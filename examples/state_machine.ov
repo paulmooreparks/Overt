@@ -37,6 +37,6 @@ fn transition(state: ConnectionState, event: Event) -> Result<ConnectionState, T
         (ConnectionState.SynReceived, Event.AckReceived)    => Ok(ConnectionState.Established),
         (ConnectionState.Established, Event.Close)          => Ok(ConnectionState.FinWait),
         (ConnectionState.FinWait,     Event.AckReceived)    => Ok(ConnectionState.Closed),
-        (from, event)                                       => Err(TransitionError.InvalidTransition { from = from, event = event }),
+        _                                                   => Err(TransitionError.InvalidTransition { from = state, event = event }),
     }
 }

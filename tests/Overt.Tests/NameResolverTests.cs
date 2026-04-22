@@ -133,6 +133,7 @@ public class NameResolverTests
     [InlineData("trace.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
+    [InlineData("state_machine.ov")]
     public void Resolve_Example_HasNoDiagnostics(string file)
     {
         var source = File.ReadAllText(Path.Combine(ExamplesDir, file));
