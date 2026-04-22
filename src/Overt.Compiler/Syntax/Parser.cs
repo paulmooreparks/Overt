@@ -264,26 +264,41 @@ public sealed class Parser
 
         while (!Check(TokenKind.RightBrace) && !Check(TokenKind.EndOfFile))
         {
-            var expr = ParseExpression();
-
-            if (Check(TokenKind.Semicolon))
+            // A let-binding is always a statement, never a trailing expression.
+            if (Check(TokenKind.KeywordLet))
             {
-                var semi = Advance();
-                statements.Add(new ExpressionStmt(
-                    expr,
-                    new SourceSpan(expr.Span.Start, semi.Span.End)));
+                statements.Add(ParseLetStmt());
+                Match(TokenKind.Semicolon); // optional trailing `;`
                 continue;
             }
 
-            // No trailing semicolon. This is either the block's result expression or —
-            // if there's more to parse before the closing brace — a bare expression statement.
+            // `ident = expr` at statement position is rebinding assignment (only valid for
+            // `let mut` bindings; the type checker enforces that later). Named-argument
+            // syntax `name = expr` never reaches here because it lives inside a call's
+            // argument list.
+            if (Check(TokenKind.Identifier) && Peek(1).Kind == TokenKind.Equals)
+            {
+                statements.Add(ParseAssignmentStmt());
+                Match(TokenKind.Semicolon);
+                continue;
+            }
+
+            var expr = ParseExpression();
+
+            if (Match(TokenKind.Semicolon))
+            {
+                statements.Add(new ExpressionStmt(expr, expr.Span));
+                continue;
+            }
+
             if (Check(TokenKind.RightBrace))
             {
                 trailingExpression = expr;
                 break;
             }
 
-            // The expression serves as a statement; its value is discarded.
+            // Bare expression without semicolon before another statement — the expression's
+            // value is discarded.
             statements.Add(new ExpressionStmt(expr, expr.Span));
         }
 
@@ -294,22 +309,168 @@ public sealed class Parser
             new SourceSpan(startPos, closing.Span.End));
     }
 
+    private LetStmt ParseLetStmt()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordLet, "let binding");
+        var isMutable = Match(TokenKind.KeywordMut);
+        var nameToken = Expect(TokenKind.Identifier, "let binding name");
+
+        TypeExpr? type = null;
+        if (Match(TokenKind.Colon))
+        {
+            type = ParseTypeExpr();
+        }
+
+        Expect(TokenKind.Equals, "let binding initializer");
+        var initializer = ParseExpression();
+        return new LetStmt(
+            nameToken.Lexeme,
+            isMutable,
+            type,
+            initializer,
+            new SourceSpan(startPos, initializer.Span.End));
+    }
+
+    private AssignmentStmt ParseAssignmentStmt()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "assignment target");
+        Expect(TokenKind.Equals, "assignment");
+        var value = ParseExpression();
+        return new AssignmentStmt(
+            nameToken.Lexeme,
+            value,
+            new SourceSpan(nameToken.Span.Start, value.Span.End));
+    }
+
     // ---------------------------------------------------------- expressions
 
     private Expression ParseExpression() => ParsePipe();
 
-    // Grammar per precedence.md §8. Each method descends to the next precedence level.
-    // Today only a subset of operators is parsed; the scaffolding is in place so adding
-    // them is mechanical.
+    // Grammar per docs/grammar/precedence.md §8. Each method handles its level's operators
+    // by parsing a higher-precedence subexpression, then looping on matching operator tokens.
 
-    private Expression ParsePipe() => ParseLogicalOr();        // TODO: |> |>?
-    private Expression ParseLogicalOr() => ParseLogicalAnd();  // TODO: ||
-    private Expression ParseLogicalAnd() => ParseEquality();   // TODO: &&
-    private Expression ParseEquality() => ParseComparison();   // TODO: == != (non-assoc)
-    private Expression ParseComparison() => ParseAdditive();   // TODO: < <= > >= (non-assoc)
-    private Expression ParseAdditive() => ParseMultiplicative(); // TODO: + -
-    private Expression ParseMultiplicative() => ParseUnaryPrefix(); // TODO: * / %
-    private Expression ParseUnaryPrefix() => ParsePostfix();   // TODO: - ! (non-chainable)
+    private Expression ParsePipe()
+    {
+        var left = ParseLogicalOr();
+        while (Check(TokenKind.PipeCompose) || Check(TokenKind.PipePropagate))
+        {
+            var op = Advance().Kind == TokenKind.PipeCompose
+                ? BinaryOp.PipeCompose
+                : BinaryOp.PipePropagate;
+            var right = ParseLogicalOr();
+            left = new BinaryExpr(op, left, right, new SourceSpan(left.Span.Start, right.Span.End));
+        }
+        return left;
+    }
+
+    private Expression ParseLogicalOr()
+    {
+        var left = ParseLogicalAnd();
+        while (Match(TokenKind.PipePipe))
+        {
+            var right = ParseLogicalAnd();
+            left = new BinaryExpr(BinaryOp.LogicalOr, left, right,
+                new SourceSpan(left.Span.Start, right.Span.End));
+        }
+        return left;
+    }
+
+    private Expression ParseLogicalAnd()
+    {
+        var left = ParseEquality();
+        while (Match(TokenKind.AmpersandAmpersand))
+        {
+            var right = ParseEquality();
+            left = new BinaryExpr(BinaryOp.LogicalAnd, left, right,
+                new SourceSpan(left.Span.Start, right.Span.End));
+        }
+        return left;
+    }
+
+    // Equality and comparison are NON-associative (precedence.md §4). At most one operator
+    // may appear at each level; a second emits OV0102.
+    private Expression ParseEquality()
+    {
+        var left = ParseComparison();
+        if (!TryMatchBinaryOp(EqualityOp, out var op))
+        {
+            return left;
+        }
+        var right = ParseComparison();
+        var result = new BinaryExpr(op, left, right, new SourceSpan(left.Span.Start, right.Span.End));
+        if (TryMatchBinaryOp(EqualityOp, out _))
+        {
+            ReportError("OV0102",
+                "equality operators are non-associative; use `&&` to combine comparisons",
+                Current.Span);
+            // Consume the right operand to avoid cascading; ignore the chained result.
+            ParseComparison();
+        }
+        return result;
+    }
+
+    private Expression ParseComparison()
+    {
+        var left = ParseAdditive();
+        if (!TryMatchBinaryOp(ComparisonOp, out var op))
+        {
+            return left;
+        }
+        var right = ParseAdditive();
+        var result = new BinaryExpr(op, left, right, new SourceSpan(left.Span.Start, right.Span.End));
+        if (TryMatchBinaryOp(ComparisonOp, out _))
+        {
+            ReportError("OV0102",
+                "comparison operators are non-associative; use `&&` to combine comparisons",
+                Current.Span);
+            ParseAdditive();
+        }
+        return result;
+    }
+
+    private Expression ParseAdditive()
+    {
+        var left = ParseMultiplicative();
+        while (TryMatchBinaryOp(AdditiveOp, out var op))
+        {
+            var right = ParseMultiplicative();
+            left = new BinaryExpr(op, left, right, new SourceSpan(left.Span.Start, right.Span.End));
+        }
+        return left;
+    }
+
+    private Expression ParseMultiplicative()
+    {
+        var left = ParseUnaryPrefix();
+        while (TryMatchBinaryOp(MultiplicativeOp, out var op))
+        {
+            var right = ParseUnaryPrefix();
+            left = new BinaryExpr(op, left, right, new SourceSpan(left.Span.Start, right.Span.End));
+        }
+        return left;
+    }
+
+    // Unary prefix is non-chainable: `!!x` and `--x` are rejected (precedence.md §3).
+    private Expression ParseUnaryPrefix()
+    {
+        if (Check(TokenKind.Minus) || Check(TokenKind.Bang))
+        {
+            var opToken = Advance();
+            var op = opToken.Kind == TokenKind.Minus ? UnaryOp.Negate : UnaryOp.LogicalNot;
+
+            if (Check(TokenKind.Minus) || Check(TokenKind.Bang))
+            {
+                ReportError("OV0103",
+                    "unary prefix operators do not chain; parenthesize explicitly if required",
+                    Current.Span);
+            }
+
+            var operand = ParsePostfix();
+            return new UnaryExpr(op, operand, new SourceSpan(opToken.Span.Start, operand.Span.End));
+        }
+        return ParsePostfix();
+    }
 
     private Expression ParsePostfix()
     {
@@ -330,12 +491,83 @@ public sealed class Parser
                 continue;
             }
 
-            // TODO: field access `.ident`
+            if (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
+            {
+                Advance(); // .
+                var fieldToken = Advance();
+                expr = new FieldAccessExpr(
+                    expr,
+                    fieldToken.Lexeme,
+                    new SourceSpan(expr.Span.Start, fieldToken.Span.End));
+                continue;
+            }
 
             break;
         }
 
         return expr;
+    }
+
+    // Operator-classifier helpers. Each returns the matching BinaryOp if the current
+    // token is in the set, otherwise returns false without advancing.
+    private delegate bool OpClassifier(TokenKind kind, out BinaryOp op);
+
+    private static readonly OpClassifier EqualityOp = (TokenKind kind, out BinaryOp op) =>
+    {
+        op = kind switch
+        {
+            TokenKind.EqualsEquals => BinaryOp.Equal,
+            TokenKind.BangEquals => BinaryOp.NotEqual,
+            _ => default,
+        };
+        return kind is TokenKind.EqualsEquals or TokenKind.BangEquals;
+    };
+
+    private static readonly OpClassifier ComparisonOp = (TokenKind kind, out BinaryOp op) =>
+    {
+        op = kind switch
+        {
+            TokenKind.Less => BinaryOp.Less,
+            TokenKind.LessEquals => BinaryOp.LessEqual,
+            TokenKind.Greater => BinaryOp.Greater,
+            TokenKind.GreaterEquals => BinaryOp.GreaterEqual,
+            _ => default,
+        };
+        return kind is TokenKind.Less or TokenKind.LessEquals
+            or TokenKind.Greater or TokenKind.GreaterEquals;
+    };
+
+    private static readonly OpClassifier AdditiveOp = (TokenKind kind, out BinaryOp op) =>
+    {
+        op = kind switch
+        {
+            TokenKind.Plus => BinaryOp.Add,
+            TokenKind.Minus => BinaryOp.Subtract,
+            _ => default,
+        };
+        return kind is TokenKind.Plus or TokenKind.Minus;
+    };
+
+    private static readonly OpClassifier MultiplicativeOp = (TokenKind kind, out BinaryOp op) =>
+    {
+        op = kind switch
+        {
+            TokenKind.Star => BinaryOp.Multiply,
+            TokenKind.Slash => BinaryOp.Divide,
+            TokenKind.Percent => BinaryOp.Modulo,
+            _ => default,
+        };
+        return kind is TokenKind.Star or TokenKind.Slash or TokenKind.Percent;
+    };
+
+    private bool TryMatchBinaryOp(OpClassifier classifier, out BinaryOp op)
+    {
+        if (classifier(Current.Kind, out op))
+        {
+            Advance();
+            return true;
+        }
+        return false;
     }
 
     private CallExpr ParseCallTail(Expression callee)
@@ -410,19 +642,52 @@ public sealed class Parser
                 Advance();
                 return new StringLiteralExpr(token.Lexeme, token.Span);
 
+            case TokenKind.IntegerLiteral:
+                Advance();
+                return new IntegerLiteralExpr(token.Lexeme, token.Span);
+
+            case TokenKind.FloatLiteral:
+                Advance();
+                return new FloatLiteralExpr(token.Lexeme, token.Span);
+
+            case TokenKind.KeywordTrue:
+                Advance();
+                return new BooleanLiteralExpr(true, token.Span);
+
+            case TokenKind.KeywordFalse:
+                Advance();
+                return new BooleanLiteralExpr(false, token.Span);
+
             case TokenKind.LeftParen:
                 return ParseUnitOrParenthesizedExpression();
 
             case TokenKind.LeftBrace:
                 return ParseBlock();
 
-            // TODO: integer/float literals, if/else, match, with, trace, record/list literals,
-            // and interpolated strings (StringHead / StringMiddle / StringTail).
+            case TokenKind.KeywordIf:
+                return ParseIfExpr();
+
+            // TODO: match, with, trace, record/list literals, interpolated strings.
         }
 
         ReportError("OV0155", $"expected expression, got {token.Kind}", token.Span);
         Advance(); // skip offending token so the parser can make progress
         return new UnitExpr(token.Span);
+    }
+
+    private IfExpr ParseIfExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordIf, "if expression");
+        var condition = ParseExpression();
+        var thenBlock = ParseBlock();
+        Expect(TokenKind.KeywordElse, "if expression (else arm is required)");
+        var elseBlock = ParseBlock();
+        return new IfExpr(
+            condition,
+            thenBlock,
+            elseBlock,
+            new SourceSpan(startPos, elseBlock.Span.End));
     }
 
     private Expression ParseUnitOrParenthesizedExpression()

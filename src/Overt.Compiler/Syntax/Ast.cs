@@ -58,6 +58,27 @@ public sealed record ExpressionStmt(
     Expression Expression,
     SourceSpan Span) : Statement(Span);
 
+/// <summary>
+/// A <c>let</c> or <c>let mut</c> binding. Per DESIGN.md §10, <see cref="IsMutable"/>
+/// permits subsequent rebinding via <see cref="AssignmentStmt"/>, but the binding remains
+/// scalar-local; no shared mutable state.
+/// </summary>
+public sealed record LetStmt(
+    string Name,
+    bool IsMutable,
+    TypeExpr? Type,
+    Expression Initializer,
+    SourceSpan Span) : Statement(Span);
+
+/// <summary>
+/// Rebinding assignment for a <c>let mut</c> binding. Not an expression — assignment
+/// does not produce a value in Overt (unlike C-family languages).
+/// </summary>
+public sealed record AssignmentStmt(
+    string Name,
+    Expression Value,
+    SourceSpan Span) : Statement(Span);
+
 // ---------- Expressions ----------
 
 public abstract record Expression(SourceSpan Span) : SyntaxNode(Span);
@@ -68,8 +89,68 @@ public sealed record IdentifierExpr(string Name, SourceSpan Span) : Expression(S
 /// including surrounding quotes; escape-sequence decoding happens at a later pass.</summary>
 public sealed record StringLiteralExpr(string Value, SourceSpan Span) : Expression(Span);
 
+/// <summary>Integer literal. <see cref="Lexeme"/> is the raw source form including any
+/// underscore separators and base prefix (<c>0x</c>/<c>0b</c>). Semantic value is computed
+/// at a later pass so the original spelling survives for diagnostics and formatting.</summary>
+public sealed record IntegerLiteralExpr(string Lexeme, SourceSpan Span) : Expression(Span);
+
+/// <summary>Float literal. <see cref="Lexeme"/> is the raw source form.</summary>
+public sealed record FloatLiteralExpr(string Lexeme, SourceSpan Span) : Expression(Span);
+
+public sealed record BooleanLiteralExpr(bool Value, SourceSpan Span) : Expression(Span);
+
 /// <summary>The unit value, spelled <c>()</c>.</summary>
 public sealed record UnitExpr(SourceSpan Span) : Expression(Span);
+
+public sealed record FieldAccessExpr(
+    Expression Target,
+    string FieldName,
+    SourceSpan Span) : Expression(Span);
+
+public enum BinaryOp
+{
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    LogicalAnd,
+    LogicalOr,
+    PipeCompose,
+    PipePropagate,
+}
+
+public sealed record BinaryExpr(
+    BinaryOp Op,
+    Expression Left,
+    Expression Right,
+    SourceSpan Span) : Expression(Span);
+
+public enum UnaryOp
+{
+    Negate,
+    LogicalNot,
+}
+
+public sealed record UnaryExpr(
+    UnaryOp Op,
+    Expression Operand,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>if cond { then } else { else }</c>. Both arms required per DESIGN.md §4.
+/// </summary>
+public sealed record IfExpr(
+    Expression Condition,
+    BlockExpr Then,
+    BlockExpr Else,
+    SourceSpan Span) : Expression(Span);
 
 public sealed record CallExpr(
     Expression Callee,

@@ -290,8 +290,71 @@ static class AstPrinter
                 w.Line($"String {s.Value}");
                 break;
 
+            case IntegerLiteralExpr i:
+                w.Line($"Int {i.Lexeme}");
+                break;
+
+            case FloatLiteralExpr f:
+                w.Line($"Float {f.Lexeme}");
+                break;
+
+            case BooleanLiteralExpr b2:
+                w.Line($"Bool {(b2.Value ? "true" : "false")}");
+                break;
+
             case UnitExpr:
                 w.Line("UnitValue");
+                break;
+
+            case FieldAccessExpr fa:
+                w.Line($"Field .{fa.FieldName}");
+                using (w.Indent()) Visit(fa.Target, w);
+                break;
+
+            case BinaryExpr be:
+                w.Line($"Binary {be.Op}");
+                using (w.Indent())
+                {
+                    Visit(be.Left, w);
+                    Visit(be.Right, w);
+                }
+                break;
+
+            case UnaryExpr ue:
+                w.Line($"Unary {ue.Op}");
+                using (w.Indent()) Visit(ue.Operand, w);
+                break;
+
+            case IfExpr ie:
+                w.Line("If");
+                using (w.Indent())
+                {
+                    w.Line("Condition");
+                    using (w.Indent()) Visit(ie.Condition, w);
+                    w.Line("Then");
+                    using (w.Indent()) Visit(ie.Then, w);
+                    w.Line("Else");
+                    using (w.Indent()) Visit(ie.Else, w);
+                }
+                break;
+
+            case LetStmt ls:
+                w.Line($"Let{(ls.IsMutable ? " mut" : "")} {ls.Name}");
+                using (w.Indent())
+                {
+                    if (ls.Type is { } t2)
+                    {
+                        w.Line("Type");
+                        using (w.Indent()) Visit(t2, w);
+                    }
+                    w.Line("Init");
+                    using (w.Indent()) Visit(ls.Initializer, w);
+                }
+                break;
+
+            case AssignmentStmt asn:
+                w.Line($"Assign {asn.Name}");
+                using (w.Indent()) Visit(asn.Value, w);
                 break;
 
             default:
