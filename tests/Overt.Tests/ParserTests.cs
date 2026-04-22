@@ -415,7 +415,7 @@ public class ParserTests
     // ------------------------------------------------------------------ if
 
     [Fact]
-    public void Parse_IfElse_BothArmsRequired()
+    public void Parse_IfElse_BothArmsPresent()
     {
         var lex = Lexer.Lex("module m\nfn f() { if cond { 1 } else { 2 } }");
         var result = Parser.Parse(lex.Tokens);
@@ -425,15 +425,275 @@ public class ParserTests
         var ife = Assert.IsType<IfExpr>(fn.Body.TrailingExpression);
         Assert.IsType<IdentifierExpr>(ife.Condition);
         Assert.Equal("1", ((IntegerLiteralExpr)ife.Then.TrailingExpression!).Lexeme);
-        Assert.Equal("2", ((IntegerLiteralExpr)ife.Else.TrailingExpression!).Lexeme);
+        Assert.NotNull(ife.Else);
+        Assert.Equal("2", ((IntegerLiteralExpr)ife.Else!.TrailingExpression!).Lexeme);
     }
 
     [Fact]
-    public void Parse_IfWithoutElse_IsDiagnostic()
+    public void Parse_IfWithoutElse_IsAccepted_WithNullElseArm()
     {
-        // Per DESIGN.md §4 and precedence.md §6, both arms are required.
-        var lex = Lexer.Lex("module m\nfn f() { if cond { 1 } }");
+        // DESIGN.md §4: `if cond { body }` is sugar for `if cond { body } else { () }`.
+        // The type checker enforces that the then block's type is `()` when else is absent.
+        var lex = Lexer.Lex("module m\nfn f() { if cond { body } }");
         var result = Parser.Parse(lex.Tokens);
-        Assert.Contains(result.Diagnostics, d => d.Code == "OV0150");
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var ife = Assert.IsType<IfExpr>(fn.Body.TrailingExpression);
+        Assert.Null(ife.Else);
+    }
+
+    // -------------------------------------------------------------- records
+
+    [Fact]
+    public void Parse_RecordDecl_SingleField()
+    {
+        var lex = Lexer.Lex("module m\nrecord UserId { value: String }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var rec = Assert.IsType<RecordDecl>(result.Module.Declarations[0]);
+        Assert.Equal("UserId", rec.Name);
+        Assert.Single(rec.Fields);
+        Assert.Equal("value", rec.Fields[0].Name);
+        Assert.Equal("String", ((NamedType)rec.Fields[0].Type).Name);
+    }
+
+    [Fact]
+    public void Parse_RecordDecl_MultipleFields_TrailingCommaAllowed()
+    {
+        var lex = Lexer.Lex(
+            "module m\nrecord User { id: Int, name: String, is_active: Bool, }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var rec = Assert.IsType<RecordDecl>(result.Module.Declarations[0]);
+        Assert.Equal(new[] { "id", "name", "is_active" }, rec.Fields.Select(f => f.Name).ToArray());
+    }
+
+    [Fact]
+    public void Parse_RecordDecl_EmptyBody()
+    {
+        var lex = Lexer.Lex("module m\nrecord Empty { }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var rec = Assert.IsType<RecordDecl>(result.Module.Declarations[0]);
+        Assert.Empty(rec.Fields);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteral_InExpressionPosition()
+    {
+        var expr = ParseBodyExpression("Point { x = 1, y = 2 }");
+        var lit = Assert.IsType<RecordLiteralExpr>(expr);
+        Assert.Equal("Point", lit.TypeName);
+        Assert.Equal(2, lit.Fields.Length);
+        Assert.Equal("x", lit.Fields[0].Name);
+        Assert.Equal("y", lit.Fields[1].Name);
+        Assert.Equal("1", ((IntegerLiteralExpr)lit.Fields[0].Value).Lexeme);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteral_EmptyFields()
+    {
+        var expr = ParseBodyExpression("Marker { }");
+        var lit = Assert.IsType<RecordLiteralExpr>(expr);
+        Assert.Equal("Marker", lit.TypeName);
+        Assert.Empty(lit.Fields);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteral_NestedValue()
+    {
+        var expr = ParseBodyExpression("User { id = UserId { value = \"x\" }, active = true }");
+        var outer = Assert.IsType<RecordLiteralExpr>(expr);
+        Assert.Equal("User", outer.TypeName);
+        var idInit = outer.Fields[0];
+        Assert.Equal("id", idInit.Name);
+        var inner = Assert.IsType<RecordLiteralExpr>(idInit.Value);
+        Assert.Equal("UserId", inner.TypeName);
+    }
+
+    [Fact]
+    public void Parse_IfCondition_DoesNotConsumeFollowingBraceAsRecordLiteral()
+    {
+        // Without the restricted-context machinery, the parser would greedily consume
+        // `flag { ... }` as a record literal and leave the if with no body.
+        var lex = Lexer.Lex("module m\nfn f() { if flag { body_expr } else { other } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var ife = Assert.IsType<IfExpr>(fn.Body.TrailingExpression);
+        Assert.Equal("flag", ((IdentifierExpr)ife.Condition).Name);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteralInsideIfCondition_RequiresParens()
+    {
+        // Parenthesizing re-enables record-literal parsing inside the restricted context.
+        var lex = Lexer.Lex(
+            "module m\nfn f() { if (Point { x = 1 }) == p { a } else { b } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var ife = Assert.IsType<IfExpr>(fn.Body.TrailingExpression);
+        var eq = Assert.IsType<BinaryExpr>(ife.Condition);
+        Assert.Equal(BinaryOp.Equal, eq.Op);
+        Assert.IsType<RecordLiteralExpr>(eq.Left);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteral_FieldAccessAfter()
+    {
+        var expr = ParseBodyExpression("Point { x = 1, y = 2 }.x");
+        var fa = Assert.IsType<FieldAccessExpr>(expr);
+        Assert.Equal("x", fa.FieldName);
+        Assert.IsType<RecordLiteralExpr>(fa.Target);
+    }
+
+    // ----------------------------------------------- interpolated strings
+
+    [Fact]
+    public void Parse_InterpolatedString_DollarIdent()
+    {
+        var expr = ParseBodyExpression("\"Hello, $name!\"");
+        var isx = Assert.IsType<InterpolatedStringExpr>(expr);
+        Assert.Equal(3, isx.Parts.Length);
+        var head = Assert.IsType<StringLiteralPart>(isx.Parts[0]);
+        var interp = Assert.IsType<StringInterpolationPart>(isx.Parts[1]);
+        var tail = Assert.IsType<StringLiteralPart>(isx.Parts[2]);
+        Assert.Equal("\"Hello, ", head.Text);
+        Assert.Equal("name", Assert.IsType<IdentifierExpr>(interp.Expression).Name);
+        Assert.Equal("!\"", tail.Text);
+    }
+
+    [Fact]
+    public void Parse_InterpolatedString_BracedExpression()
+    {
+        var expr = ParseBodyExpression("\"${price * quantity}\"");
+        var isx = Assert.IsType<InterpolatedStringExpr>(expr);
+        Assert.Equal(3, isx.Parts.Length);
+        var interp = Assert.IsType<StringInterpolationPart>(isx.Parts[1]);
+        var mul = Assert.IsType<BinaryExpr>(interp.Expression);
+        Assert.Equal(BinaryOp.Multiply, mul.Op);
+    }
+
+    [Fact]
+    public void Parse_InterpolatedString_Multiple()
+    {
+        var expr = ParseBodyExpression("\"a${x}b${y}c\"");
+        var isx = Assert.IsType<InterpolatedStringExpr>(expr);
+        Assert.Equal(5, isx.Parts.Length);
+        Assert.IsType<StringLiteralPart>(isx.Parts[0]);
+        Assert.IsType<StringInterpolationPart>(isx.Parts[1]);
+        Assert.IsType<StringLiteralPart>(isx.Parts[2]);
+        Assert.IsType<StringInterpolationPart>(isx.Parts[3]);
+        Assert.IsType<StringLiteralPart>(isx.Parts[4]);
+    }
+
+    [Fact]
+    public void Parse_InterpolatedString_NestedStringInsideInterpolation()
+    {
+        var expr = ParseBodyExpression("\"outer ${format(\"inner $who\")}\"");
+        var outer = Assert.IsType<InterpolatedStringExpr>(expr);
+        var interp = Assert.IsType<StringInterpolationPart>(outer.Parts[1]);
+        var call = Assert.IsType<CallExpr>(interp.Expression);
+        Assert.IsType<InterpolatedStringExpr>(call.Arguments[0].Value);
+    }
+
+    [Fact]
+    public void Parse_InterpolatedString_InsideIfCondition_Works()
+    {
+        // Interpolated strings start with `"`, not an identifier, so the restricted
+        // context that disables record literals does not affect them.
+        var lex = Lexer.Lex(
+            "module m\nfn f() !{io} { if \"$x\" == \"$y\" { a } else { b } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    // ----------------------------------------------------- with expression
+
+    [Fact]
+    public void Parse_WithExpr_SingleFieldUpdate()
+    {
+        var expr = ParseBodyExpression("config with { enable_a = true }");
+        var with = Assert.IsType<WithExpr>(expr);
+        Assert.Equal("config", ((IdentifierExpr)with.Target).Name);
+        Assert.Single(with.Updates);
+        Assert.Equal("enable_a", with.Updates[0].Name);
+        Assert.True(((BooleanLiteralExpr)with.Updates[0].Value).Value);
+    }
+
+    [Fact]
+    public void Parse_WithExpr_ChainsOnFieldAccess()
+    {
+        // user.address with { city = "X" } groups as (user.address) with { city = "X" }.
+        var expr = ParseBodyExpression("user.address with { city = \"X\" }");
+        var with = Assert.IsType<WithExpr>(expr);
+        Assert.IsType<FieldAccessExpr>(with.Target);
+    }
+
+    [Fact]
+    public void Parse_WithExpr_NestedWithInValue()
+    {
+        var expr = ParseBodyExpression(
+            "user with { address = user.address with { city = \"London\" } }");
+        var outer = Assert.IsType<WithExpr>(expr);
+        Assert.Equal("user", ((IdentifierExpr)outer.Target).Name);
+        var inner = Assert.IsType<WithExpr>(outer.Updates[0].Value);
+        Assert.IsType<FieldAccessExpr>(inner.Target);
+    }
+
+    // --------------------------------------------------------------- while
+
+    [Fact]
+    public void Parse_While_SimpleBody()
+    {
+        // The while expression lands on the block's trailing-expression slot (it has no
+        // following expression to demote it to a statement). That's fine — the type
+        // checker will require while's value `()` to match the enclosing block's type.
+        var lex = Lexer.Lex(
+            "module m\nfn f() { let mut i = 0; while i <= 10 { i = i + 1 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        Assert.Single(fn.Body.Statements); // the let
+        var wh = Assert.IsType<WhileExpr>(fn.Body.TrailingExpression);
+        var cmp = Assert.IsType<BinaryExpr>(wh.Condition);
+        Assert.Equal(BinaryOp.LessEqual, cmp.Op);
+        Assert.Single(wh.Body.Statements);
+    }
+
+    [Fact]
+    public void Parse_While_ThenTrailingExpression()
+    {
+        // Matches mutation.ov shape: while { ... } followed by a trailing value.
+        var lex = Lexer.Lex(
+            "module m\nfn f() -> Int { let mut t = 0; while t < 10 { t = t + 1 } t }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        Assert.Equal(2, fn.Body.Statements.Length);
+        Assert.IsType<WhileExpr>(((ExpressionStmt)fn.Body.Statements[1]).Expression);
+        Assert.Equal("t", ((IdentifierExpr)fn.Body.TrailingExpression!).Name);
+    }
+
+    [Fact]
+    public void Parse_While_ConditionRespectsRestrictedContext()
+    {
+        // `while flag { body }` — `flag { body }` must NOT be parsed as a record literal.
+        var lex = Lexer.Lex("module m\nfn f() { while flag { body_call() } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var whe = Assert.IsType<WhileExpr>(fn.Body.TrailingExpression);
+        Assert.Equal("flag", ((IdentifierExpr)whe.Condition).Name);
     }
 }

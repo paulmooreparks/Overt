@@ -18,6 +18,14 @@ public sealed class Parser
     private readonly List<Diagnostic> _diagnostics = new();
     private int _cursor;
 
+    /// <summary>
+    /// When false, <see cref="ParsePrimary"/> will not interpret an identifier followed by
+    /// <c>{</c> as a record literal. Set in "condition-like" positions (the head of
+    /// <c>if</c>, <c>while</c>, <c>match</c>) so the following <c>{</c> can open the
+    /// construct's body instead. Rust's struct-expression-disambiguation trick.
+    /// </summary>
+    private bool _allowRecordLiteral = true;
+
     private Parser(ImmutableArray<Token> tokens)
     {
         _tokens = tokens;
@@ -70,8 +78,51 @@ public sealed class Parser
         {
             return ParseFunctionDecl();
         }
+        if (Check(TokenKind.KeywordRecord))
+        {
+            return ParseRecordDecl();
+        }
 
         return null;
+    }
+
+    private RecordDecl ParseRecordDecl()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordRecord, "record declaration");
+        var nameToken = Expect(TokenKind.Identifier, "record name");
+        Expect(TokenKind.LeftBrace, "record body");
+
+        var fields = ImmutableArray.CreateBuilder<RecordField>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            fields.Add(ParseRecordFieldDecl());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                fields.Add(ParseRecordFieldDecl());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, "record body");
+        return new RecordDecl(
+            nameToken.Lexeme,
+            fields.ToImmutable(),
+            new SourceSpan(startPos, closing.Span.End));
+    }
+
+    private RecordField ParseRecordFieldDecl()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "field name");
+        Expect(TokenKind.Colon, "field type annotation");
+        var type = ParseTypeExpr();
+        return new RecordField(
+            nameToken.Lexeme,
+            type,
+            new SourceSpan(nameToken.Span.Start, type.Span.End));
     }
 
     private FunctionDecl ParseFunctionDecl()
@@ -502,10 +553,42 @@ public sealed class Parser
                 continue;
             }
 
+            if (Check(TokenKind.KeywordWith))
+            {
+                expr = ParseWithTail(expr);
+                continue;
+            }
+
             break;
         }
 
         return expr;
+    }
+
+    private WithExpr ParseWithTail(Expression target)
+    {
+        Expect(TokenKind.KeywordWith, "with expression");
+        Expect(TokenKind.LeftBrace, "with expression");
+
+        var updates = ImmutableArray.CreateBuilder<FieldInit>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            updates.Add(ParseFieldInit());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                updates.Add(ParseFieldInit());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, "with expression");
+        return new WithExpr(
+            target,
+            updates.ToImmutable(),
+            new SourceSpan(target.Span.Start, closing.Span.End));
     }
 
     // Operator-classifier helpers. Each returns the matching BinaryOp if the current
@@ -636,11 +719,18 @@ public sealed class Parser
         {
             case TokenKind.Identifier:
                 Advance();
+                if (_allowRecordLiteral && LooksLikeRecordLiteralHead())
+                {
+                    return ParseRecordLiteralTail(token);
+                }
                 return new IdentifierExpr(token.Lexeme, token.Span);
 
             case TokenKind.StringLiteral:
                 Advance();
                 return new StringLiteralExpr(token.Lexeme, token.Span);
+
+            case TokenKind.StringHead:
+                return ParseInterpolatedString();
 
             case TokenKind.IntegerLiteral:
                 Advance();
@@ -667,7 +757,10 @@ public sealed class Parser
             case TokenKind.KeywordIf:
                 return ParseIfExpr();
 
-            // TODO: match, with, trace, record/list literals, interpolated strings.
+            case TokenKind.KeywordWhile:
+                return ParseWhileExpr();
+
+            // TODO: match, trace, list literals.
         }
 
         ReportError("OV0155", $"expected expression, got {token.Kind}", token.Span);
@@ -675,19 +768,181 @@ public sealed class Parser
         return new UnitExpr(token.Span);
     }
 
+    private InterpolatedStringExpr ParseInterpolatedString()
+    {
+        var head = Expect(TokenKind.StringHead, "interpolated string");
+        var startPos = head.Span.Start;
+        var endPos = head.Span.End;
+
+        var parts = ImmutableArray.CreateBuilder<StringPart>();
+        parts.Add(new StringLiteralPart(head.Lexeme, head.Span));
+
+        while (true)
+        {
+            // One interpolation.
+            if (Check(TokenKind.Dollar))
+            {
+                var dollar = Advance();
+                var ident = Expect(TokenKind.Identifier, "interpolation identifier");
+                var interpSpan = new SourceSpan(dollar.Span.Start, ident.Span.End);
+                parts.Add(new StringInterpolationPart(
+                    new IdentifierExpr(ident.Lexeme, ident.Span),
+                    interpSpan));
+            }
+            else if (Check(TokenKind.InterpolationStart))
+            {
+                var start = Advance();
+
+                // Inside ${...} we are effectively a fresh expression context —
+                // re-enable record literals regardless of what the outer state is.
+                var savedAllowRecord = _allowRecordLiteral;
+                _allowRecordLiteral = true;
+                Expression inner;
+                try
+                {
+                    inner = ParseExpression();
+                }
+                finally
+                {
+                    _allowRecordLiteral = savedAllowRecord;
+                }
+
+                var end = Expect(TokenKind.InterpolationEnd, "interpolation");
+                parts.Add(new StringInterpolationPart(
+                    inner,
+                    new SourceSpan(start.Span.Start, end.Span.End)));
+            }
+            else
+            {
+                ReportError("OV0156", "expected interpolation in string", Current.Span);
+                endPos = Current.Span.Start;
+                break;
+            }
+
+            // Literal continuation.
+            if (Check(TokenKind.StringMiddle))
+            {
+                var mid = Advance();
+                parts.Add(new StringLiteralPart(mid.Lexeme, mid.Span));
+                continue;
+            }
+            if (Check(TokenKind.StringTail))
+            {
+                var tail = Advance();
+                parts.Add(new StringLiteralPart(tail.Lexeme, tail.Span));
+                endPos = tail.Span.End;
+                break;
+            }
+
+            ReportError("OV0156",
+                "expected StringMiddle or StringTail after interpolation",
+                Current.Span);
+            endPos = Current.Span.Start;
+            break;
+        }
+
+        return new InterpolatedStringExpr(parts.ToImmutable(), new SourceSpan(startPos, endPos));
+    }
+
     private IfExpr ParseIfExpr()
     {
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordIf, "if expression");
-        var condition = ParseExpression();
+        var condition = ParseExpressionRestricted();
         var thenBlock = ParseBlock();
-        Expect(TokenKind.KeywordElse, "if expression (else arm is required)");
-        var elseBlock = ParseBlock();
-        return new IfExpr(
-            condition,
-            thenBlock,
-            elseBlock,
-            new SourceSpan(startPos, elseBlock.Span.End));
+
+        BlockExpr? elseBlock = null;
+        if (Match(TokenKind.KeywordElse))
+        {
+            elseBlock = ParseBlock();
+        }
+
+        var endPos = elseBlock?.Span.End ?? thenBlock.Span.End;
+        return new IfExpr(condition, thenBlock, elseBlock, new SourceSpan(startPos, endPos));
+    }
+
+    private WhileExpr ParseWhileExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordWhile, "while loop");
+        var condition = ParseExpressionRestricted();
+        var body = ParseBlock();
+        return new WhileExpr(condition, body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    /// <summary>
+    /// Returns true if the current state is <c>{ Ident = </c> or <c>{ }</c> — the two token
+    /// shapes that unambiguously indicate a record literal body following a preceding
+    /// identifier. All other uses of <c>{</c> after an identifier leave the brace to the
+    /// caller (if-expression body, trailing block, etc).
+    /// </summary>
+    private bool LooksLikeRecordLiteralHead()
+    {
+        if (!Check(TokenKind.LeftBrace))
+        {
+            return false;
+        }
+        var after = Peek(1).Kind;
+        if (after == TokenKind.RightBrace)
+        {
+            return true;
+        }
+        return after == TokenKind.Identifier && Peek(2).Kind == TokenKind.Equals;
+    }
+
+    private RecordLiteralExpr ParseRecordLiteralTail(Token typeNameToken)
+    {
+        Expect(TokenKind.LeftBrace, "record literal");
+
+        var fields = ImmutableArray.CreateBuilder<FieldInit>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            fields.Add(ParseFieldInit());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                fields.Add(ParseFieldInit());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, "record literal");
+        return new RecordLiteralExpr(
+            typeNameToken.Lexeme,
+            fields.ToImmutable(),
+            new SourceSpan(typeNameToken.Span.Start, closing.Span.End));
+    }
+
+    private FieldInit ParseFieldInit()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "field initializer name");
+        Expect(TokenKind.Equals, "field initializer");
+        var value = ParseExpression();
+        return new FieldInit(
+            nameToken.Lexeme,
+            value,
+            new SourceSpan(nameToken.Span.Start, value.Span.End));
+    }
+
+    /// <summary>
+    /// Parse an expression with record-literal primaries disabled. Used in the condition
+    /// position of <c>if</c>, <c>while</c>, and <c>match</c> so the following <c>{</c>
+    /// can open the construct's body instead of being mis-parsed as a record literal.
+    /// </summary>
+    private Expression ParseExpressionRestricted()
+    {
+        var saved = _allowRecordLiteral;
+        _allowRecordLiteral = false;
+        try
+        {
+            return ParseExpression();
+        }
+        finally
+        {
+            _allowRecordLiteral = saved;
+        }
     }
 
     private Expression ParseUnitOrParenthesizedExpression()
@@ -700,7 +955,19 @@ public sealed class Parser
             return new UnitExpr(new SourceSpan(startPos, closing.Span.End));
         }
 
-        var inner = ParseExpression();
+        // Parens unambiguate by themselves, so re-enable record-literal parsing inside
+        // regardless of the enclosing restricted context.
+        var saved = _allowRecordLiteral;
+        _allowRecordLiteral = true;
+        Expression inner;
+        try
+        {
+            inner = ParseExpression();
+        }
+        finally
+        {
+            _allowRecordLiteral = saved;
+        }
         var close = Expect(TokenKind.RightParen, "expression");
         return inner with { Span = new SourceSpan(startPos, close.Span.End) };
     }

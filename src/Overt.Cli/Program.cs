@@ -290,6 +290,23 @@ static class AstPrinter
                 w.Line($"String {s.Value}");
                 break;
 
+            case InterpolatedStringExpr isx:
+                w.Line("InterpolatedString");
+                using (w.Indent())
+                {
+                    foreach (var part in isx.Parts) Visit(part, w);
+                }
+                break;
+
+            case StringLiteralPart lp:
+                w.Line($"Literal {lp.Text}");
+                break;
+
+            case StringInterpolationPart sip:
+                w.Line("Interp");
+                using (w.Indent()) Visit(sip.Expression, w);
+                break;
+
             case IntegerLiteralExpr i:
                 w.Line($"Int {i.Lexeme}");
                 break;
@@ -333,8 +350,11 @@ static class AstPrinter
                     using (w.Indent()) Visit(ie.Condition, w);
                     w.Line("Then");
                     using (w.Indent()) Visit(ie.Then, w);
-                    w.Line("Else");
-                    using (w.Indent()) Visit(ie.Else, w);
+                    if (ie.Else is { } elseBlock)
+                    {
+                        w.Line("Else");
+                        using (w.Indent()) Visit(elseBlock, w);
+                    }
                 }
                 break;
 
@@ -355,6 +375,53 @@ static class AstPrinter
             case AssignmentStmt asn:
                 w.Line($"Assign {asn.Name}");
                 using (w.Indent()) Visit(asn.Value, w);
+                break;
+
+            case RecordDecl rd:
+                w.Line($"Record {rd.Name}");
+                using (w.Indent())
+                {
+                    foreach (var fld in rd.Fields) Visit(fld, w);
+                }
+                break;
+
+            case RecordField rf:
+                w.Line($"Field {rf.Name}");
+                using (w.Indent()) Visit(rf.Type, w);
+                break;
+
+            case RecordLiteralExpr rl:
+                w.Line($"RecordLiteral {rl.TypeName}");
+                using (w.Indent())
+                {
+                    foreach (var fi in rl.Fields) Visit(fi, w);
+                }
+                break;
+
+            case FieldInit fi2:
+                w.Line($"= {fi2.Name}");
+                using (w.Indent()) Visit(fi2.Value, w);
+                break;
+
+            case WithExpr we:
+                w.Line("With");
+                using (w.Indent())
+                {
+                    w.Line("Target");
+                    using (w.Indent()) Visit(we.Target, w);
+                    foreach (var u in we.Updates) Visit(u, w);
+                }
+                break;
+
+            case WhileExpr whe:
+                w.Line("While");
+                using (w.Indent())
+                {
+                    w.Line("Condition");
+                    using (w.Indent()) Visit(whe.Condition, w);
+                    w.Line("Body");
+                    using (w.Indent()) Visit(whe.Body, w);
+                }
                 break;
 
             default:

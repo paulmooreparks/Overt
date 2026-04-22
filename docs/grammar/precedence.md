@@ -106,7 +106,7 @@ x |> f |>? g |> h
 
 Several keyword-introduced forms are expressions at Overt's grammar level, not statements. They appear at primary level (tighter than any operator) and their bodies are themselves expressions:
 
-- **`if cond { then_expr } else { else_expr }`** — both arms required, types must match.
+- **`if cond { then_expr } else { else_expr }`** — `else` arm is **optional**. When absent, the form is equivalent to `if cond { then_expr } else { () }` and the then block must have type `()` (type checker enforces). When present, both arms' types must match.
 - **`match scrutinee { pattern => expr, ... }`** — exhaustive; each arm is an expression.
 - **`with record_expr { field1 = expr, field2 = expr, ... }`** — record copy-with-modification (DESIGN.md §10).
 - **`trace { body }`** — trace block (DESIGN.md §14); value is the body's value.

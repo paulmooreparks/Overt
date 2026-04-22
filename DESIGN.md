@@ -83,7 +83,7 @@ One way per semantic purpose. Zero ways for purposes our semantics do not have. 
 
 Consequences throughout the language:
 
-- **`if` is an expression.** No ternary. `let x = if cond { a } else { b }`.
+- **`if` is an expression.** No ternary. `let x = if cond { a } else { b }`. The `else` arm is **optional in statement position**: `if cond { body }` is sugar for `if cond { body } else { () }`, and the then-block's value-type must be `()`. An `if` used for its value (e.g., on the right-hand side of `let`) must have both arms with matching types — enforced by the type checker.
 - **No `if let`** — `match` handles all pattern-driven branching.
 - **One loop per semantic purpose:** `for each` (collection), `while` (condition), `loop` (infinite). Not redundant — each has a distinct meaning.
 - **One equality operator:** `==` means structural equality. No reference-identity operator. No separate `.equals()` method.
