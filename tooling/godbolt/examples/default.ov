@@ -1,0 +1,16 @@
+// The default program shown when a user first lands on Compiler Explorer
+// with Overt selected. Kept small enough to fit on screen without scrolling
+// but rich enough to surface Overt's defining features:
+//
+//   - effect rows on function signatures (`!{io}`)
+//   - Result-returning main with `?` propagation
+//   - explicit, overt error handling rather than exceptions
+//
+// Destination: compiler-explorer/compiler-explorer:examples/overt/default.ov
+
+module hello
+
+fn main() !{io} -> Result<(), IoError> {
+    println("Hello, godbolt!")?
+    Ok(())
+}

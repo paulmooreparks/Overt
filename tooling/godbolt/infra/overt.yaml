@@ -1,0 +1,26 @@
+# Compiler Explorer infra install recipe for Overt.
+#
+# Destination: compiler-explorer/infra:bin/yaml/overt.yaml
+# Docs: https://github.com/compiler-explorer/infra/blob/main/docs/adding_a_compiler.md
+#
+# This file tells CE's build farm where to download each released Overt
+# version and how to lay it out under /opt/compiler-explorer/overt-<version>/.
+#
+# TODO(release): fill in real versions once GitHub Releases exist.
+# TODO(release): confirm the archive URL pattern matches what `dotnet publish`
+#                uploads to the release (likely overt-<version>-linux-x64.tar.xz).
+
+installers:
+  overt:
+    type: tarballs
+    compression: xz
+    url_pattern: https://github.com/paulmooreparks/Overt/releases/download/v{0}/overt-{0}-linux-x64.tar.xz
+    dir_pattern: overt-{0}-linux-x64
+    strip_components: 1
+    targets:
+      # Uncomment as releases ship.
+      # - 0.1.0
+      - name: trunk
+        # For the rolling nightly build, if/when we set one up.
+        # url_pattern: https://github.com/paulmooreparks/Overt/releases/download/nightly/overt-nightly-linux-x64.tar.xz
+        check_exe: overt --version

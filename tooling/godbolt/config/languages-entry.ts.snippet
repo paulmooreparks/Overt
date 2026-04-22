@@ -1,0 +1,28 @@
+// Snippet for compiler-explorer/compiler-explorer:lib/languages.ts
+//
+// Merge this entry into the `languages` object (alphabetical by id).
+// Do NOT commit this file into the CE repo — it's a staging artifact.
+
+overt: {
+    name: 'Overt',
+    id: 'overt',
+    // Compiler Explorer uses Monaco's language id to drive syntax highlighting.
+    // See tooling/godbolt/monaco/overt-mode.ts for the mode definition that
+    // must ship alongside this entry.
+    monaco: 'overt',
+    extensions: ['.ov'],
+    alias: [],
+    logoUrl: 'overt.svg',      // TODO(release): add logo to static/logos/ or drop this line.
+    logoUrlDark: null,
+    formatter: null,
+    previewFilter: null,
+    // Path to examples/overt/default.ov in the CE repo.
+    example: [
+        'module hello',
+        '',
+        'fn main() !{io} -> Result<(), IoError> {',
+        '    println("Hello, godbolt!")?',
+        '    Ok(())',
+        '}',
+    ].join('\n'),
+},
