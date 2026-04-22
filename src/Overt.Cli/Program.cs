@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Overt.Compiler.Diagnostics;
+using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
 
 // CLI contract — stable for external integrators (Compiler Explorer, CI, agent tools):
@@ -29,7 +30,7 @@ static class Cli
         usage: overt --emit=<stage> <file.ov>
 
         options:
-          --emit=<stage>   required. one of: tokens, ast, csharp, go
+          --emit=<stage>   required. one of: tokens, ast, resolved, csharp, go
           --no-color       accepted for tool compatibility (output is never colored)
           --version        print version and exit
           --help, -h       print this message and exit
@@ -99,6 +100,7 @@ static class Cli
         {
             "tokens" => EmitTokens(source, inputFile),
             "ast" => EmitAst(source, inputFile),
+            "resolved" => EmitResolved(source, inputFile),
             "csharp" => NotYetImplemented("csharp"),
             "go" => NotYetImplemented("go"),
             _ => UnknownStage(emit),
@@ -123,6 +125,27 @@ static class Cli
         AstPrinter.Print(parse.Module, Console.Out);
 
         var combined = lex.Diagnostics.AddRange(parse.Diagnostics);
+        return WriteDiagnostics(inputFile, combined);
+    }
+
+    static int EmitResolved(string source, string inputFile)
+    {
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+        var resolved = NameResolver.Resolve(parse.Module);
+
+        // Print a flat summary of resolutions: one line per resolved reference, in
+        // source order. Deterministic and diff-friendly.
+        foreach (var (span, sym) in resolved.Resolutions
+            .OrderBy(kv => kv.Key.Start.Line)
+            .ThenBy(kv => kv.Key.Start.Column))
+        {
+            Console.Out.WriteLine($"{span.Start} -> {sym.Kind} {sym.Name} @ {sym.DeclarationSpan.Start}");
+        }
+
+        var combined = lex.Diagnostics
+            .AddRange(parse.Diagnostics)
+            .AddRange(resolved.Diagnostics);
         return WriteDiagnostics(inputFile, combined);
     }
 
