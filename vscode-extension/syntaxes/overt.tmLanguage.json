@@ -1,0 +1,196 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Overt",
+    "scopeName": "source.overt",
+    "fileTypes": ["ov"],
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#annotations" },
+        { "include": "#effect-row" },
+        { "include": "#operators" },
+        { "include": "#types" },
+        { "include": "#functions" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.overt",
+                    "match": "//.*$"
+                },
+                {
+                    "name": "comment.block.overt",
+                    "begin": "/\\*",
+                    "end": "\\*/"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.overt",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.overt",
+                            "match": "\\\\."
+                        },
+                        {
+                            "name": "meta.embedded.expression.overt",
+                            "begin": "\\$\\{",
+                            "end": "\\}",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
+                        },
+                        {
+                            "name": "variable.other.interpolation.overt",
+                            "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*"
+                        }
+                    ]
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.integer.hex.overt",
+                    "match": "\\b0x[0-9A-Fa-f_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.binary.overt",
+                    "match": "\\b0b[01_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.float.overt",
+                    "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.overt",
+                    "match": "\\b[0-9][0-9_]*\\b"
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.overt",
+                    "match": "\\b(if|else|match|for|each|while|loop|return|parallel|race|trace|with)\\b"
+                },
+                {
+                    "name": "storage.type.declaration.overt",
+                    "match": "\\b(fn|let|mut|record|enum|type|module|use|pub|extern|unsafe|where|binds|from)\\b"
+                },
+                {
+                    "name": "constant.language.boolean.overt",
+                    "match": "\\b(true|false)\\b"
+                },
+                {
+                    "name": "constant.language.overt",
+                    "match": "\\b(Ok|Err|Some|None)\\b"
+                }
+            ]
+        },
+        "annotations": {
+            "patterns": [
+                {
+                    "name": "storage.modifier.annotation.overt",
+                    "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+                }
+            ]
+        },
+        "effect-row": {
+            "patterns": [
+                {
+                    "name": "meta.effect-row.overt",
+                    "begin": "!\\{",
+                    "end": "\\}",
+                    "beginCaptures": {
+                        "0": { "name": "keyword.operator.effect.overt" }
+                    },
+                    "endCaptures": {
+                        "0": { "name": "keyword.operator.effect.overt" }
+                    },
+                    "patterns": [
+                        {
+                            "name": "support.type.effect.overt",
+                            "match": "\\b(io|async|inference|fails)\\b"
+                        },
+                        {
+                            "name": "variable.other.effect.overt",
+                            "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+                        }
+                    ]
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.pipe-propagate.overt",
+                    "match": "\\|>\\?"
+                },
+                {
+                    "name": "keyword.operator.pipe.overt",
+                    "match": "\\|>"
+                },
+                {
+                    "name": "keyword.operator.propagate.overt",
+                    "match": "\\?"
+                },
+                {
+                    "name": "keyword.operator.arrow.overt",
+                    "match": "=>|->"
+                },
+                {
+                    "name": "keyword.operator.comparison.overt",
+                    "match": "==|!=|<=|>="
+                },
+                {
+                    "name": "keyword.operator.logical.overt",
+                    "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.assignment.overt",
+                    "match": "="
+                },
+                {
+                    "name": "keyword.operator.relational.overt",
+                    "match": "<|>"
+                },
+                {
+                    "name": "keyword.operator.arithmetic.overt",
+                    "match": "\\+|-|\\*|/|%"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "support.type.primitive.overt",
+                    "match": "\\b(Int|Int32|Int64|Float|Bool|String|Byte|Char|Unit|Option|Result|List|Map|Set|Seq|CString|Ptr|Index|TraceEvent|RaceAllFailed|OvertError|IoError|HttpError|JsonError|ParseError)\\b"
+                },
+                {
+                    "name": "entity.name.type.overt",
+                    "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        },
+        "functions": {
+            "patterns": [
+                {
+                    "name": "entity.name.function.definition.overt",
+                    "match": "(?<=\\bfn\\s)[a-z_][a-zA-Z0-9_]*"
+                },
+                {
+                    "name": "entity.name.function.call.overt",
+                    "match": "\\b[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
+                }
+            ]
+        }
+    }
+}

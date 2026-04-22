@@ -1,0 +1,42 @@
+module tcp_state_machine
+
+// A simplified TCP-like connection state machine.
+// Demonstrates: enum with bare variants, exhaustive match on tuple patterns.
+
+enum ConnectionState {
+    Closed,
+    Listen,
+    SynSent,
+    SynReceived,
+    Established,
+    FinWait,
+}
+
+enum Event {
+    ActiveOpen,
+    PassiveOpen,
+    SynAckReceived,
+    AckReceived,
+    Close,
+}
+
+@derive(Debug, Display)
+enum TransitionError {
+    InvalidTransition { from: ConnectionState, event: Event },
+}
+
+// Pure function — no effect marker.
+// Exhaustive pattern matching: the compiler checks every (state, event)
+// pair is handled, or that a wildcard arm covers the rest.
+fn transition(state: ConnectionState, event: Event) -> Result<ConnectionState, TransitionError> {
+    match (state, event) {
+        (ConnectionState.Closed,      Event.ActiveOpen)     => Ok(ConnectionState.SynSent),
+        (ConnectionState.Closed,      Event.PassiveOpen)    => Ok(ConnectionState.Listen),
+        (ConnectionState.Listen,      Event.SynAckReceived) => Ok(ConnectionState.SynReceived),
+        (ConnectionState.SynSent,     Event.SynAckReceived) => Ok(ConnectionState.Established),
+        (ConnectionState.SynReceived, Event.AckReceived)    => Ok(ConnectionState.Established),
+        (ConnectionState.Established, Event.Close)          => Ok(ConnectionState.FinWait),
+        (ConnectionState.FinWait,     Event.AckReceived)    => Ok(ConnectionState.Closed),
+        (from, event)                                       => Err(TransitionError.InvalidTransition { from = from, event = event }),
+    }
+}

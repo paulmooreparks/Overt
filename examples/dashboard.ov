@@ -1,0 +1,33 @@
+module dashboard
+
+record User  { id: Int, name: String }
+record Order { id: Int, amount_cents: Int }
+
+record Dashboard {
+    users:  List<User>,
+    orders: List<Order>,
+}
+
+@derive(Debug)
+enum LoadError {
+    NetworkFailed { cause: String },
+    ParseFailed   { source: String, reason: String },
+    Timeout,
+}
+
+fn load_dashboard() !{io, async} -> Result<Dashboard, LoadError> {
+    let (users, orders) = parallel {
+        fetch_users(),
+        fetch_orders(),
+    }?
+
+    Ok(Dashboard { users = users, orders = orders })
+}
+
+fn fetch_users() !{io, async} -> Result<List<User>, LoadError> {
+    Ok(List.empty())
+}
+
+fn fetch_orders() !{io, async} -> Result<List<Order>, LoadError> {
+    Ok(List.empty())
+}

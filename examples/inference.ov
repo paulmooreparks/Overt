@@ -1,0 +1,39 @@
+module inference_example
+
+record Classification {
+    label:      String,
+    confidence: Float,
+}
+
+@derive(Debug)
+enum LlmError {
+    ApiFailed   { cause: String },
+    ParseFailed { response: String },
+}
+
+// Binding to an external LLM service.
+// Note `inference` alongside `io` and `async` in the effect row — this is what
+// marks a function as "calls an external AI inference service."
+extern "csharp" fn call_llm(prompt: String) !{io, async, inference} -> Result<String, LlmError>
+    binds "MyApp.Llm.Complete"
+
+// Any function that invokes `call_llm` inherits the `inference` effect.
+fn classify(text: String) !{io, async, inference} -> Result<Classification, LlmError> {
+    let prompt   = "Classify as positive or negative: $text"
+    let response = call_llm(prompt)?
+    parse_classification(response)
+}
+
+fn parse_classification(s: String) -> Result<Classification, LlmError> {
+    // Simplified — a real implementation would parse structured JSON output.
+    Ok(Classification { label = "positive", confidence = 0.9 })
+}
+
+// Parallel classification. `par_map`'s effect row unifies over its callback,
+// so this function's row inherits `inference` transparently. The agent cannot
+// accidentally hide LLM calls from callers — the effect row surfaces them.
+fn classify_batch(texts: List<String>) !{io, async, inference} -> Result<List<Classification>, LlmError> {
+    texts
+      |>? par_map(classify)
+      |>  Ok
+}

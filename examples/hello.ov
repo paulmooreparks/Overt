@@ -1,0 +1,6 @@
+module hello
+
+fn main() !{io} -> Result<(), IoError> {
+    println("Hello, LLM!")?
+    Ok(())
+}

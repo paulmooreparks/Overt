@@ -1,0 +1,69 @@
+module refinement_example
+
+// Refinement types push validation into the type system, out of scattered if-statements.
+// Syntax: `T where <predicate>`, with `self` referring to the value.
+
+type Age         = Int   where 0   <= self <= 150
+type Percent     = Float where 0.0 <= self <= 100.0
+type NonEmpty<T> = List<T> where size(self) > 0
+
+record UserProfile {
+    name:          String,
+    age:           Age,
+    score_percent: Percent,
+    friends:       NonEmpty<String>,
+}
+
+@derive(Debug, Display)
+enum ValidationError {
+    AgeOutOfRange   { got: Int },
+    ScoreOutOfRange { got: Float },
+    NoFriends,
+}
+
+// Each `check_*` helper uses flow-sensitive type narrowing: once a predicate
+// is proven inside a branch, the compiler narrows the base type to the
+// corresponding refinement type. That is why `Ok(raw)` type-checks in the
+// Ok branch even though `raw` was declared as `Int`.
+fn check_age(raw: Int) -> Result<Age, ValidationError> {
+    if 0 <= raw && raw <= 150 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.AgeOutOfRange { got = raw })
+    }
+}
+
+fn check_percent(raw: Float) -> Result<Percent, ValidationError> {
+    if 0.0 <= raw && raw <= 100.0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.ScoreOutOfRange { got = raw })
+    }
+}
+
+fn check_non_empty(raw: List<String>) -> Result<NonEmpty<String>, ValidationError> {
+    if size(raw) > 0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.NoFriends)
+    }
+}
+
+fn make_profile(
+    name:      String,
+    age_raw:   Int,
+    score_raw: Float,
+    friends:   List<String>,
+) -> Result<UserProfile, ValidationError> {
+
+    let age:     Age              = check_age(age_raw)?
+    let score:   Percent          = check_percent(score_raw)?
+    let checked: NonEmpty<String> = check_non_empty(friends)?
+
+    Ok(UserProfile {
+        name          = name,
+        age           = age,
+        score_percent = score,
+        friends       = checked,
+    })
+}

@@ -1,0 +1,37 @@
+module pipeline_example
+
+record UserId { value: String }
+
+record User {
+    id:        UserId,
+    name:      String,
+    is_active: Bool,
+}
+
+@derive(Debug)
+enum LoadError {
+    NotFound      { id: UserId },
+    NetworkFailed { cause: String },
+}
+
+// Pipe composition. `|>?` propagates Err; `|>` is infallible composition.
+// Fallibility of each step is visible at the operator.
+fn active_user_names(ids: List<UserId>) !{io, async} -> Result<List<String>, LoadError> {
+    ids
+      |>? par_map(fetch_user)   // fallible: network
+      |>  filter(is_active)     // infallible
+      |>  map(get_name)         // infallible
+      |>  Ok                    // wrap final value
+}
+
+fn fetch_user(id: UserId) !{io, async} -> Result<User, LoadError> {
+    Ok(User { id = id, name = "stub", is_active = true })
+}
+
+fn is_active(user: User) -> Bool {
+    user.is_active
+}
+
+fn get_name(user: User) -> String {
+    user.name
+}

@@ -1,0 +1,31 @@
+module effects_example
+
+// Pure function — no effect marker
+fn double(n: Int) -> Int {
+    n * 2
+}
+
+// I/O-doing function — !{io} in the signature
+fn log_and_double(n: Int) !{io} -> Int {
+    println("doubling $n")
+    n * 2
+}
+
+// Effect-polymorphic higher-order function.
+// `E` is an effect-row type variable. The function's row is whatever row
+// the callback carries — no more, no less.
+fn apply_twice<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T {
+    f(f(x))
+}
+
+// Pure call site: E is solved as empty, so this function is pure.
+fn quadruple(n: Int) -> Int {
+    apply_twice(double, n)
+}
+
+// I/O call site: E is solved as {io}, so this function must declare !{io}.
+// The effect propagates through the higher-order call transparently —
+// signatures stay explicit; call sites need no effect annotations.
+fn noisy_quadruple(n: Int) !{io} -> Int {
+    apply_twice(log_and_double, n)
+}

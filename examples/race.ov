@@ -1,0 +1,26 @@
+module race_example
+
+record UserId { value: String }
+record User   { id: UserId, name: String }
+
+@derive(Debug)
+enum LoadError {
+    NotFound      { id: UserId },
+    Timeout,
+    NetworkFailed { cause: String },
+}
+
+fn fetch_with_fallback(id: UserId) !{io, async} -> Result<User, LoadError> {
+    race {
+        fetch_from_primary(id),
+        fetch_from_backup(id),
+    }
+}
+
+fn fetch_from_primary(id: UserId) !{io, async} -> Result<User, LoadError> {
+    Ok(User { id = id, name = "stub" })
+}
+
+fn fetch_from_backup(id: UserId) !{io, async} -> Result<User, LoadError> {
+    Ok(User { id = id, name = "stub" })
+}

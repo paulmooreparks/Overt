@@ -1,0 +1,49 @@
+module mutation_example
+
+record Config {
+    enable_a: Bool,
+    enable_b: Bool,
+}
+
+fn default_config() -> Config {
+    Config { enable_a = false, enable_b = false }
+}
+
+// `with` produces a modified copy — records are immutable.
+fn enable_feature_a(config: Config) -> Config {
+    config with { enable_a = true }
+}
+
+// `let mut` enables progressive refinement.
+// Without it (and without shadowing), this would need config_1, config_2, config_3 —
+// the numbered-suffix antipattern the design explicitly rejects.
+fn configure(use_a: Bool, use_b: Bool) -> Config {
+    let mut config = default_config()
+    if use_a {
+        config = config with { enable_a = true }
+    }
+    if use_b {
+        config = config with { enable_b = true }
+    }
+    config
+}
+
+// `let mut` for scalar accumulators in a while loop.
+// (Collection reductions should use `fold`/`sum_by` instead — see §10.)
+fn sum_first_n(n: Int) -> Int {
+    let mut total = 0
+    let mut i     = 1
+    while i <= n {
+        total = total + i
+        i     = i + 1
+    }
+    total
+}
+
+// Nested `with` for nested record updates — no path expressions in v1.
+record Address { street: String, city: String }
+record User    { name: String, address: Address }
+
+fn move_to_london(user: User) -> User {
+    user with { address = user.address with { city = "London" } }
+}

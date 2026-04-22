@@ -1,0 +1,42 @@
+module ffi_example
+
+// Three platforms, one declaration syntax.
+// The Overt signature is the normalized one the agent sees; the compiler
+// handles all boundary conversion (exceptions → Result, nullable → Option,
+// primitive marshaling).
+
+// Import a .NET static method. C# exceptions become Err at the boundary.
+extern "csharp" fn file_exists(path: String) !{io} -> Bool
+    binds "System.IO.File.Exists"
+
+// Import a Go function. Go's (value, ok) pattern becomes Option.
+extern "go" fn env_value(key: String) !{io} -> Option<String>
+    binds "os.LookupEnv"
+
+// Import a C function. Requires `unsafe` and `from`.
+// CString and Ptr<T> are distinct types from Overt String and List — conversions
+// across the C boundary are always explicit.
+unsafe extern "c" fn c_strlen(s: CString) -> Int
+    binds "strlen"
+    from  "libc"
+
+// Safe Overt wrapper around the unsafe C binding.
+// From here on, no other code touches c_strlen directly.
+fn strlen(s: String) -> Int {
+    let cs: CString = CString.from(s)
+    unsafe { c_strlen(cs) }
+}
+
+fn main() !{io} -> Result<(), IoError> {
+    let exists = file_exists("/tmp/hello.txt")
+    println("file exists: $exists")
+
+    match env_value("HOME") {
+        Some(home) => println("HOME=$home"),
+        None       => println("HOME is not set"),
+    }
+
+    println("length of \"hello\" = ${strlen(\"hello\")}")
+
+    Ok(())
+}

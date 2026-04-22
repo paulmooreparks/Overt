@@ -1,0 +1,20 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+
+# Rider / JetBrains
+.idea/
+
+# VS Code extension
+vscode-extension/node_modules/
+vscode-extension/*.vsix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local
+.claude/settings.local.json

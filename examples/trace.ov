@@ -1,0 +1,53 @@
+module trace_example
+
+record Order {
+    id:     Int,
+    amount: Int,
+    status: OrderStatus,
+}
+
+enum OrderStatus { Pending, Shipped, Delivered }
+
+@derive(Debug, Display)
+enum ProcessError {
+    ApprovalRequired { order_id: Int },
+    AlreadyShipped   { order_id: Int },
+    AlreadyDelivered { order_id: Int },
+}
+
+// A `trace` block captures structured events — function entry/exit, value
+// bindings, branches taken, pattern-match arms — for any registered consumer.
+// With no consumer subscribed, the block is a zero-cost pass-through: the body
+// still runs, but no events are allocated or dispatched.
+fn process_order(order: Order) -> Result<Order, ProcessError> {
+    trace {
+        match order.status {
+            OrderStatus.Pending => {
+                if order.amount > 10000 {
+                    Err(ProcessError.ApprovalRequired { order_id = order.id })
+                } else {
+                    Ok(order with { status = OrderStatus.Shipped })
+                }
+            }
+            OrderStatus.Shipped   => Err(ProcessError.AlreadyShipped   { order_id = order.id }),
+            OrderStatus.Delivered => Err(ProcessError.AlreadyDelivered { order_id = order.id }),
+        }
+    }
+}
+
+// Register a consumer at the start of main to observe the trace.
+// In production, this is typically not called, so traces are inert.
+fn main() !{io} -> Result<(), IoError> {
+    trace.subscribe(print_event)
+
+    let order = Order { id = 42, amount = 500, status = OrderStatus.Pending }
+    match process_order(order) {
+        Ok(updated) => println("shipped: ${updated.id}"),
+        Err(e)      => println("failed: $e"),
+    }
+    Ok(())
+}
+
+fn print_event(event: TraceEvent) !{io} -> () {
+    println("[trace] $event")
+}
