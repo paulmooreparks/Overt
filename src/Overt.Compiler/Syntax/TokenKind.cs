@@ -34,9 +34,6 @@ public enum TokenKind
     KeywordWhere,
     KeywordExtern,
     KeywordUnsafe,
-    KeywordFrom,
-    KeywordAs,
-    KeywordIn,
 
     // Literals
     IntegerLiteral,

@@ -487,7 +487,7 @@ public class ParserTests
     {
         var expr = ParseBodyExpression("Point { x = 1, y = 2 }");
         var lit = Assert.IsType<RecordLiteralExpr>(expr);
-        Assert.Equal("Point", lit.TypeName);
+        Assert.Equal("Point", ((IdentifierExpr)lit.TypeTarget).Name);
         Assert.Equal(2, lit.Fields.Length);
         Assert.Equal("x", lit.Fields[0].Name);
         Assert.Equal("y", lit.Fields[1].Name);
@@ -499,7 +499,7 @@ public class ParserTests
     {
         var expr = ParseBodyExpression("Marker { }");
         var lit = Assert.IsType<RecordLiteralExpr>(expr);
-        Assert.Equal("Marker", lit.TypeName);
+        Assert.Equal("Marker", ((IdentifierExpr)lit.TypeTarget).Name);
         Assert.Empty(lit.Fields);
     }
 
@@ -508,11 +508,23 @@ public class ParserTests
     {
         var expr = ParseBodyExpression("User { id = UserId { value = \"x\" }, active = true }");
         var outer = Assert.IsType<RecordLiteralExpr>(expr);
-        Assert.Equal("User", outer.TypeName);
+        Assert.Equal("User", ((IdentifierExpr)outer.TypeTarget).Name);
         var idInit = outer.Fields[0];
         Assert.Equal("id", idInit.Name);
         var inner = Assert.IsType<RecordLiteralExpr>(idInit.Value);
-        Assert.Equal("UserId", inner.TypeName);
+        Assert.Equal("UserId", ((IdentifierExpr)inner.TypeTarget).Name);
+    }
+
+    [Fact]
+    public void Parse_RecordLiteral_DottedPath()
+    {
+        // Tree.Node { ... } is parsed as a record literal whose type-target is a
+        // FieldAccessExpr chain of identifiers. Required for enum variant records.
+        var expr = ParseBodyExpression("Tree.Node { value = 1 }");
+        var lit = Assert.IsType<RecordLiteralExpr>(expr);
+        var fa = Assert.IsType<FieldAccessExpr>(lit.TypeTarget);
+        Assert.Equal("Node", fa.FieldName);
+        Assert.Equal("Tree", ((IdentifierExpr)fa.Target).Name);
     }
 
     [Fact]
@@ -695,5 +707,199 @@ public class ParserTests
         var fn = (FunctionDecl)result.Module.Declarations[0];
         var whe = Assert.IsType<WhileExpr>(fn.Body.TrailingExpression);
         Assert.Equal("flag", ((IdentifierExpr)whe.Condition).Name);
+    }
+
+    // ------------------------------------------------------------ else-if
+
+    [Fact]
+    public void Parse_ElseIfChain_WrapsNestedIfInSyntheticBlock()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { if a { 1 } else if b { 2 } else { 3 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var outer = Assert.IsType<IfExpr>(fn.Body.TrailingExpression);
+        Assert.NotNull(outer.Else);
+        // Synthetic wrapper block: no statements, trailing expression is the nested if.
+        Assert.Empty(outer.Else!.Statements);
+        var nested = Assert.IsType<IfExpr>(outer.Else.TrailingExpression);
+        Assert.Equal("b", ((IdentifierExpr)nested.Condition).Name);
+    }
+
+    // -------------------------------------------------------------- enums
+
+    [Fact]
+    public void Parse_EnumDecl_BareVariants()
+    {
+        var lex = Lexer.Lex("module m\nenum Status { Pending, Shipped, Delivered }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var e = Assert.IsType<EnumDecl>(result.Module.Declarations[0]);
+        Assert.Equal("Status", e.Name);
+        Assert.Equal(new[] { "Pending", "Shipped", "Delivered" }, e.Variants.Select(v => v.Name).ToArray());
+        Assert.All(e.Variants, v => Assert.Empty(v.Fields));
+    }
+
+    [Fact]
+    public void Parse_EnumDecl_StructLikeVariants()
+    {
+        var lex = Lexer.Lex(
+            "module m\nenum LoadError { NotFound { id: Int }, NetworkFailed { cause: String }, Timeout }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var e = Assert.IsType<EnumDecl>(result.Module.Declarations[0]);
+        Assert.Equal(3, e.Variants.Length);
+        Assert.Single(e.Variants[0].Fields);
+        Assert.Equal("id", e.Variants[0].Fields[0].Name);
+        Assert.Single(e.Variants[1].Fields);
+        Assert.Empty(e.Variants[2].Fields); // bare after struct-like
+    }
+
+    // --------------------------------------------------------- annotations
+
+    [Fact]
+    public void Parse_DeriveAnnotation_OnRecord()
+    {
+        var lex = Lexer.Lex("module m\n@derive(Debug, Clone)\nrecord User { id: Int }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var rec = Assert.IsType<RecordDecl>(result.Module.Declarations[0]);
+        Assert.Single(rec.Annotations);
+        Assert.Equal("derive", rec.Annotations[0].Name);
+        Assert.Equal(new[] { "Debug", "Clone" }, rec.Annotations[0].Arguments.ToArray());
+    }
+
+    [Fact]
+    public void Parse_DeriveAnnotation_OnEnum()
+    {
+        var lex = Lexer.Lex("module m\n@derive(Debug)\nenum E { A, B }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var e = Assert.IsType<EnumDecl>(result.Module.Declarations[0]);
+        Assert.Single(e.Annotations);
+    }
+
+    [Fact]
+    public void Parse_Annotation_OnFunction_EmitsOV0157()
+    {
+        var lex = Lexer.Lex("module m\n@derive(Debug)\nfn f() { }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Contains(result.Diagnostics, d => d.Code == "OV0157");
+    }
+
+    // ---------------------------------------------------------- tuples
+
+    [Fact]
+    public void Parse_TupleExpr_TwoElements()
+    {
+        var expr = ParseBodyExpression("(a, b)");
+        var tup = Assert.IsType<TupleExpr>(expr);
+        Assert.Equal(2, tup.Elements.Length);
+    }
+
+    [Fact]
+    public void Parse_TupleExpr_ThreeElements_TrailingComma()
+    {
+        var expr = ParseBodyExpression("(1, 2, 3,)");
+        var tup = Assert.IsType<TupleExpr>(expr);
+        Assert.Equal(3, tup.Elements.Length);
+    }
+
+    [Fact]
+    public void Parse_SingleParenExpression_NotATuple()
+    {
+        var expr = ParseBodyExpression("(42)");
+        Assert.IsType<IntegerLiteralExpr>(expr);
+    }
+
+    // ---------------------------------------------------------- match
+
+    [Fact]
+    public void Parse_Match_BareVariantArms()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { match status { Pending => 1, Shipped => 2, Delivered => 3 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        Assert.Equal(3, m.Arms.Length);
+        Assert.All(m.Arms, arm => Assert.IsType<IdentifierPattern>(arm.Pattern));
+    }
+
+    [Fact]
+    public void Parse_Match_PathAndConstructorPatterns()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { match r { Ok(value) => value, Err(e) => 0 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        var okArm = Assert.IsType<ConstructorPattern>(m.Arms[0].Pattern);
+        Assert.Equal(new[] { "Ok" }, okArm.Path.ToArray());
+        Assert.Single(okArm.Arguments);
+        Assert.IsType<IdentifierPattern>(okArm.Arguments[0]);
+    }
+
+    [Fact]
+    public void Parse_Match_RecordDestructurePattern()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { match t { Tree.Node { value = v, left = l } => v } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        var rp = Assert.IsType<RecordPattern>(m.Arms[0].Pattern);
+        Assert.Equal(new[] { "Tree", "Node" }, rp.Path.ToArray());
+        Assert.Equal(2, rp.Fields.Length);
+    }
+
+    [Fact]
+    public void Parse_Match_TupleScrutineeAndTuplePattern()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { match (state, event) { (A, B) => 1, (from, event) => 2 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        Assert.IsType<TupleExpr>(m.Scrutinee);
+        Assert.IsType<TuplePattern>(m.Arms[0].Pattern);
+        var secondArm = Assert.IsType<TuplePattern>(m.Arms[1].Pattern);
+        Assert.Equal(2, secondArm.Elements.Length);
+        Assert.IsType<IdentifierPattern>(secondArm.Elements[0]);
+    }
+
+    [Fact]
+    public void Parse_Match_WildcardPattern()
+    {
+        var lex = Lexer.Lex("module m\nfn f() { match x { _ => 0 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        Assert.IsType<WildcardPattern>(m.Arms[0].Pattern);
+    }
+
+    [Fact]
+    public void Parse_Match_ScrutineeRespectsRestrictedContext()
+    {
+        // `match flag { body }` — `flag { ... }` must NOT be a record literal.
+        var lex = Lexer.Lex("module m\nfn f() { match x { A => 1, B => 2 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
     }
 }

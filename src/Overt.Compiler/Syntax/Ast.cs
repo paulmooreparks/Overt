@@ -30,12 +30,40 @@ public sealed record FunctionDecl(
 
 public sealed record RecordDecl(
     string Name,
+    ImmutableArray<Annotation> Annotations,
     ImmutableArray<RecordField> Fields,
     SourceSpan Span) : Declaration(Span);
 
 public sealed record RecordField(
     string Name,
     TypeExpr Type,
+    SourceSpan Span) : SyntaxNode(Span);
+
+/// <summary>
+/// Sum type: <c>enum Name { Variant1, Variant2 { field: Type, ... }, ... }</c>. Variants
+/// with no fields are "bare" (e.g. <c>Pending</c>); variants with fields carry named data
+/// (Rust-struct-like; tuple-struct variants are not used in v1).
+/// </summary>
+public sealed record EnumDecl(
+    string Name,
+    ImmutableArray<Annotation> Annotations,
+    ImmutableArray<EnumVariant> Variants,
+    SourceSpan Span) : Declaration(Span);
+
+public sealed record EnumVariant(
+    string Name,
+    ImmutableArray<RecordField> Fields,
+    SourceSpan Span) : SyntaxNode(Span);
+
+/// <summary>
+/// An annotation attached to a declaration: <c>@name(arg, arg, ...)</c>. V1 uses attributes
+/// only for <c>@derive</c>, which takes a list of identifier arguments naming stdlib
+/// derive kinds (Debug, Clone, etc — DESIGN.md §15). Arguments are stored as raw
+/// identifier strings and interpreted by later passes.
+/// </summary>
+public sealed record Annotation(
+    string Name,
+    ImmutableArray<string> Arguments,
     SourceSpan Span) : SyntaxNode(Span);
 
 public sealed record Parameter(
@@ -185,13 +213,17 @@ public sealed record IfExpr(
     SourceSpan Span) : Expression(Span);
 
 /// <summary>
-/// Record literal: <c>Name { field = value, ... }</c>. Disambiguated from a bare identifier
-/// followed by a block at parse time by the field-initializer shape <c>Ident =</c>; in
-/// condition-like positions (<c>if</c>, <c>while</c>, <c>match</c>) record literals are
-/// disabled entirely to avoid ambiguity with the form's opening brace.
+/// Record literal: <c>Name { field = value, ... }</c> or <c>Mod.Type { ... }</c>. The type
+/// is represented as an expression (always an <see cref="IdentifierExpr"/> or a
+/// <see cref="FieldAccessExpr"/> chain of identifiers) so dotted paths like
+/// <c>Tree.Node { ... }</c> and enum-variant-record literals like
+/// <c>OrderStatus.Delivered { ... }</c> fit the same node. Disambiguated from a bare
+/// identifier followed by a block at parse time by the field-initializer shape
+/// <c>Ident =</c>; in condition-like positions (<c>if</c>, <c>while</c>, <c>match</c>)
+/// record literals are disabled entirely to avoid ambiguity with the form's opening brace.
 /// </summary>
 public sealed record RecordLiteralExpr(
-    string TypeName,
+    Expression TypeTarget,
     ImmutableArray<FieldInit> Fields,
     SourceSpan Span) : Expression(Span);
 
@@ -220,6 +252,78 @@ public sealed record WhileExpr(
     Expression Condition,
     BlockExpr Body,
     SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// Tuple literal: <c>(a, b, c)</c> with two or more elements. One-element tuples are not
+/// a thing in Overt; <c>(a)</c> is a parenthesized expression, <c>()</c> is the unit value.
+/// </summary>
+public sealed record TupleExpr(
+    ImmutableArray<Expression> Elements,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>match scrutinee { pattern =&gt; expr, ... }</c>. Exhaustiveness is enforced later.
+/// </summary>
+public sealed record MatchExpr(
+    Expression Scrutinee,
+    ImmutableArray<MatchArm> Arms,
+    SourceSpan Span) : Expression(Span);
+
+public sealed record MatchArm(
+    Pattern Pattern,
+    Expression Body,
+    SourceSpan Span) : SyntaxNode(Span);
+
+// ---------- Patterns ----------
+
+public abstract record Pattern(SourceSpan Span) : SyntaxNode(Span);
+
+/// <summary>The <c>_</c> pattern — matches anything, binds nothing.</summary>
+public sealed record WildcardPattern(SourceSpan Span) : Pattern(Span);
+
+/// <summary>
+/// A single-identifier pattern. Ambiguous at parse time: could be a binding or a
+/// zero-argument variant reference (e.g. <c>Empty</c> for <c>Tree.Empty</c> in scope).
+/// Later semantic passes resolve which.
+/// </summary>
+public sealed record IdentifierPattern(string Name, SourceSpan Span) : Pattern(Span);
+
+/// <summary>
+/// A dotted path pattern with no arguments: <c>Tree.Empty</c>, <c>OrderStatus.Pending</c>.
+/// Always resolves to a constant / zero-argument variant reference (no binding).
+/// </summary>
+public sealed record PathPattern(
+    ImmutableArray<string> Path,
+    SourceSpan Span) : Pattern(Span);
+
+/// <summary>
+/// A constructor pattern with positional arguments: <c>Ok(value)</c>, <c>Err(cause)</c>.
+/// </summary>
+public sealed record ConstructorPattern(
+    ImmutableArray<string> Path,
+    ImmutableArray<Pattern> Arguments,
+    SourceSpan Span) : Pattern(Span);
+
+/// <summary>
+/// A record-destructuring pattern: <c>Tree.Node { value = v, left = l, right = r }</c>.
+/// Each field pattern names a field of the record/variant and supplies a subpattern for it.
+/// </summary>
+public sealed record RecordPattern(
+    ImmutableArray<string> Path,
+    ImmutableArray<FieldPattern> Fields,
+    SourceSpan Span) : Pattern(Span);
+
+public sealed record FieldPattern(
+    string Name,
+    Pattern Subpattern,
+    SourceSpan Span) : SyntaxNode(Span);
+
+/// <summary>
+/// A tuple pattern: <c>(p1, p2, ...)</c>. Arity must match the scrutinee.
+/// </summary>
+public sealed record TuplePattern(
+    ImmutableArray<Pattern> Elements,
+    SourceSpan Span) : Pattern(Span);
 
 public sealed record CallExpr(
     Expression Callee,

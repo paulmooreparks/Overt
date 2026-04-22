@@ -51,7 +51,7 @@ Arrow(->) @ 19:43..19:45
 Identifier(Int) @ 19:46..19:49
 Identifier(binds) @ 20:5..20:10
 StringLiteral("strlen") @ 20:11..20:19
-KeywordFrom(from) @ 21:5..21:9
+Identifier(from) @ 21:5..21:9
 StringLiteral("libc") @ 21:11..21:17
 KeywordFn(fn) @ 25:1..25:3
 Identifier(strlen) @ 25:4..25:10
@@ -70,7 +70,7 @@ Identifier(CString) @ 26:13..26:20
 Equals(=) @ 26:21..26:22
 Identifier(CString) @ 26:23..26:30
 Dot(.) @ 26:30..26:31
-KeywordFrom(from) @ 26:31..26:35
+Identifier(from) @ 26:31..26:35
 LeftParen(() @ 26:35..26:36
 Identifier(s) @ 26:36..26:37
 RightParen()) @ 26:37..26:38

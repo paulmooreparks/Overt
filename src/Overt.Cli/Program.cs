@@ -381,8 +381,34 @@ static class AstPrinter
                 w.Line($"Record {rd.Name}");
                 using (w.Indent())
                 {
+                    foreach (var a in rd.Annotations) Visit(a, w);
                     foreach (var fld in rd.Fields) Visit(fld, w);
                 }
+                break;
+
+            case EnumDecl ed:
+                w.Line($"Enum {ed.Name}");
+                using (w.Indent())
+                {
+                    foreach (var a in ed.Annotations) Visit(a, w);
+                    foreach (var v in ed.Variants) Visit(v, w);
+                }
+                break;
+
+            case EnumVariant ev:
+                w.Line($"Variant {ev.Name}");
+                if (ev.Fields.Length > 0)
+                {
+                    using (w.Indent())
+                    {
+                        foreach (var fld in ev.Fields) Visit(fld, w);
+                    }
+                }
+                break;
+
+            case Annotation attr:
+                var args = attr.Arguments.Length > 0 ? $"({string.Join(", ", attr.Arguments)})" : "";
+                w.Line($"@{attr.Name}{args}");
                 break;
 
             case RecordField rf:
@@ -391,9 +417,11 @@ static class AstPrinter
                 break;
 
             case RecordLiteralExpr rl:
-                w.Line($"RecordLiteral {rl.TypeName}");
+                w.Line("RecordLiteral");
                 using (w.Indent())
                 {
+                    w.Line("Type");
+                    using (w.Indent()) Visit(rl.TypeTarget, w);
                     foreach (var fi in rl.Fields) Visit(fi, w);
                 }
                 break;
@@ -421,6 +449,76 @@ static class AstPrinter
                     using (w.Indent()) Visit(whe.Condition, w);
                     w.Line("Body");
                     using (w.Indent()) Visit(whe.Body, w);
+                }
+                break;
+
+            case TupleExpr te:
+                w.Line($"Tuple[{te.Elements.Length}]");
+                using (w.Indent())
+                {
+                    foreach (var e in te.Elements) Visit(e, w);
+                }
+                break;
+
+            case MatchExpr me:
+                w.Line("Match");
+                using (w.Indent())
+                {
+                    w.Line("Scrutinee");
+                    using (w.Indent()) Visit(me.Scrutinee, w);
+                    foreach (var arm in me.Arms) Visit(arm, w);
+                }
+                break;
+
+            case MatchArm ma:
+                w.Line("Arm");
+                using (w.Indent())
+                {
+                    w.Line("Pattern");
+                    using (w.Indent()) Visit(ma.Pattern, w);
+                    w.Line("Body");
+                    using (w.Indent()) Visit(ma.Body, w);
+                }
+                break;
+
+            case WildcardPattern:
+                w.Line("_");
+                break;
+
+            case IdentifierPattern ip:
+                w.Line($"Bind {ip.Name}");
+                break;
+
+            case PathPattern pp:
+                w.Line($"Path {string.Join(".", pp.Path)}");
+                break;
+
+            case ConstructorPattern cp:
+                w.Line($"Ctor {string.Join(".", cp.Path)}");
+                using (w.Indent())
+                {
+                    foreach (var a in cp.Arguments) Visit(a, w);
+                }
+                break;
+
+            case RecordPattern rp:
+                w.Line($"RecordPat {string.Join(".", rp.Path)}");
+                using (w.Indent())
+                {
+                    foreach (var fp in rp.Fields) Visit(fp, w);
+                }
+                break;
+
+            case FieldPattern fp2:
+                w.Line($"= {fp2.Name}");
+                using (w.Indent()) Visit(fp2.Subpattern, w);
+                break;
+
+            case TuplePattern tp:
+                w.Line($"TuplePat[{tp.Elements.Length}]");
+                using (w.Indent())
+                {
+                    foreach (var e in tp.Elements) Visit(e, w);
                 }
                 break;
 

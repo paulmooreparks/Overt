@@ -74,21 +74,83 @@ public sealed class Parser
 
     private Declaration? ParseDeclaration()
     {
+        var attributes = ImmutableArray<Annotation>.Empty;
+        if (Check(TokenKind.At))
+        {
+            attributes = ParseAnnotationList();
+        }
+
         if (Check(TokenKind.KeywordFn))
         {
+            if (attributes.Length > 0)
+            {
+                ReportError("OV0157",
+                    "attributes on `fn` declarations are not supported in v1",
+                    attributes[0].Span);
+            }
             return ParseFunctionDecl();
         }
         if (Check(TokenKind.KeywordRecord))
         {
-            return ParseRecordDecl();
+            return ParseRecordDecl(attributes);
+        }
+        if (Check(TokenKind.KeywordEnum))
+        {
+            return ParseEnumDecl(attributes);
         }
 
+        if (attributes.Length > 0)
+        {
+            ReportError("OV0157",
+                "attributes must precede a declaration",
+                attributes[0].Span);
+        }
         return null;
     }
 
-    private RecordDecl ParseRecordDecl()
+    private ImmutableArray<Annotation> ParseAnnotationList()
     {
-        var startPos = Current.Span.Start;
+        var attributes = ImmutableArray.CreateBuilder<Annotation>();
+        while (Check(TokenKind.At))
+        {
+            attributes.Add(ParseAnnotation());
+        }
+        return attributes.ToImmutable();
+    }
+
+    private Annotation ParseAnnotation()
+    {
+        var at = Expect(TokenKind.At, "attribute");
+        var nameToken = Expect(TokenKind.Identifier, "attribute name");
+
+        var arguments = ImmutableArray<string>.Empty;
+        var endPos = nameToken.Span.End;
+        if (Match(TokenKind.LeftParen))
+        {
+            var args = ImmutableArray.CreateBuilder<string>();
+            if (!Check(TokenKind.RightParen))
+            {
+                args.Add(Expect(TokenKind.Identifier, "attribute argument").Lexeme);
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightParen))
+                    {
+                        break;
+                    }
+                    args.Add(Expect(TokenKind.Identifier, "attribute argument").Lexeme);
+                }
+            }
+            var closing = Expect(TokenKind.RightParen, "attribute arguments");
+            arguments = args.ToImmutable();
+            endPos = closing.Span.End;
+        }
+
+        return new Annotation(nameToken.Lexeme, arguments, new SourceSpan(at.Span.Start, endPos));
+    }
+
+    private RecordDecl ParseRecordDecl(ImmutableArray<Annotation> attributes)
+    {
+        var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         Expect(TokenKind.KeywordRecord, "record declaration");
         var nameToken = Expect(TokenKind.Identifier, "record name");
         Expect(TokenKind.LeftBrace, "record body");
@@ -110,8 +172,71 @@ public sealed class Parser
         var closing = Expect(TokenKind.RightBrace, "record body");
         return new RecordDecl(
             nameToken.Lexeme,
+            attributes,
             fields.ToImmutable(),
             new SourceSpan(startPos, closing.Span.End));
+    }
+
+    private EnumDecl ParseEnumDecl(ImmutableArray<Annotation> attributes)
+    {
+        var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
+        Expect(TokenKind.KeywordEnum, "enum declaration");
+        var nameToken = Expect(TokenKind.Identifier, "enum name");
+        Expect(TokenKind.LeftBrace, "enum body");
+
+        var variants = ImmutableArray.CreateBuilder<EnumVariant>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            variants.Add(ParseEnumVariant());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                variants.Add(ParseEnumVariant());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, "enum body");
+        return new EnumDecl(
+            nameToken.Lexeme,
+            attributes,
+            variants.ToImmutable(),
+            new SourceSpan(startPos, closing.Span.End));
+    }
+
+    private EnumVariant ParseEnumVariant()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "enum variant name");
+        var endPos = nameToken.Span.End;
+        var fields = ImmutableArray<RecordField>.Empty;
+
+        if (Check(TokenKind.LeftBrace))
+        {
+            Advance(); // {
+            var builder = ImmutableArray.CreateBuilder<RecordField>();
+            if (!Check(TokenKind.RightBrace))
+            {
+                builder.Add(ParseRecordFieldDecl());
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightBrace))
+                    {
+                        break;
+                    }
+                    builder.Add(ParseRecordFieldDecl());
+                }
+            }
+            var closing = Expect(TokenKind.RightBrace, "enum variant fields");
+            fields = builder.ToImmutable();
+            endPos = closing.Span.End;
+        }
+
+        return new EnumVariant(
+            nameToken.Lexeme,
+            fields,
+            new SourceSpan(nameToken.Span.Start, endPos));
     }
 
     private RecordField ParseRecordFieldDecl()
@@ -559,11 +684,25 @@ public sealed class Parser
                 continue;
             }
 
+            // Record literal on an identifier/path chain (e.g. `Tree.Node { ... }`).
+            // The restricted-context flag disables this in `if` / `while` / `match` heads.
+            if (_allowRecordLiteral
+                && IsIdentifierChain(expr)
+                && LooksLikeRecordLiteralHead())
+            {
+                expr = ParseRecordLiteralTail(expr);
+                continue;
+            }
+
             break;
         }
 
         return expr;
     }
+
+    private static bool IsIdentifierChain(Expression expr) =>
+        expr is IdentifierExpr
+        || (expr is FieldAccessExpr fa && IsIdentifierChain(fa.Target));
 
     private WithExpr ParseWithTail(Expression target)
     {
@@ -719,10 +858,6 @@ public sealed class Parser
         {
             case TokenKind.Identifier:
                 Advance();
-                if (_allowRecordLiteral && LooksLikeRecordLiteralHead())
-                {
-                    return ParseRecordLiteralTail(token);
-                }
                 return new IdentifierExpr(token.Lexeme, token.Span);
 
             case TokenKind.StringLiteral:
@@ -760,7 +895,10 @@ public sealed class Parser
             case TokenKind.KeywordWhile:
                 return ParseWhileExpr();
 
-            // TODO: match, trace, list literals.
+            case TokenKind.KeywordMatch:
+                return ParseMatchExpr();
+
+            // TODO: trace, list literals.
         }
 
         ReportError("OV0155", $"expected expression, got {token.Kind}", token.Span);
@@ -854,7 +992,21 @@ public sealed class Parser
         BlockExpr? elseBlock = null;
         if (Match(TokenKind.KeywordElse))
         {
-            elseBlock = ParseBlock();
+            if (Check(TokenKind.KeywordIf))
+            {
+                // `else if` — parse a nested if and wrap it in a synthetic block so the
+                // AST's Else slot stays a BlockExpr. No runtime cost; the wrap is just a
+                // shape adapter.
+                var nestedIf = ParseIfExpr();
+                elseBlock = new BlockExpr(
+                    ImmutableArray<Statement>.Empty,
+                    nestedIf,
+                    nestedIf.Span);
+            }
+            else
+            {
+                elseBlock = ParseBlock();
+            }
         }
 
         var endPos = elseBlock?.Span.End ?? thenBlock.Span.End;
@@ -868,6 +1020,190 @@ public sealed class Parser
         var condition = ParseExpressionRestricted();
         var body = ParseBlock();
         return new WhileExpr(condition, body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    // ------------------------------------------------------------- match
+
+    private MatchExpr ParseMatchExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordMatch, "match expression");
+        var scrutinee = ParseExpressionRestricted();
+        Expect(TokenKind.LeftBrace, "match body");
+
+        var arms = ImmutableArray.CreateBuilder<MatchArm>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            arms.Add(ParseMatchArm());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                arms.Add(ParseMatchArm());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, "match body");
+        return new MatchExpr(
+            scrutinee,
+            arms.ToImmutable(),
+            new SourceSpan(startPos, closing.Span.End));
+    }
+
+    private MatchArm ParseMatchArm()
+    {
+        var pattern = ParsePattern();
+        Expect(TokenKind.FatArrow, "match arm");
+        var body = ParseExpression();
+        return new MatchArm(pattern, body, new SourceSpan(pattern.Span.Start, body.Span.End));
+    }
+
+    // ----------------------------------------------------------- patterns
+
+    private Pattern ParsePattern()
+    {
+        if (Check(TokenKind.Identifier) && Current.Lexeme == "_")
+        {
+            var tok = Advance();
+            return new WildcardPattern(tok.Span);
+        }
+
+        if (Check(TokenKind.LeftParen))
+        {
+            return ParseParenOrTuplePattern();
+        }
+
+        if (Check(TokenKind.Identifier))
+        {
+            return ParseIdentifierOrConstructorPattern();
+        }
+
+        ReportError("OV0158", $"expected pattern, got {Current.Kind}", Current.Span);
+        var skipped = Advance();
+        return new WildcardPattern(skipped.Span);
+    }
+
+    private Pattern ParseParenOrTuplePattern()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.LeftParen, "pattern");
+
+        if (Check(TokenKind.RightParen))
+        {
+            // Unit pattern not supported yet; match the unit value via a different idiom.
+            var closing = Advance();
+            ReportError("OV0159", "unit pattern `()` is not yet supported", new SourceSpan(startPos, closing.Span.End));
+            return new WildcardPattern(new SourceSpan(startPos, closing.Span.End));
+        }
+
+        var first = ParsePattern();
+        if (!Match(TokenKind.Comma))
+        {
+            var close = Expect(TokenKind.RightParen, "pattern");
+            return first with { Span = new SourceSpan(startPos, close.Span.End) };
+        }
+
+        var elements = ImmutableArray.CreateBuilder<Pattern>();
+        elements.Add(first);
+        if (!Check(TokenKind.RightParen))
+        {
+            elements.Add(ParsePattern());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightParen))
+                {
+                    break;
+                }
+                elements.Add(ParsePattern());
+            }
+        }
+        var closeTup = Expect(TokenKind.RightParen, "tuple pattern");
+        return new TuplePattern(
+            elements.ToImmutable(),
+            new SourceSpan(startPos, closeTup.Span.End));
+    }
+
+    private Pattern ParseIdentifierOrConstructorPattern()
+    {
+        var firstToken = Advance();
+        var startPos = firstToken.Span.Start;
+        var endPos = firstToken.Span.End;
+        var pathBuilder = ImmutableArray.CreateBuilder<string>();
+        pathBuilder.Add(firstToken.Lexeme);
+
+        while (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
+        {
+            Advance(); // .
+            var next = Advance();
+            pathBuilder.Add(next.Lexeme);
+            endPos = next.Span.End;
+        }
+
+        if (Check(TokenKind.LeftParen))
+        {
+            Advance();
+            var args = ImmutableArray.CreateBuilder<Pattern>();
+            if (!Check(TokenKind.RightParen))
+            {
+                args.Add(ParsePattern());
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightParen))
+                    {
+                        break;
+                    }
+                    args.Add(ParsePattern());
+                }
+            }
+            var closeParen = Expect(TokenKind.RightParen, "constructor pattern arguments");
+            return new ConstructorPattern(
+                pathBuilder.ToImmutable(),
+                args.ToImmutable(),
+                new SourceSpan(startPos, closeParen.Span.End));
+        }
+
+        if (Check(TokenKind.LeftBrace))
+        {
+            Advance();
+            var fields = ImmutableArray.CreateBuilder<FieldPattern>();
+            if (!Check(TokenKind.RightBrace))
+            {
+                fields.Add(ParseFieldPattern());
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightBrace))
+                    {
+                        break;
+                    }
+                    fields.Add(ParseFieldPattern());
+                }
+            }
+            var closeBrace = Expect(TokenKind.RightBrace, "record pattern");
+            return new RecordPattern(
+                pathBuilder.ToImmutable(),
+                fields.ToImmutable(),
+                new SourceSpan(startPos, closeBrace.Span.End));
+        }
+
+        var path = pathBuilder.ToImmutable();
+        if (path.Length == 1)
+        {
+            return new IdentifierPattern(path[0], new SourceSpan(startPos, endPos));
+        }
+        return new PathPattern(path, new SourceSpan(startPos, endPos));
+    }
+
+    private FieldPattern ParseFieldPattern()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "field pattern name");
+        Expect(TokenKind.Equals, "field pattern");
+        var sub = ParsePattern();
+        return new FieldPattern(
+            nameToken.Lexeme,
+            sub,
+            new SourceSpan(nameToken.Span.Start, sub.Span.End));
     }
 
     /// <summary>
@@ -890,7 +1226,7 @@ public sealed class Parser
         return after == TokenKind.Identifier && Peek(2).Kind == TokenKind.Equals;
     }
 
-    private RecordLiteralExpr ParseRecordLiteralTail(Token typeNameToken)
+    private RecordLiteralExpr ParseRecordLiteralTail(Expression typeTarget)
     {
         Expect(TokenKind.LeftBrace, "record literal");
 
@@ -910,9 +1246,9 @@ public sealed class Parser
 
         var closing = Expect(TokenKind.RightBrace, "record literal");
         return new RecordLiteralExpr(
-            typeNameToken.Lexeme,
+            typeTarget,
             fields.ToImmutable(),
-            new SourceSpan(typeNameToken.Span.Start, closing.Span.End));
+            new SourceSpan(typeTarget.Span.Start, closing.Span.End));
     }
 
     private FieldInit ParseFieldInit()
@@ -949,6 +1285,7 @@ public sealed class Parser
     {
         var startPos = Current.Span.Start;
         Expect(TokenKind.LeftParen, "expression");
+
         if (Check(TokenKind.RightParen))
         {
             var closing = Advance();
@@ -959,17 +1296,41 @@ public sealed class Parser
         // regardless of the enclosing restricted context.
         var saved = _allowRecordLiteral;
         _allowRecordLiteral = true;
-        Expression inner;
         try
         {
-            inner = ParseExpression();
+            var first = ParseExpression();
+
+            // Parenthesized single expression.
+            if (!Match(TokenKind.Comma))
+            {
+                var close = Expect(TokenKind.RightParen, "expression");
+                return first with { Span = new SourceSpan(startPos, close.Span.End) };
+            }
+
+            // Tuple expression: two or more elements. Trailing comma allowed.
+            var elements = ImmutableArray.CreateBuilder<Expression>();
+            elements.Add(first);
+            if (!Check(TokenKind.RightParen))
+            {
+                elements.Add(ParseExpression());
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightParen))
+                    {
+                        break;
+                    }
+                    elements.Add(ParseExpression());
+                }
+            }
+            var tupleClose = Expect(TokenKind.RightParen, "tuple expression");
+            return new TupleExpr(
+                elements.ToImmutable(),
+                new SourceSpan(startPos, tupleClose.Span.End));
         }
         finally
         {
             _allowRecordLiteral = saved;
         }
-        var close = Expect(TokenKind.RightParen, "expression");
-        return inner with { Span = new SourceSpan(startPos, close.Span.End) };
     }
 
     // ---------------------------------------------------------- primitives

@@ -42,7 +42,7 @@ Identifier(TransitionError) @ 24:6..24:21
 LeftBrace({) @ 24:22..24:23
 Identifier(InvalidTransition) @ 25:5..25:22
 LeftBrace({) @ 25:23..25:24
-KeywordFrom(from) @ 25:25..25:29
+Identifier(from) @ 25:25..25:29
 Colon(:) @ 25:29..25:30
 Identifier(ConnectionState) @ 25:31..25:46
 Comma(,) @ 25:46..25:47
@@ -198,7 +198,7 @@ Identifier(Closed) @ 39:83..39:89
 RightParen()) @ 39:89..39:90
 Comma(,) @ 39:90..39:91
 LeftParen(() @ 40:9..40:10
-KeywordFrom(from) @ 40:10..40:14
+Identifier(from) @ 40:10..40:14
 Comma(,) @ 40:14..40:15
 Identifier(event) @ 40:16..40:21
 RightParen()) @ 40:21..40:22
@@ -209,9 +209,9 @@ Identifier(TransitionError) @ 40:68..40:83
 Dot(.) @ 40:83..40:84
 Identifier(InvalidTransition) @ 40:84..40:101
 LeftBrace({) @ 40:102..40:103
-KeywordFrom(from) @ 40:104..40:108
+Identifier(from) @ 40:104..40:108
 Equals(=) @ 40:109..40:110
-KeywordFrom(from) @ 40:111..40:115
+Identifier(from) @ 40:111..40:115
 Comma(,) @ 40:115..40:116
 Identifier(event) @ 40:117..40:122
 Equals(=) @ 40:123..40:124
