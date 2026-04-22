@@ -60,7 +60,8 @@ An identifier is any maximal run matching `identifier` that is not a reserved wo
 ```
 else     enum     extern   false    fn       for      if       let
 loop     match    module   mut      parallel pub      race     record
-return   trace    true     unsafe   use      where    while    with
+return   trace    true     type     unsafe   use      where    while
+with
 ```
 
 > **Effect names are not keywords.** `io`, `async`, `inference` — the core effects declared in DESIGN.md §7 — lex as ordinary identifiers. The effect-row parser treats them no differently from effect-row type variables like `E`. This keeps them available as local variable names in ordinary code, and removes a special case from the lexer.

@@ -109,6 +109,16 @@ public sealed class Parser
             }
             return ParseExternDecl();
         }
+        if (Check(TokenKind.KeywordType))
+        {
+            if (attributes.Length > 0)
+            {
+                ReportError("OV0157",
+                    "attributes on `type` aliases are not supported in v1",
+                    attributes[0].Span);
+            }
+            return ParseTypeAliasDecl();
+        }
 
         if (attributes.Length > 0)
         {
@@ -343,6 +353,11 @@ public sealed class Parser
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordFn, "function declaration");
         var nameToken = Expect(TokenKind.Identifier, "function name");
+
+        var typeParams = Check(TokenKind.Less)
+            ? ParseTypeParameterList()
+            : ImmutableArray<string>.Empty;
+
         Expect(TokenKind.LeftParen, "function parameter list");
 
         var parameters = ParseParameterList();
@@ -364,11 +379,61 @@ public sealed class Parser
         var body = ParseBlock();
         return new FunctionDecl(
             nameToken.Lexeme,
+            typeParams,
             parameters,
             effects,
             returnType,
             body,
             new SourceSpan(startPos, body.Span.End));
+    }
+
+    private TypeAliasDecl ParseTypeAliasDecl()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordType, "type alias");
+        var nameToken = Expect(TokenKind.Identifier, "type alias name");
+
+        var typeParams = Check(TokenKind.Less)
+            ? ParseTypeParameterList()
+            : ImmutableArray<string>.Empty;
+
+        Expect(TokenKind.Equals, "type alias initializer");
+        var target = ParseTypeExpr();
+
+        Expression? predicate = null;
+        var endPos = target.Span.End;
+        if (Match(TokenKind.KeywordWhere))
+        {
+            predicate = ParseExpression();
+            endPos = predicate.Span.End;
+        }
+
+        return new TypeAliasDecl(
+            nameToken.Lexeme,
+            typeParams,
+            target,
+            predicate,
+            new SourceSpan(startPos, endPos));
+    }
+
+    private ImmutableArray<string> ParseTypeParameterList()
+    {
+        Expect(TokenKind.Less, "type parameters");
+        var builder = ImmutableArray.CreateBuilder<string>();
+        if (!Check(TokenKind.Greater))
+        {
+            builder.Add(Expect(TokenKind.Identifier, "type parameter name").Lexeme);
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.Greater))
+                {
+                    break;
+                }
+                builder.Add(Expect(TokenKind.Identifier, "type parameter name").Lexeme);
+            }
+        }
+        Expect(TokenKind.Greater, "type parameters");
+        return builder.ToImmutable();
     }
 
     private ImmutableArray<Parameter> ParseParameterList()
@@ -454,10 +519,51 @@ public sealed class Parser
             return ParseNamedType();
         }
 
+        if (Check(TokenKind.KeywordFn))
+        {
+            return ParseFunctionType();
+        }
+
         var spanAtError = Current.Span;
         ReportError("OV0152", $"expected type, got {Current.Kind}", spanAtError);
         // Synthesize a unit type so callers have a non-null TypeExpr.
         return new UnitType(spanAtError);
+    }
+
+    private FunctionType ParseFunctionType()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordFn, "function type");
+        Expect(TokenKind.LeftParen, "function type parameters");
+
+        var parameters = ImmutableArray.CreateBuilder<TypeExpr>();
+        if (!Check(TokenKind.RightParen))
+        {
+            parameters.Add(ParseTypeExpr());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightParen))
+                {
+                    break;
+                }
+                parameters.Add(ParseTypeExpr());
+            }
+        }
+        Expect(TokenKind.RightParen, "function type parameters");
+
+        EffectRow? effects = null;
+        if (Check(TokenKind.Bang))
+        {
+            effects = ParseEffectRow();
+        }
+
+        Expect(TokenKind.Arrow, "function type return");
+        var returnType = ParseTypeExpr();
+        return new FunctionType(
+            parameters.ToImmutable(),
+            effects,
+            returnType,
+            new SourceSpan(startPos, returnType.Span.End));
     }
 
     private TypeExpr ParseUnitOrTupleType()

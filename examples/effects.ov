@@ -20,12 +20,12 @@ fn apply_twice<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T {
 
 // Pure call site: E is solved as empty, so this function is pure.
 fn quadruple(n: Int) -> Int {
-    apply_twice(double, n)
+    apply_twice(f = double, x = n)
 }
 
 // I/O call site: E is solved as {io}, so this function must declare !{io}.
 // The effect propagates through the higher-order call transparently —
 // signatures stay explicit; call sites need no effect annotations.
 fn noisy_quadruple(n: Int) !{io} -> Int {
-    apply_twice(log_and_double, n)
+    apply_twice(f = log_and_double, x = n)
 }

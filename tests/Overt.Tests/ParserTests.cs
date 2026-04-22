@@ -1043,10 +1043,82 @@ public class ParserTests
     [InlineData("inference.ov")]
     [InlineData("ffi.ov")]
     [InlineData("trace.ov")]
+    [InlineData("effects.ov")]
+    [InlineData("refinement.ov")]
     public void Parse_Example_HasNoDiagnostics(string file)
     {
         var result = ParseFile(file);
         Assert.Empty(result.Diagnostics);
         Assert.NotEmpty(result.Module.Declarations);
+    }
+
+    // --------------------------------------------------- generics / fn types
+
+    [Fact]
+    public void Parse_FunctionDecl_WithTypeParameters()
+    {
+        var lex = Lexer.Lex("module m\nfn map<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> { }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = Assert.IsType<FunctionDecl>(result.Module.Declarations[0]);
+        Assert.Equal(new[] { "T", "U" }, fn.TypeParameters.ToArray());
+    }
+
+    [Fact]
+    public void Parse_FunctionType_WithEffectRow()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn apply<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T { f(x) }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var fType = Assert.IsType<FunctionType>(fn.Parameters[0].Type);
+        Assert.Single(fType.Parameters);
+        Assert.NotNull(fType.Effects);
+        Assert.Equal(new[] { "E" }, fType.Effects!.Effects.ToArray());
+    }
+
+    // ---------------------------------------------------------- type alias
+
+    [Fact]
+    public void Parse_TypeAlias_Simple()
+    {
+        var lex = Lexer.Lex("module m\ntype UserId = Int");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var t = Assert.IsType<TypeAliasDecl>(result.Module.Declarations[0]);
+        Assert.Equal("UserId", t.Name);
+        Assert.Equal("Int", ((NamedType)t.Target).Name);
+        Assert.Null(t.Predicate);
+    }
+
+    [Fact]
+    public void Parse_TypeAlias_WithRefinement()
+    {
+        var lex = Lexer.Lex(
+            "module m\ntype Age = Int where 0 <= self && self <= 150");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var t = Assert.IsType<TypeAliasDecl>(result.Module.Declarations[0]);
+        Assert.Equal("Age", t.Name);
+        Assert.NotNull(t.Predicate);
+        var and = Assert.IsType<BinaryExpr>(t.Predicate);
+        Assert.Equal(BinaryOp.LogicalAnd, and.Op);
+    }
+
+    [Fact]
+    public void Parse_TypeAlias_WithGenericParams()
+    {
+        var lex = Lexer.Lex(
+            "module m\ntype NonEmpty<T> = List<T> where size(self) > 0");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var t = Assert.IsType<TypeAliasDecl>(result.Module.Declarations[0]);
+        Assert.Equal(new[] { "T" }, t.TypeParameters.ToArray());
     }
 }

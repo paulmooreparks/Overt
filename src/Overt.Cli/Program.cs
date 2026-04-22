@@ -177,7 +177,10 @@ static class AstPrinter
                 break;
 
             case FunctionDecl f:
-                w.Line($"Function {f.Name}");
+                var tparams = f.TypeParameters.Length > 0
+                    ? $"<{string.Join(", ", f.TypeParameters)}>"
+                    : "";
+                w.Line($"Function {f.Name}{tparams}");
                 using (w.Indent())
                 {
                     if (f.Parameters.Length > 0)
@@ -201,6 +204,41 @@ static class AstPrinter
                     using (w.Indent())
                     {
                         Visit(f.Body, w);
+                    }
+                }
+                break;
+
+            case FunctionType ft:
+                w.Line("FnType");
+                using (w.Indent())
+                {
+                    if (ft.Parameters.Length > 0)
+                    {
+                        w.Line("Parameters");
+                        using (w.Indent())
+                        {
+                            foreach (var p in ft.Parameters) Visit(p, w);
+                        }
+                    }
+                    if (ft.Effects is { } fteff) Visit(fteff, w);
+                    w.Line("Return");
+                    using (w.Indent()) Visit(ft.ReturnType, w);
+                }
+                break;
+
+            case TypeAliasDecl tad:
+                var tadParams = tad.TypeParameters.Length > 0
+                    ? $"<{string.Join(", ", tad.TypeParameters)}>"
+                    : "";
+                w.Line($"TypeAlias {tad.Name}{tadParams}");
+                using (w.Indent())
+                {
+                    w.Line("Target");
+                    using (w.Indent()) Visit(tad.Target, w);
+                    if (tad.Predicate is { } pred)
+                    {
+                        w.Line("Where");
+                        using (w.Indent()) Visit(pred, w);
                     }
                 }
                 break;

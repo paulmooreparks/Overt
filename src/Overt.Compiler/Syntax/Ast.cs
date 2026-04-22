@@ -22,10 +22,24 @@ public abstract record Declaration(SourceSpan Span) : SyntaxNode(Span);
 
 public sealed record FunctionDecl(
     string Name,
+    ImmutableArray<string> TypeParameters,
     ImmutableArray<Parameter> Parameters,
     EffectRow? Effects,
     TypeExpr? ReturnType,
     BlockExpr Body,
+    SourceSpan Span) : Declaration(Span);
+
+/// <summary>
+/// A type alias with an optional refinement predicate:
+/// <code>type Age = Int where 0 &lt;= self &amp;&amp; self &lt;= 150</code>
+/// <c>Predicate</c> is null for plain aliases. Generic parameters are collected in
+/// <see cref="TypeParameters"/> (DESIGN.md §8 — refinement types).
+/// </summary>
+public sealed record TypeAliasDecl(
+    string Name,
+    ImmutableArray<string> TypeParameters,
+    TypeExpr Target,
+    Expression? Predicate,
     SourceSpan Span) : Declaration(Span);
 
 /// <summary>
@@ -107,6 +121,16 @@ public sealed record NamedType(
 
 /// <summary>The unit type, spelled <c>()</c>.</summary>
 public sealed record UnitType(SourceSpan Span) : TypeExpr(Span);
+
+/// <summary>
+/// A function type — used as a parameter type for higher-order functions:
+/// <c>fn(T) !{E} -&gt; U</c>. <see cref="Effects"/> is null for an empty effect row.
+/// </summary>
+public sealed record FunctionType(
+    ImmutableArray<TypeExpr> Parameters,
+    EffectRow? Effects,
+    TypeExpr ReturnType,
+    SourceSpan Span) : TypeExpr(Span);
 
 // ---------- Statements ----------
 
