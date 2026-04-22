@@ -125,7 +125,7 @@ public sealed class CSharpEmitter
             if (i > 0) _w.Write(", ");
             EmitType(rec.Fields[i].Type);
             _w.Write(" ");
-            _w.Write(PascalCase(rec.Fields[i].Name));
+            _w.Write(EscapeId(rec.Fields[i].Name));
         }
         _w.WriteLine(");");
     }
@@ -147,7 +147,7 @@ public sealed class CSharpEmitter
                     if (i > 0) _w.Write(", ");
                     EmitType(variant.Fields[i].Type);
                     _w.Write(" ");
-                    _w.Write(PascalCase(variant.Fields[i].Name));
+                    _w.Write(EscapeId(variant.Fields[i].Name));
                 }
                 _w.Write(")");
             }
@@ -184,7 +184,7 @@ public sealed class CSharpEmitter
         {
             _w.Write("Unit");
         }
-        _w.Write($" {PascalCase(fn.Name)}");
+        _w.Write($" {EscapeId(fn.Name)}");
         if (fn.TypeParameters.Length > 0)
         {
             _w.Write("<");
@@ -197,7 +197,7 @@ public sealed class CSharpEmitter
             if (i > 0) _w.Write(", ");
             EmitType(fn.Parameters[i].Type);
             _w.Write(" ");
-            _w.Write(fn.Parameters[i].Name);
+            _w.Write(EscapeId(fn.Parameters[i].Name));
         }
         _w.WriteLine(")");
         EmitBlockAsMethodBody(fn.Body, fn.ReturnType);
@@ -218,13 +218,13 @@ public sealed class CSharpEmitter
         {
             _w.Write("Unit");
         }
-        _w.Write($" {PascalCase(x.Name)}(");
+        _w.Write($" {EscapeId(x.Name)}(");
         for (var i = 0; i < x.Parameters.Length; i++)
         {
             if (i > 0) _w.Write(", ");
             EmitType(x.Parameters[i].Type);
             _w.Write(" ");
-            _w.Write(x.Parameters[i].Name);
+            _w.Write(EscapeId(x.Parameters[i].Name));
         }
         _w.WriteLine(")");
         _w.WriteLine("{");
@@ -339,14 +339,64 @@ public sealed class CSharpEmitter
                 break;
 
             case AssignmentStmt asn:
-                _w.Write(asn.Name);
+                _w.Write(EscapeId(asn.Name));
                 _w.Write(" = ");
                 EmitExpression(asn.Value);
                 _w.WriteLine(";");
                 break;
 
             case ExpressionStmt es:
-                EmitExpression(es.Expression);
+                EmitExpressionAsStatement(es.Expression);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Emit an expression as a C# statement. Control-flow constructs that look natural
+    /// as expressions in Overt (<c>if</c>, <c>while</c>, <c>match</c>, <c>unsafe</c>,
+    /// <c>trace</c>, and blocks) map directly to C#'s statement-level forms when the
+    /// value is discarded. Everything else emits as <c>expr;</c>.
+    /// </summary>
+    private void EmitExpressionAsStatement(Expression expr)
+    {
+        switch (expr)
+        {
+            case IfExpr ie:
+                _w.Write("if (");
+                EmitExpression(ie.Condition);
+                _w.WriteLine(")");
+                EmitBlockAsStatement(ie.Then);
+                if (ie.Else is { } elseBlock)
+                {
+                    _w.WriteLine("else");
+                    EmitBlockAsStatement(elseBlock);
+                }
+                break;
+
+            case WhileExpr we:
+                _w.Write("while (");
+                EmitExpression(we.Condition);
+                _w.WriteLine(")");
+                EmitBlockAsStatement(we.Body);
+                break;
+
+            case BlockExpr b:
+                EmitBlockAsStatement(b);
+                break;
+
+            case UnsafeExpr ux:
+                EmitBlockAsStatement(ux.Body);
+                break;
+
+            case TraceExpr tx:
+                EmitBlockAsStatement(tx.Body);
+                break;
+
+            // Everything else: just write the expression plus a trailing `;`. C# will
+            // reject anything that isn't a valid statement-expression (calls, assignments,
+            // increments, etc.) — that's the type checker's job later.
+            default:
+                EmitExpression(expr);
                 _w.WriteLine(";");
                 break;
         }
@@ -361,7 +411,7 @@ public sealed class CSharpEmitter
         switch (pattern)
         {
             case IdentifierPattern ip:
-                _w.Write(ip.Name);
+                _w.Write(EscapeId(ip.Name));
                 break;
             case TuplePattern tp:
                 _w.Write("(");
@@ -408,13 +458,30 @@ public sealed class CSharpEmitter
                 break;
 
             case IdentifierExpr id:
-                _w.Write(id.Name);
+                _w.Write(EscapeId(id.Name));
                 break;
 
             case FieldAccessExpr fa:
-                EmitExpression(fa.Target);
-                _w.Write(".");
-                _w.Write(PascalCase(fa.FieldName));
+                // Without type info, we can't tell an enum variant reference
+                // (<c>ConnectionState.Closed</c>) from an ordinary field access
+                // (<c>user.name</c>). Apply a heuristic: when the target is a bare
+                // identifier whose name is PascalCase and the accessed name is also
+                // PascalCase, treat it as an enum-variant reference and emit the
+                // flat <c>Name_Variant</c> form used by the enum lowering, as a
+                // constructor call with no args. Everything else is a member access.
+                if (IsLikelyEnumVariantRef(fa))
+                {
+                    // Widening cast to the enum base type: target-typing `Ok(variant)`
+                    // needs T to unify with the base, not the specific variant's type.
+                    var baseName = ((IdentifierExpr)fa.Target).Name;
+                    _w.Write($"(({baseName})new {baseName}_{fa.FieldName}())");
+                }
+                else
+                {
+                    EmitExpression(fa.Target);
+                    _w.Write(".");
+                    _w.Write(EscapeId(fa.FieldName));
+                }
                 break;
 
             case CallExpr c:
@@ -478,7 +545,7 @@ public sealed class CSharpEmitter
                 for (var i = 0; i < w.Updates.Length; i++)
                 {
                     if (i > 0) _w.Write(", ");
-                    _w.Write(PascalCase(w.Updates[i].Name));
+                    _w.Write(EscapeId(w.Updates[i].Name));
                     _w.Write(" = ");
                     EmitExpression(w.Updates[i].Value);
                 }
@@ -523,7 +590,7 @@ public sealed class CSharpEmitter
             // Named-argument calls pass through to C# named-argument syntax.
             if (c.Arguments[i].Name is { } name)
             {
-                _w.Write(name);
+                _w.Write(EscapeId(name));
                 _w.Write(": ");
             }
             EmitExpression(c.Arguments[i].Value);
@@ -680,13 +747,40 @@ public sealed class CSharpEmitter
         switch (p)
         {
             case WildcardPattern: _w.Write("_"); break;
-            case IdentifierPattern id: _w.Write($"var {id.Name}"); break;
-            case PathPattern pp: _w.Write($"/* path {string.Join(".", pp.Path)} */ _"); break;
+            case IdentifierPattern id: _w.Write($"var {EscapeId(id.Name)}"); break;
+            case PathPattern pp:
+                // `A.B` with no args — emit the sealed-record type name (A_B) for
+                // pattern-matching against the variant.
+                _w.Write(JoinPath(pp.Path));
+                _w.Write(" _");
+                break;
             case ConstructorPattern cp:
-                _w.Write($"/* ctor {string.Join(".", cp.Path)} */ _");
+                // `Ok(x)` or `A.B(x, y)` — emit as a positional record pattern. Unqualified
+                // variant names (single-segment path) are left to resolve via type context
+                // (e.g. `Ok` / `Err` / `Some` / `None` from the runtime prelude).
+                _w.Write(JoinPath(cp.Path));
+                if (cp.Arguments.Length > 0)
+                {
+                    _w.Write("(");
+                    for (var i = 0; i < cp.Arguments.Length; i++)
+                    {
+                        if (i > 0) _w.Write(", ");
+                        EmitPatternForMatch(cp.Arguments[i]);
+                    }
+                    _w.Write(")");
+                }
                 break;
             case RecordPattern rp:
-                _w.Write($"/* record {string.Join(".", rp.Path)} */ _");
+                _w.Write(JoinPath(rp.Path));
+                _w.Write(" { ");
+                for (var i = 0; i < rp.Fields.Length; i++)
+                {
+                    if (i > 0) _w.Write(", ");
+                    _w.Write(EscapeId(rp.Fields[i].Name));
+                    _w.Write(": ");
+                    EmitPatternForMatch(rp.Fields[i].Subpattern);
+                }
+                _w.Write(" }");
                 break;
             case TuplePattern tp:
                 _w.Write("(");
@@ -699,6 +793,15 @@ public sealed class CSharpEmitter
                 break;
         }
     }
+
+    /// <summary>
+    /// Join a dotted path for an enum variant reference. Multi-segment paths collapse
+    /// to <c>First_Second</c> (the emitted sealed-record name); single-segment paths
+    /// pass through so unqualified variants like <c>Ok</c> / <c>Some</c> resolve against
+    /// whatever type context (Result / Option) is in scope.
+    /// </summary>
+    private static string JoinPath(System.Collections.Immutable.ImmutableArray<string> path)
+        => path.Length == 1 ? path[0] : string.Join("_", path);
 
     private void EmitBlockAsStatement(BlockExpr block)
     {
@@ -747,17 +850,38 @@ public sealed class CSharpEmitter
 
     private void EmitRecordLiteral(RecordLiteralExpr rl)
     {
+        // A dotted-path record literal (e.g. `Tree.Node { ... }`) refers to an enum
+        // variant, emitted as a flat sealed-record type named `Enum_Variant`. We cast
+        // to the enum base type so `Ok(variant)` / `Err(variant)` target-type correctly
+        // at the call site — C# will otherwise infer the most-specific type and fail to
+        // find an implicit conversion for the marker.
+        if (rl.TypeTarget is FieldAccessExpr fa
+            && fa.Target is IdentifierExpr enumName
+            && IsPascalCase(enumName.Name)
+            && IsPascalCase(fa.FieldName))
+        {
+            _w.Write($"(({enumName.Name})new {enumName.Name}_{fa.FieldName}(");
+            EmitFieldInits(rl.Fields);
+            _w.Write("))");
+            return;
+        }
+
         _w.Write("new ");
         EmitExpression(rl.TypeTarget);
         _w.Write("(");
-        for (var i = 0; i < rl.Fields.Length; i++)
+        EmitFieldInits(rl.Fields);
+        _w.Write(")");
+    }
+
+    private void EmitFieldInits(ImmutableArray<FieldInit> fields)
+    {
+        for (var i = 0; i < fields.Length; i++)
         {
             if (i > 0) _w.Write(", ");
-            _w.Write(PascalCase(rl.Fields[i].Name));
+            _w.Write(EscapeId(fields[i].Name));
             _w.Write(": ");
-            EmitExpression(rl.Fields[i].Value);
+            EmitExpression(fields[i].Value);
         }
-        _w.Write(")");
     }
 
     // ------------------------------------------------------------ helpers
@@ -784,4 +908,40 @@ public sealed class CSharpEmitter
         return string.Concat(parts.Select(p =>
             p.Length == 0 ? p : char.ToUpperInvariant(p[0]) + p[1..]));
     }
+
+    private static bool IsLikelyEnumVariantRef(FieldAccessExpr fa)
+        => fa.Target is IdentifierExpr id
+           && IsPascalCase(id.Name)
+           && IsPascalCase(fa.FieldName);
+
+    private static bool IsPascalCase(string s)
+        => s.Length > 0 && char.IsUpper(s[0]) && !s.Contains('_');
+
+    /// <summary>
+    /// C# reserved and contextual keywords. Overt identifiers that happen to spell these
+    /// must be prefixed with <c>@</c> in emitted code (e.g. <c>event</c> → <c>@event</c>).
+    /// </summary>
+    private static readonly HashSet<string> CSharpKeywords = new(StringComparer.Ordinal)
+    {
+        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char",
+        "checked", "class", "const", "continue", "decimal", "default", "delegate",
+        "do", "double", "else", "enum", "event", "explicit", "extern", "false",
+        "finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit",
+        "in", "int", "interface", "internal", "is", "lock", "long", "namespace",
+        "new", "null", "object", "operator", "out", "override", "params", "private",
+        "protected", "public", "readonly", "ref", "return", "sbyte", "sealed",
+        "short", "sizeof", "stackalloc", "static", "string", "struct", "switch",
+        "this", "throw", "true", "try", "typeof", "uint", "ulong", "unchecked",
+        "unsafe", "ushort", "using", "virtual", "void", "volatile", "while",
+    };
+
+    /// <summary>
+    /// Escape an Overt identifier for use in emitted C#. Adds the <c>@</c> prefix when
+    /// the name would otherwise collide with a C# keyword. Called on every identifier
+    /// slot that the emitter writes — declarations, references, parameters, fields.
+    /// Variant paths like <c>Tree.Node</c> stay raw because they match the emitted
+    /// variant record names directly.
+    /// </summary>
+    private static string EscapeId(string name) =>
+        CSharpKeywords.Contains(name) ? "@" + name : name;
 }

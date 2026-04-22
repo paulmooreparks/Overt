@@ -14,7 +14,7 @@ namespace Overt.Generated.Hello;
 public static class Module
 {
     // !{io}
-    public static Result<Unit, IoError> Main()
+    public static Result<Unit, IoError> main()
     {
         (println("Hello, LLM!")).Unwrap();
         return Ok(Unit.Value);

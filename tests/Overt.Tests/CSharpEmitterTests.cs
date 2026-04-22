@@ -23,7 +23,7 @@ public class CSharpEmitterTests
 
         Assert.Contains("namespace Overt.Generated.Hello;", csharp);
         Assert.Contains("public static class Module", csharp);
-        Assert.Contains("public static Result<Unit, IoError> Main()", csharp);
+        Assert.Contains("public static Result<Unit, IoError> main()", csharp);
         Assert.Contains(".Unwrap()", csharp); // ? propagation
         Assert.Contains("Ok(Unit.Value)", csharp);
     }
@@ -32,7 +32,7 @@ public class CSharpEmitterTests
     public void Emit_Record_BecomesSealedRecord()
     {
         var csharp = EmitSource("module m\nrecord Point { x: Int, y: Int }");
-        Assert.Contains("public sealed record Point(int X, int Y);", csharp);
+        Assert.Contains("public sealed record Point(int x, int y);", csharp);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public class CSharpEmitterTests
     {
         var csharp = EmitSource(
             "module m\nenum E { NotFound { id: Int }, Timeout }");
-        Assert.Contains("public sealed record E_NotFound(int Id) : E;", csharp);
+        Assert.Contains("public sealed record E_NotFound(int id) : E;", csharp);
         Assert.Contains("public sealed record E_Timeout : E;", csharp);
     }
 
@@ -68,7 +68,7 @@ public class CSharpEmitterTests
         var csharp = EmitSource(
             "module m\nfn f(p: Point) -> Point { p with { x = 1 } }");
         // C# `record with { ... }` syntax passes through directly.
-        Assert.Contains("with { X = 1 }", csharp);
+        Assert.Contains("with { x = 1 }", csharp);
     }
 
     [Fact]

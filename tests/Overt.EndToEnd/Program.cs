@@ -10,7 +10,7 @@ public static class Harness
 {
     public static int Main()
     {
-        var result = Module.Main();
+        var result = Module.main();
         if (result.IsErr)
         {
             Console.Error.WriteLine("harness: transpiled Main returned Err");

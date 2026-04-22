@@ -98,6 +98,43 @@ public sealed record IoError(string Narrative)
     public override string ToString() => $"IoError: {Narrative}";
 }
 
+// ------------------------------------------------------- Collection stubs
+
+/// <summary>Minimal ordered collection placeholder. Real implementation lands with the
+/// stdlib milestone; this shape is just enough to let transpiled code type-check.</summary>
+public sealed record List<T>(System.Collections.Immutable.ImmutableArray<T> Items);
+
+/// <summary>
+/// Non-generic namespace companion to <see cref="List{T}"/>. Overt source calls
+/// module-qualified stdlib functions as <c>List.empty()</c>, <c>List.singleton(x)</c>,
+/// etc; those resolve to members of this class. C# permits a non-generic class and a
+/// generic class/record to share a name.
+/// </summary>
+public static class List
+{
+    public static List<T> empty<T>() => new(System.Collections.Immutable.ImmutableArray<T>.Empty);
+    public static List<T> singleton<T>(T value)
+        => new(System.Collections.Immutable.ImmutableArray.Create(value));
+    public static List<T> concat_three<T>(List<T> first, List<T> middle, List<T> last)
+        => new(first.Items.AddRange(middle.Items).AddRange(last.Items));
+}
+
+public sealed record Map<K, V>(System.Collections.Immutable.ImmutableDictionary<K, V> Items)
+    where K : notnull;
+
+public sealed record Set<T>(System.Collections.Immutable.ImmutableHashSet<T> Items);
+
+/// <summary>FFI-boundary byte-string type, distinct from Overt <c>String</c>.
+/// Placeholder for v1.</summary>
+public sealed record CString(byte[] Bytes)
+{
+    // Lowercase match to Overt source's `CString.from(s)` call style.
+    public static CString from(string s) => new(System.Text.Encoding.UTF8.GetBytes(s));
+}
+
+/// <summary>C-FFI raw pointer placeholder.</summary>
+public readonly record struct Ptr<T>(IntPtr Raw);
+
 // ---------------------------------------------------------------- Prelude
 
 /// <summary>
@@ -141,4 +178,39 @@ public static class Prelude
             return Err(new IoError(ex.Message));
         }
     }
+
+    // ------------------------------- Collection-operation stubs.
+    //
+    // These exist so transpiled code type-checks. Runtime semantics arrive with the
+    // stdlib milestone; until then each stub throws if invoked. The point of having
+    // them now is to close the compile-check loop for every example program — a test
+    // that the C# emitter produces shape-valid output, not that it produces correct
+    // semantics.
+
+    public static int size<T>(List<T> list) => list.Items.Length;
+    public static int length(string s) => s.Length;
+    public static int len<T>(List<T> list) => list.Items.Length;
+
+    public static List<U> map<T, U>(List<T> list, Func<T, U> f)
+        => throw new NotImplementedException("stdlib map not wired up");
+
+    public static List<T> filter<T>(List<T> list, Func<T, bool> predicate)
+        => throw new NotImplementedException("stdlib filter not wired up");
+
+    public static Result<List<U>, E> par_map<T, U, E>(List<T> list, Func<T, Result<U, E>> f)
+        => throw new NotImplementedException("stdlib par_map not wired up");
+
+    public static U fold<T, U>(List<T> list, U seed, Func<U, T, U> step)
+        => throw new NotImplementedException("stdlib fold not wired up");
+
+    // Trace is a stdlib namespace-shaped type so transpiled code can write
+    // `Trace.subscribe(...)` etc.
+    public static class Trace
+    {
+        public static void subscribe(Action<object> consumer)
+            => throw new NotImplementedException("stdlib Trace.subscribe not wired up");
+    }
 }
+
+/// <summary>Marker carried by all Overt trace events (DESIGN.md §14). Placeholder.</summary>
+public abstract record TraceEvent;
