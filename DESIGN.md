@@ -873,6 +873,22 @@ Practices that keep dual-target honest without doubling implementation work:
 4. **Go in CI as conformance only**, not a parallel implementation effort.
 5. **Frontend is ~80% of the work.** Parser, type checker, IR, diagnostics. Backends are comparatively cheap once the IR is right.
 
+### Compiler host language
+
+The Overt compiler itself is written in **C# on .NET 9**. Committed on 2026-04-22.
+
+Rationale:
+
+- **Iteration speed over language-theoretic fit.** The author has 26 years of C# experience. The principle in item 3 above — "friction kills compiler projects; go with familiarity" — applies with extra force to the compiler itself, not only the primary backend.
+- **Backend affinity.** The C# backend depends on the Roslyn APIs. Hosting the compiler in .NET makes the backend an in-process API call rather than an external toolchain invocation.
+- **Modern C# covers the IR shape.** Sealed record hierarchies + `switch` expressions approximate sum types well enough for compiler work. Not as clean as OCaml or Rust, not painful enough to justify a less familiar host language.
+
+Rejected alternatives: Go (weaker sum types hurt compiler internals more than the simpler distribution story helps); Rust / OCaml / F# (better theoretical fit, but add a stack axis with no adoption payoff for a solo early-stage project); self-hosting (cannot be the bootstrap). Self-hosting remains a legitimate long-term goal once the compiler is stable.
+
+### License
+
+Apache License 2.0. Rationale: the conventional choice for a programming language that is meant to be built upon (Rust, Swift, Kotlin, Go, .NET all use it). Patent grant is meaningful as the project attracts contributors or downstream users, and the incremental friction vs. MIT is negligible. See [`LICENSE`](LICENSE).
+
 ---
 
 ## 21. Code style and review conventions
