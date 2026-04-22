@@ -304,6 +304,35 @@ Static types are the single biggest correctness win for an agent-authored langua
 - **Subtyping / variance rules** — invariant generics only; composition over subclass hierarchies.
 - **Reflection** — see §15.
 
+### Defined behavior (no UB in safe Overt)
+
+Every well-typed Overt program has one observable behavior. Undefined behavior — semantics the compiler assumes *don't happen* and silently optimizes around — is the exact antithesis of "overt": it hides a load-bearing precondition at the call site. Safe Overt has no UB.
+
+Most classical UB sources are already eliminated structurally by decisions made elsewhere in this document:
+
+| Classical UB | How Overt prevents it |
+|---|---|
+| Null dereference | Non-nullable by default; nullability is `Option<T>` and must be matched (§3, this section). |
+| Out-of-bounds index | No literal integer indexing (§13). Iteration, branded indices, or proven-index only. |
+| Use-after-free | No manual memory management; backends are garbage-collected. No raw pointers in safe code. |
+| Data races | No shared mutable state (§3, §10). Task groups pass values, not references. |
+| Uninitialized reads | No zero values. Every `let` must initialize. |
+| Strict-aliasing violation | No raw pointers in safe code; no concept applies. |
+
+**Integer overflow traps by default.** A signed or unsigned integer operation that overflows is a program fault at the point of overflow — the canonical form for arithmetic is loud on failure, not silent. Committed on 2026-04-22. Rationale: overflow is almost always a bug; making it silent (wrap) costs more debug-time tokens than trap costs write-time ones (§4 token calculus). Opt-in alternatives live in the stdlib as explicit functions:
+
+- `checked_add(a, b) -> Option<Int>` — returns `None` on overflow.
+- `wrapping_add(a, b) -> Int` — two's-complement wrap; for checksum, hash, and cryptographic kernels where wrap is the intended behavior.
+- `saturating_add(a, b) -> Int` — clamps to the type's bounds. Rarely the right answer; included for completeness.
+
+Corresponding `sub`, `mul`, `div` variants follow the same pattern. The default `+` `-` `*` `/` operators trap — no opt-out via compiler flag. Release builds behave identically to debug builds.
+
+**Float semantics are IEEE 754.** NaN, `+0` / `-0`, and the rounding modes are defined; this is not UB territory. Conversions from float to integer are not implicit (§8) and the explicit conversion function returns `Result` on out-of-range inputs.
+
+**`unsafe` FFI can inherit host-language UB.** C FFI (§17) calls into a language whose semantics admit UB by design; there is no way to prevent that without refusing to speak C. The mitigation is syntactic: `extern "c"` requires an `unsafe` block at every call site, so every UB-adjacent operation is declared at the source. Calls across the `csharp` and `go` FFI boundaries are safer because both runtimes define their behavior, but effects, errors, and non-nullability must still be checked at the boundary.
+
+**The guarantee, stated sharply:** in any function whose body contains no `unsafe` block, there is no source-level construct that produces undefined behavior. The compiler never relies on "that can't happen" for optimization. If a program reaches a state that would be UB in C, Overt either (a) rejects it at compile time, (b) makes it a typed value flow (`Option` / `Result`), or (c) traps at runtime.
+
 ---
 
 ## 9. Product and sum types
