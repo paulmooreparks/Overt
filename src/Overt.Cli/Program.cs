@@ -31,7 +31,7 @@ static class Cli
         usage: overt --emit=<stage> <file.ov>
 
         options:
-          --emit=<stage>   required. one of: tokens, ast, resolved, csharp, go
+          --emit=<stage>   required. one of: tokens, ast, resolved, typed, csharp, go
           --no-color       accepted for tool compatibility (output is never colored)
           --version        print version and exit
           --help, -h       print this message and exit
@@ -102,10 +102,39 @@ static class Cli
             "tokens" => EmitTokens(source, inputFile),
             "ast" => EmitAst(source, inputFile),
             "resolved" => EmitResolved(source, inputFile),
+            "typed" => EmitTyped(source, inputFile),
             "csharp" => EmitCSharp(source, inputFile),
             "go" => NotYetImplemented("go"),
             _ => UnknownStage(emit),
         };
+    }
+
+    static int EmitTyped(string source, string inputFile)
+    {
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+        var resolved = NameResolver.Resolve(parse.Module);
+        var typed = TypeChecker.Check(parse.Module, resolved);
+
+        foreach (var (sym, type) in typed.SymbolTypes
+            .OrderBy(kv => kv.Key.DeclarationSpan.Start.Line)
+            .ThenBy(kv => kv.Key.DeclarationSpan.Start.Column))
+        {
+            Console.Out.WriteLine(
+                $"{sym.DeclarationSpan.Start} decl {sym.Kind} {sym.Name} : {type.Display}");
+        }
+        foreach (var (span, type) in typed.ExpressionTypes
+            .OrderBy(kv => kv.Key.Start.Line)
+            .ThenBy(kv => kv.Key.Start.Column))
+        {
+            Console.Out.WriteLine($"{span.Start} expr : {type.Display}");
+        }
+
+        var combined = lex.Diagnostics
+            .AddRange(parse.Diagnostics)
+            .AddRange(resolved.Diagnostics)
+            .AddRange(typed.Diagnostics);
+        return WriteDiagnostics(inputFile, combined);
     }
 
     static int EmitCSharp(string source, string inputFile)
