@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Overt.Backend.CSharp;
 using Overt.Compiler.Diagnostics;
 using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
@@ -101,10 +102,25 @@ static class Cli
             "tokens" => EmitTokens(source, inputFile),
             "ast" => EmitAst(source, inputFile),
             "resolved" => EmitResolved(source, inputFile),
-            "csharp" => NotYetImplemented("csharp"),
+            "csharp" => EmitCSharp(source, inputFile),
             "go" => NotYetImplemented("go"),
             _ => UnknownStage(emit),
         };
+    }
+
+    static int EmitCSharp(string source, string inputFile)
+    {
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+        var resolved = NameResolver.Resolve(parse.Module);
+
+        var csharp = CSharpEmitter.Emit(parse.Module);
+        Console.Out.Write(csharp);
+
+        var combined = lex.Diagnostics
+            .AddRange(parse.Diagnostics)
+            .AddRange(resolved.Diagnostics);
+        return WriteDiagnostics(inputFile, combined);
     }
 
     static int EmitTokens(string source, string inputFile)
