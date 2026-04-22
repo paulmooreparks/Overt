@@ -6,9 +6,6 @@ public enum TokenKind
     EndOfFile,
     Unknown,
 
-    // Trivia we preserve as tokens (may be skipped by parser)
-    LineComment,
-
     // Identifiers and keywords
     Identifier,
 
@@ -44,7 +41,19 @@ public enum TokenKind
     // Literals
     IntegerLiteral,
     FloatLiteral,
+
+    // String literals — see docs/grammar/lexical.md §6.
+    // Un-interpolated strings emit one StringLiteral token.
+    // Interpolated strings fragment into StringHead [StringMiddle*] StringTail, with
+    // interpolation tokens between them. Bare `$name` form emits Dollar + Identifier;
+    // `${expr}` form emits InterpolationStart + inner tokens + InterpolationEnd.
     StringLiteral,
+    StringHead,
+    StringMiddle,
+    StringTail,
+    Dollar,
+    InterpolationStart,
+    InterpolationEnd,
 
     // Punctuation — single character
     LeftParen,          // (

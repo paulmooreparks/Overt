@@ -36,7 +36,7 @@ fn main() !{io} -> Result<(), IoError> {
         None       => println("HOME is not set"),
     }
 
-    println("length of \"hello\" = ${strlen(\"hello\")}")
+    println("length of \"hello\" = ${strlen("hello")}")
 
     Ok(())
 }

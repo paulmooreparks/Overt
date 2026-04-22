@@ -5,12 +5,9 @@ using Overt.Compiler.Diagnostics;
 namespace Overt.Compiler.Syntax;
 
 /// <summary>
-/// Tokenizes a single Overt source file into a flat token stream.
-///
-/// Not final. The current grammar surface supports enough of §7 to lex the hand-written
-/// examples under <c>examples/</c>. Missing: string interpolation segmentation (strings are
-/// lexed as one <see cref="TokenKind.StringLiteral"/> today; interpolation parsing happens
-/// post-lex), character literals (not in §7), raw strings, numeric type suffixes.
+/// Tokenizes a single Overt source file. Authoritative spec:
+/// <c>docs/grammar/lexical.md</c>. Divergence between this implementation and the spec
+/// is a bug in one or the other; the test suite pins them together.
 /// </summary>
 public sealed class Lexer
 {
@@ -47,8 +44,17 @@ public sealed class Lexer
             ["in"] = TokenKind.KeywordIn,
         }.ToImmutableDictionary();
 
+    // Mode stack. The top frame determines how the next token is scanned.
+    // See docs/grammar/lexical.md §6.2 for the automaton.
+    private abstract class Frame { }
+    private sealed class DefaultFrame : Frame { }
+    private sealed class StringBodyFrame : Frame { public bool SeenSegment; }
+    private sealed class InterpolationFrame : Frame { public int BraceDepth; }
+
     private readonly string _source;
     private readonly List<Diagnostic> _diagnostics = new();
+    private readonly Stack<Frame> _modes = new();
+    private readonly Queue<Token> _pending = new();
 
     private int _position;
     private int _line = 1;
@@ -57,6 +63,7 @@ public sealed class Lexer
     private Lexer(string source)
     {
         _source = source;
+        _modes.Push(new DefaultFrame());
     }
 
     public static LexResult Lex(string source)
@@ -77,7 +84,18 @@ public sealed class Lexer
 
     private Token NextToken()
     {
-        SkipWhitespace();
+        if (_pending.TryDequeue(out var queued))
+        {
+            return queued;
+        }
+
+        var top = _modes.Peek();
+        if (top is StringBodyFrame body)
+        {
+            return LexStringBody(body, openStart: null);
+        }
+
+        SkipTrivia();
 
         if (IsAtEnd)
         {
@@ -87,11 +105,6 @@ public sealed class Lexer
 
         var start = CurrentPosition;
         var ch = Peek();
-
-        if (ch == '/' && Peek(1) == '/')
-        {
-            return LexLineComment(start);
-        }
 
         if (IsIdentifierStart(ch))
         {
@@ -105,20 +118,161 @@ public sealed class Lexer
 
         if (ch == '"')
         {
-            return LexString(start);
+            return OpenStringBody(start);
+        }
+
+        if (top is InterpolationFrame interp)
+        {
+            if (ch == '{')
+            {
+                interp.BraceDepth++;
+                return LexPunctuation(start);
+            }
+            if (ch == '}' && interp.BraceDepth == 0)
+            {
+                Advance();
+                _modes.Pop();
+                return new Token(TokenKind.InterpolationEnd, "}", new SourceSpan(start, CurrentPosition));
+            }
+            if (ch == '}')
+            {
+                interp.BraceDepth--;
+                return LexPunctuation(start);
+            }
         }
 
         return LexPunctuation(start);
     }
 
-    private Token LexLineComment(SourcePosition start)
+    private Token OpenStringBody(SourcePosition start)
     {
-        var builder = new StringBuilder();
-        while (!IsAtEnd && Peek() != '\n')
+        var frame = new StringBodyFrame();
+        _modes.Push(frame);
+        Advance(); // consume opening "
+        return LexStringBody(frame, openStart: start);
+    }
+
+    /// <summary>
+    /// Scans a run of literal text in string-body mode. Emits one of
+    /// <see cref="TokenKind.StringLiteral"/> (whole string, no interpolation),
+    /// <see cref="TokenKind.StringHead"/> (first segment of an interpolated string),
+    /// <see cref="TokenKind.StringMiddle"/> (between two interpolations), or
+    /// <see cref="TokenKind.StringTail"/> (final segment).
+    /// Queues any cross-mode transition tokens (<c>Dollar + Identifier</c> or
+    /// <c>InterpolationStart</c>) into <see cref="_pending"/>.
+    /// </summary>
+    private Token LexStringBody(StringBodyFrame frame, SourcePosition? openStart)
+    {
+        var segmentStart = openStart ?? CurrentPosition;
+        var lexeme = new StringBuilder();
+        if (openStart.HasValue)
         {
-            builder.Append(Advance());
+            lexeme.Append('"');
         }
-        return new Token(TokenKind.LineComment, builder.ToString(), new SourceSpan(start, CurrentPosition));
+
+        while (true)
+        {
+            if (IsAtEnd)
+            {
+                _diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "OV0001",
+                    "unterminated string literal: reached end of file",
+                    new SourceSpan(segmentStart, CurrentPosition)));
+                _modes.Pop();
+                return new Token(
+                    frame.SeenSegment ? TokenKind.StringTail : TokenKind.StringLiteral,
+                    lexeme.ToString(),
+                    new SourceSpan(segmentStart, CurrentPosition));
+            }
+
+            var c = Peek();
+
+            if (c == '\n')
+            {
+                _diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "OV0001",
+                    "unterminated string literal: newline before closing quote",
+                    new SourceSpan(segmentStart, CurrentPosition)));
+                _modes.Pop();
+                return new Token(
+                    frame.SeenSegment ? TokenKind.StringTail : TokenKind.StringLiteral,
+                    lexeme.ToString(),
+                    new SourceSpan(segmentStart, CurrentPosition));
+            }
+
+            if (c == '\\')
+            {
+                lexeme.Append(Advance());
+                if (!IsAtEnd)
+                {
+                    lexeme.Append(Advance());
+                }
+                continue;
+            }
+
+            if (c == '"')
+            {
+                lexeme.Append(Advance());
+                _modes.Pop();
+                var kind = frame.SeenSegment ? TokenKind.StringTail : TokenKind.StringLiteral;
+                return new Token(kind, lexeme.ToString(), new SourceSpan(segmentStart, CurrentPosition));
+            }
+
+            if (c == '$')
+            {
+                var segmentEnd = CurrentPosition;
+                var dollarStart = CurrentPosition;
+                Advance(); // consume $
+
+                if (!IsAtEnd && Peek() == '{')
+                {
+                    Advance(); // consume {
+                    _pending.Enqueue(new Token(
+                        TokenKind.InterpolationStart,
+                        "${",
+                        new SourceSpan(dollarStart, CurrentPosition)));
+                    _modes.Push(new InterpolationFrame());
+                }
+                else if (!IsAtEnd && IsIdentifierStart(Peek()))
+                {
+                    _pending.Enqueue(new Token(
+                        TokenKind.Dollar,
+                        "$",
+                        new SourceSpan(dollarStart, CurrentPosition)));
+
+                    var identStart = CurrentPosition;
+                    var identBuilder = new StringBuilder();
+                    while (!IsAtEnd && IsIdentifierContinue(Peek()))
+                    {
+                        identBuilder.Append(Advance());
+                    }
+                    _pending.Enqueue(new Token(
+                        TokenKind.Identifier,
+                        identBuilder.ToString(),
+                        new SourceSpan(identStart, CurrentPosition)));
+                }
+                else
+                {
+                    _diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        "OV0003",
+                        "bare '$' in string body must be followed by an identifier or '{'; use '\\$' for a literal '$'",
+                        new SourceSpan(dollarStart, CurrentPosition)));
+                    _pending.Enqueue(new Token(
+                        TokenKind.Dollar,
+                        "$",
+                        new SourceSpan(dollarStart, CurrentPosition)));
+                }
+
+                var segmentKind = frame.SeenSegment ? TokenKind.StringMiddle : TokenKind.StringHead;
+                frame.SeenSegment = true;
+                return new Token(segmentKind, lexeme.ToString(), new SourceSpan(segmentStart, segmentEnd));
+            }
+
+            lexeme.Append(Advance());
+        }
     }
 
     private Token LexIdentifierOrKeyword(SourcePosition start)
@@ -137,11 +291,10 @@ public sealed class Lexer
     {
         var builder = new StringBuilder();
 
-        // Hex / binary prefix
         if (Peek() == '0' && (Peek(1) == 'x' || Peek(1) == 'X' || Peek(1) == 'b' || Peek(1) == 'B'))
         {
-            builder.Append(Advance()); // 0
-            builder.Append(Advance()); // x or b
+            builder.Append(Advance());
+            builder.Append(Advance());
             while (!IsAtEnd && (IsHexDigit(Peek()) || Peek() == '_'))
             {
                 builder.Append(Advance());
@@ -159,7 +312,7 @@ public sealed class Lexer
         if (!IsAtEnd && Peek() == '.' && IsDigit(Peek(1)))
         {
             isFloat = true;
-            builder.Append(Advance()); // .
+            builder.Append(Advance());
             while (!IsAtEnd && (IsDigit(Peek()) || Peek() == '_'))
             {
                 builder.Append(Advance());
@@ -182,51 +335,6 @@ public sealed class Lexer
 
         var kind = isFloat ? TokenKind.FloatLiteral : TokenKind.IntegerLiteral;
         return new Token(kind, builder.ToString(), new SourceSpan(start, CurrentPosition));
-    }
-
-    private Token LexString(SourcePosition start)
-    {
-        var builder = new StringBuilder();
-        builder.Append(Advance()); // opening "
-
-        while (!IsAtEnd && Peek() != '"')
-        {
-            var c = Peek();
-            if (c == '\n')
-            {
-                _diagnostics.Add(new Diagnostic(
-                    DiagnosticSeverity.Error,
-                    "OV0001",
-                    "unterminated string literal: newline before closing quote",
-                    new SourceSpan(start, CurrentPosition)));
-                break;
-            }
-            if (c == '\\')
-            {
-                builder.Append(Advance());
-                if (!IsAtEnd)
-                {
-                    builder.Append(Advance());
-                }
-                continue;
-            }
-            builder.Append(Advance());
-        }
-
-        if (!IsAtEnd && Peek() == '"')
-        {
-            builder.Append(Advance()); // closing "
-        }
-        else
-        {
-            _diagnostics.Add(new Diagnostic(
-                DiagnosticSeverity.Error,
-                "OV0001",
-                "unterminated string literal: reached end of file",
-                new SourceSpan(start, CurrentPosition)));
-        }
-
-        return new Token(TokenKind.StringLiteral, builder.ToString(), new SourceSpan(start, CurrentPosition));
     }
 
     private Token LexPunctuation(SourcePosition start)
@@ -304,7 +412,11 @@ public sealed class Lexer
     private Token Emit(TokenKind kind, string lexeme, SourcePosition start)
         => new(kind, lexeme, new SourceSpan(start, CurrentPosition));
 
-    private void SkipWhitespace()
+    /// <summary>
+    /// Skips whitespace, line terminators, and line comments. Called in default and
+    /// interpolation modes; string-body mode has its own scanning rules.
+    /// </summary>
+    private void SkipTrivia()
     {
         while (!IsAtEnd)
         {
@@ -312,6 +424,14 @@ public sealed class Lexer
             if (c is ' ' or '\t' or '\r' or '\n')
             {
                 Advance();
+                continue;
+            }
+            if (c == '/' && Peek(1) == '/')
+            {
+                while (!IsAtEnd && Peek() != '\n')
+                {
+                    Advance();
+                }
                 continue;
             }
             break;
