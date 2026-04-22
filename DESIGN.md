@@ -280,11 +280,13 @@ Static types are the single biggest correctness win for an agent-authored langua
 - **Refinement types at boundaries** — constraints like "int in range 0..100" expressible in the type system, so validation lives in types rather than scattered `if` statements. Syntax: `T where <predicate>`, with `self` referring to the value.
 
   ```
-  type Age        = Int where 0 <= self <= 150
+  type Age        = Int where 0 <= self && self <= 150
   type NonEmpty<T> = List<T> where size(self) > 0
 
-  fn greet(age: Int where 0 <= self <= 150) !{io} -> () { ... }
+  fn greet(age: Int where 0 <= self && self <= 150) !{io} -> () { ... }
   ```
+
+  Chained comparison (`0 <= self <= 150` as sugar for a conjunction) is **not** supported. Comparison operators are non-associative; range predicates must be written as explicit `&&` conjunctions. See [`docs/grammar/precedence.md`](docs/grammar/precedence.md).
 
   Predicates the compiler can decide (arithmetic comparisons, ADT shape, size/length of fixed collections) are checked statically. Predicates outside the decidable fragment become runtime assertions at the construction / boundary point. The agent never writes ad-hoc `if` validation for constraints expressible in the type system.
 - **No implicit conversions.** Including int-to-float. Coercion is always explicit.
@@ -1075,7 +1077,7 @@ Non-language work that matters for adoption but sits outside the language spec i
 - **Record** — product type. Structural equality, fully immutable fields, no inheritance, no attached methods.
 - **`@repr("c")`** — attribute on a record forcing C-compatible field layout (no reordering, predictable padding). Required on any record that crosses a C FFI boundary.
 - **`RaceAllFailed<E>`** — stdlib type returned by `race` when all branches fail; wraps `List<E>` of child errors in source order (§12).
-- **Refinement type** — a base type narrowed by a predicate expressible in the type system (e.g., `Int where 0 <= self <= 100`). Syntax: `T where <predicate>`; `self` refers to the value. Decidable predicates check statically; others become runtime assertions at boundaries.
+- **Refinement type** — a base type narrowed by a predicate expressible in the type system (e.g., `Int where 0 <= self && self <= 100`). Syntax: `T where <predicate>`; `self` refers to the value. Decidable predicates check statically; others become runtime assertions at boundaries.
 - **Structured concurrency** — concurrency model where tasks have well-defined lifetimes tied to lexical scope (task groups / nurseries), forbidding orphaned tasks.
 - **Tokens per correct unit of work** — the right economic metric for agent-authored code: total tokens (write + read + debug) divided by correct deliverables, rather than tokens per line.
 - **`TraceEvent`** — stdlib sum type representing one entry in a `trace` block's output: function entry/exit, value binding, branch taken, pattern-match arm taken, or exceptional exit. Derives `Serialize`; JSON export is one combinator away (§14).

@@ -3,8 +3,8 @@ module refinement_example
 // Refinement types push validation into the type system, out of scattered if-statements.
 // Syntax: `T where <predicate>`, with `self` referring to the value.
 
-type Age         = Int   where 0   <= self <= 150
-type Percent     = Float where 0.0 <= self <= 100.0
+type Age         = Int   where 0   <= self && self <= 150
+type Percent     = Float where 0.0 <= self && self <= 100.0
 type NonEmpty<T> = List<T> where size(self) > 0
 
 record UserProfile {

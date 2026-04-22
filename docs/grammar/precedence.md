@@ -62,15 +62,9 @@ To write the double application, parenthesize: `!(!x)`. The formatter rejects th
 `a < b < c` and `a == b == c` are **parse errors** in v1. Reasons:
 
 - Agents reliably get these wrong in C-family languages, where `a < b < c` silently means `(a < b) < c` — bool compared with the third operand — and produces nonsense results with no warning.
-- Chained comparison (`0 <= self <= 150` meaning `0 <= self AND self <= 150`) is appealing and appears in DESIGN.md §8 refinement examples, but a full design for it has not been committed.
+- Chained comparison (`0 <= self <= 150` meaning `0 <= self AND self <= 150`) is appealing and reads naturally in refinement predicates, but introduces a parser-level special case that buys very little over the explicit `&&` form.
 
-**Open:** chained comparison in refinement-type predicates (`T where 0 <= self <= 150`). Two options:
-
-- (a) Parse chained comparison everywhere as sugar for an `&&` chain. Python-style.
-- (b) Parse chained comparison **only inside refinement predicates**, where the notational benefit is highest and the risk of confusion lowest.
-- (c) Reject everywhere; require `0 <= self && self <= 150`.
-
-Current stance: (c) — reject. The refinement examples in DESIGN.md need updating to use `&&`, or we commit to (b) before the parser lands.
+**Resolved (2026-04-22): reject chained comparison everywhere.** Range predicates must be written with explicit `&&`: `T where 0 <= self && self <= 150`. Rationale: one canonical form (§4 of DESIGN.md); no parser-level magic that only applies inside one context; diagnostic code `OV0102` points agents at the exact rewrite. The notational savings of chained form do not clear the bar for a grammar special case.
 
 ---
 

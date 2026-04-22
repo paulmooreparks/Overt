@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Overt.Compiler.Syntax;
 
 namespace Overt.Tests;
@@ -6,6 +7,9 @@ public class LexerTests
 {
     private static readonly string ExamplesDir =
         Path.Combine(AppContext.BaseDirectory, "examples");
+
+    private static string GoldenDir([CallerFilePath] string callerFilePath = "")
+        => Path.Combine(Path.GetDirectoryName(callerFilePath)!, "fixtures", "golden");
 
     [Fact]
     public void Lex_HelloOv_ProducesExpectedTokenStream()
@@ -272,6 +276,10 @@ public class LexerTests
             kinds);
     }
 
+    /// <summary>
+    /// Locks down the token stream for every example. Set <c>OVERT_UPDATE_GOLDEN=1</c>
+    /// in the environment to regenerate the golden files after an intentional change.
+    /// </summary>
     [Theory]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]
@@ -285,14 +293,30 @@ public class LexerTests
     [InlineData("refinement.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("trace.ov")]
-    public void Lex_Example_ProducesNoDiagnostics(string exampleFile)
+    public void Lex_Example_MatchesGoldenTokenStream(string exampleFile)
     {
-        var path = Path.Combine(ExamplesDir, exampleFile);
-        var source = File.ReadAllText(path);
+        var sourcePath = Path.Combine(ExamplesDir, exampleFile);
+        var source = File.ReadAllText(sourcePath);
 
         var result = Lexer.Lex(source);
 
         Assert.Empty(result.Diagnostics);
-        Assert.Equal(TokenKind.EndOfFile, result.Tokens[^1].Kind);
+
+        var actual = string.Join("\n", result.Tokens.Select(t => t.ToString())) + "\n";
+        var goldenPath = Path.Combine(GoldenDir(), exampleFile + ".tokens");
+
+        if (Environment.GetEnvironmentVariable("OVERT_UPDATE_GOLDEN") == "1")
+        {
+            Directory.CreateDirectory(GoldenDir());
+            File.WriteAllText(goldenPath, actual);
+            return;
+        }
+
+        Assert.True(
+            File.Exists(goldenPath),
+            $"Golden file not found: {goldenPath}. Run tests with OVERT_UPDATE_GOLDEN=1 to create.");
+
+        var expected = File.ReadAllText(goldenPath);
+        Assert.Equal(expected, actual);
     }
 }
