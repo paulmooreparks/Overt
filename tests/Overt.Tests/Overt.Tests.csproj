@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Overt.Compiler\Overt.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
+    <ProjectReference Include="..\Overt.EndToEnd\Overt.EndToEnd.csproj" />
   </ItemGroup>
 
 </Project>

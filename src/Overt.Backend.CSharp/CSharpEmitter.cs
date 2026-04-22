@@ -51,6 +51,7 @@ public sealed class CSharpEmitter
         _w.WriteLine();
         _w.WriteLine("using System;");
         _w.WriteLine("using System.Threading.Tasks;");
+        _w.WriteLine("using Overt.Runtime;");
         _w.WriteLine("using static Overt.Runtime.Prelude;");
         _w.WriteLine();
         _w.WriteLine($"namespace Overt.Generated.{PascalCase(module.Name)};");
