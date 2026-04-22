@@ -28,6 +28,27 @@ public sealed record FunctionDecl(
     BlockExpr Body,
     SourceSpan Span) : Declaration(Span);
 
+/// <summary>
+/// FFI import — a function declared in Overt but implemented in a host language. The
+/// shape, per DESIGN.md §17:
+/// <code>
+///   [unsafe] extern "platform" fn name(params) !{effects} -> Type
+///       binds "target.symbol"
+///       [from  "libname"]        // C only
+/// </code>
+/// Only C FFI requires <c>unsafe</c> and the <c>from</c> clause.
+/// </summary>
+public sealed record ExternDecl(
+    string Platform,
+    bool IsUnsafe,
+    string Name,
+    ImmutableArray<Parameter> Parameters,
+    EffectRow? Effects,
+    TypeExpr? ReturnType,
+    string BindsTarget,
+    string? FromLibrary,
+    SourceSpan Span) : Declaration(Span);
+
 public sealed record RecordDecl(
     string Name,
     ImmutableArray<Annotation> Annotations,
@@ -97,12 +118,15 @@ public sealed record ExpressionStmt(
     SourceSpan Span) : Statement(Span);
 
 /// <summary>
-/// A <c>let</c> or <c>let mut</c> binding. Per DESIGN.md §10, <see cref="IsMutable"/>
-/// permits subsequent rebinding via <see cref="AssignmentStmt"/>, but the binding remains
-/// scalar-local; no shared mutable state.
+/// A <c>let</c> or <c>let mut</c> binding. The target is a pattern — most commonly a
+/// single <see cref="IdentifierPattern"/>, but tuple-destructuring lets like
+/// <c>let (users, orders) = parallel { ... }</c> land as <see cref="TuplePattern"/>.
+/// Irrefutability is enforced by the type checker; the parser is liberal about pattern
+/// shape. <see cref="IsMutable"/> permits subsequent rebinding via
+/// <see cref="AssignmentStmt"/> and is only valid for single-identifier targets.
 /// </summary>
 public sealed record LetStmt(
-    string Name,
+    Pattern Target,
     bool IsMutable,
     TypeExpr? Type,
     Expression Initializer,
@@ -250,6 +274,40 @@ public sealed record WithExpr(
 /// </summary>
 public sealed record WhileExpr(
     Expression Condition,
+    BlockExpr Body,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>parallel { expr, expr, ... }</c> — each expression runs as an independent task.
+/// Block yields a tuple of results in source order; any failure cancels siblings and
+/// propagates (DESIGN.md §12).
+/// </summary>
+public sealed record ParallelExpr(
+    ImmutableArray<Expression> Tasks,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>race { expr, expr, ... }</c> — returns the first task to succeed; remaining tasks
+/// are cancelled. If all fail, yields <c>Err(RaceAllFailed&lt;E&gt;)</c> (DESIGN.md §12).
+/// </summary>
+public sealed record RaceExpr(
+    ImmutableArray<Expression> Tasks,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>unsafe { body }</c> — a block whose value is the body's value, tagged as an
+/// unsafe region (DESIGN.md §17). Required to wrap calls into C FFI bindings.
+/// </summary>
+public sealed record UnsafeExpr(
+    BlockExpr Body,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>trace { body }</c> — a trace block (DESIGN.md §14). Evaluates to the body's
+/// value; emits structured trace events to any registered consumer. Zero-cost when
+/// no consumer is subscribed.
+/// </summary>
+public sealed record TraceExpr(
     BlockExpr Body,
     SourceSpan Span) : Expression(Span);
 

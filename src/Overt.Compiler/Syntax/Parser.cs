@@ -98,6 +98,17 @@ public sealed class Parser
         {
             return ParseEnumDecl(attributes);
         }
+        if (Check(TokenKind.KeywordExtern)
+            || (Check(TokenKind.KeywordUnsafe) && Peek(1).Kind == TokenKind.KeywordExtern))
+        {
+            if (attributes.Length > 0)
+            {
+                ReportError("OV0157",
+                    "attributes on `extern` declarations are not supported in v1",
+                    attributes[0].Span);
+            }
+            return ParseExternDecl();
+        }
 
         if (attributes.Length > 0)
         {
@@ -106,6 +117,83 @@ public sealed class Parser
                 attributes[0].Span);
         }
         return null;
+    }
+
+    private ExternDecl ParseExternDecl()
+    {
+        var startPos = Current.Span.Start;
+        var isUnsafe = Match(TokenKind.KeywordUnsafe);
+        Expect(TokenKind.KeywordExtern, "extern declaration");
+
+        var platformToken = Expect(TokenKind.StringLiteral, "extern platform string");
+        var platform = StripQuotes(platformToken.Lexeme);
+
+        Expect(TokenKind.KeywordFn, "extern function signature");
+        var nameToken = Expect(TokenKind.Identifier, "extern function name");
+        Expect(TokenKind.LeftParen, "extern parameter list");
+        var parameters = ParseParameterList();
+        Expect(TokenKind.RightParen, "extern parameter list");
+
+        EffectRow? effects = null;
+        if (Check(TokenKind.Bang))
+        {
+            effects = ParseEffectRow();
+        }
+
+        TypeExpr? returnType = null;
+        if (Check(TokenKind.Arrow))
+        {
+            Advance();
+            returnType = ParseTypeExpr();
+        }
+
+        // `binds "..."` — mandatory.
+        ExpectContextualKeyword("binds", "extern declaration");
+        var bindsToken = Expect(TokenKind.StringLiteral, "binds target string");
+        var bindsTarget = StripQuotes(bindsToken.Lexeme);
+        var endPos = bindsToken.Span.End;
+
+        // `from "..."` — C FFI only; the parser is permissive and the later pass checks.
+        string? fromLibrary = null;
+        if (Check(TokenKind.Identifier) && Current.Lexeme == "from")
+        {
+            Advance();
+            var fromToken = Expect(TokenKind.StringLiteral, "from library string");
+            fromLibrary = StripQuotes(fromToken.Lexeme);
+            endPos = fromToken.Span.End;
+        }
+
+        return new ExternDecl(
+            platform,
+            isUnsafe,
+            nameToken.Lexeme,
+            parameters,
+            effects,
+            returnType,
+            bindsTarget,
+            fromLibrary,
+            new SourceSpan(startPos, endPos));
+    }
+
+    private void ExpectContextualKeyword(string word, string context)
+    {
+        if (Check(TokenKind.Identifier) && Current.Lexeme == word)
+        {
+            Advance();
+            return;
+        }
+        ReportError("OV0160",
+            $"expected `{word}` in {context}, got {Current.Kind}",
+            Current.Span);
+    }
+
+    private static string StripQuotes(string lexeme)
+    {
+        if (lexeme.Length >= 2 && lexeme[0] == '"' && lexeme[^1] == '"')
+        {
+            return lexeme[1..^1];
+        }
+        return lexeme;
     }
 
     private ImmutableArray<Annotation> ParseAnnotationList()
@@ -490,7 +578,17 @@ public sealed class Parser
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordLet, "let binding");
         var isMutable = Match(TokenKind.KeywordMut);
-        var nameToken = Expect(TokenKind.Identifier, "let binding name");
+
+        // Accept any pattern on the LHS. The common case is a single identifier
+        // pattern; tuple destructuring (`let (users, orders) = ...`) lands here too.
+        var target = ParsePattern();
+
+        if (isMutable && target is not IdentifierPattern)
+        {
+            ReportError("OV0161",
+                "`let mut` requires a single identifier on the left; pattern destructuring is only valid for immutable let",
+                target.Span);
+        }
 
         TypeExpr? type = null;
         if (Match(TokenKind.Colon))
@@ -501,7 +599,7 @@ public sealed class Parser
         Expect(TokenKind.Equals, "let binding initializer");
         var initializer = ParseExpression();
         return new LetStmt(
-            nameToken.Lexeme,
+            target,
             isMutable,
             type,
             initializer,
@@ -898,7 +996,19 @@ public sealed class Parser
             case TokenKind.KeywordMatch:
                 return ParseMatchExpr();
 
-            // TODO: trace, list literals.
+            case TokenKind.KeywordParallel:
+                return ParseTaskGroup(parallel: true);
+
+            case TokenKind.KeywordRace:
+                return ParseTaskGroup(parallel: false);
+
+            case TokenKind.KeywordUnsafe:
+                return ParseUnsafeExpr();
+
+            case TokenKind.KeywordTrace:
+                return ParseTraceExpr();
+
+            // TODO: list literals.
         }
 
         ReportError("OV0155", $"expected expression, got {token.Kind}", token.Span);
@@ -1022,6 +1132,55 @@ public sealed class Parser
         return new WhileExpr(condition, body, new SourceSpan(startPos, body.Span.End));
     }
 
+    private UnsafeExpr ParseUnsafeExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordUnsafe, "unsafe block");
+        var body = ParseBlock();
+        return new UnsafeExpr(body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    private TraceExpr ParseTraceExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordTrace, "trace block");
+        var body = ParseBlock();
+        return new TraceExpr(body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    /// <summary>
+    /// Parses <c>parallel { expr, expr, ... }</c> and <c>race { expr, expr, ... }</c>
+    /// task groups (DESIGN.md §12). Unlike a block expression, the braces delimit a
+    /// comma-separated list of expressions — not statements followed by a trailing
+    /// expression. Trailing commas are accepted.
+    /// </summary>
+    private Expression ParseTaskGroup(bool parallel)
+    {
+        var startPos = Current.Span.Start;
+        Advance(); // parallel or race
+        Expect(TokenKind.LeftBrace, parallel ? "parallel block" : "race block");
+
+        var tasks = ImmutableArray.CreateBuilder<Expression>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            tasks.Add(ParseExpression());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace))
+                {
+                    break;
+                }
+                tasks.Add(ParseExpression());
+            }
+        }
+
+        var closing = Expect(TokenKind.RightBrace, parallel ? "parallel block" : "race block");
+        var span = new SourceSpan(startPos, closing.Span.End);
+        return parallel
+            ? new ParallelExpr(tasks.ToImmutable(), span)
+            : new RaceExpr(tasks.ToImmutable(), span);
+    }
+
     // ------------------------------------------------------------- match
 
     private MatchExpr ParseMatchExpr()
@@ -1032,17 +1191,29 @@ public sealed class Parser
         Expect(TokenKind.LeftBrace, "match body");
 
         var arms = ImmutableArray.CreateBuilder<MatchArm>();
-        if (!Check(TokenKind.RightBrace))
+        while (!Check(TokenKind.RightBrace) && !Check(TokenKind.EndOfFile))
         {
-            arms.Add(ParseMatchArm());
-            while (Match(TokenKind.Comma))
+            var arm = ParseMatchArm();
+            arms.Add(arm);
+
+            if (Match(TokenKind.Comma))
             {
-                if (Check(TokenKind.RightBrace))
-                {
-                    break;
-                }
-                arms.Add(ParseMatchArm());
+                continue;
             }
+
+            // No comma. Allowed iff the arm body ended with `}` — i.e. the last consumed
+            // token was a right brace (block, if-else, match, with, record literal, etc).
+            if (Check(TokenKind.RightBrace))
+            {
+                break;
+            }
+            if (_cursor > 0 && _tokens[_cursor - 1].Kind == TokenKind.RightBrace)
+            {
+                continue;
+            }
+
+            ReportError("OV0162", "expected `,` between match arms", Current.Span);
+            break;
         }
 
         var closing = Expect(TokenKind.RightBrace, "match body");

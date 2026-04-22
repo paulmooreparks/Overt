@@ -177,7 +177,7 @@ Comma(,) @ 40:29..40:30
 Identifier(IoError) @ 40:31..40:38
 Greater(>) @ 40:38..40:39
 LeftBrace({) @ 40:40..40:41
-KeywordTrace(trace) @ 41:5..41:10
+Identifier(Trace) @ 41:5..41:10
 Dot(.) @ 41:10..41:11
 Identifier(subscribe) @ 41:11..41:20
 LeftParen(() @ 41:20..41:21

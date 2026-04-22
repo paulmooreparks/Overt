@@ -38,7 +38,7 @@ fn process_order(order: Order) -> Result<Order, ProcessError> {
 // Register a consumer at the start of main to observe the trace.
 // In production, this is typically not called, so traces are inert.
 fn main() !{io} -> Result<(), IoError> {
-    trace.subscribe(print_event)
+    Trace.subscribe(print_event)
 
     let order = Order { id = 42, amount = 500, status = OrderStatus.Pending }
     match process_order(order) {

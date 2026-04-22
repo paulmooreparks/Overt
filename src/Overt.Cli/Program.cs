@@ -359,9 +359,11 @@ static class AstPrinter
                 break;
 
             case LetStmt ls:
-                w.Line($"Let{(ls.IsMutable ? " mut" : "")} {ls.Name}");
+                w.Line($"Let{(ls.IsMutable ? " mut" : "")}");
                 using (w.Indent())
                 {
+                    w.Line("Target");
+                    using (w.Indent()) Visit(ls.Target, w);
                     if (ls.Type is { } t2)
                     {
                         w.Line("Type");
@@ -519,6 +521,59 @@ static class AstPrinter
                 using (w.Indent())
                 {
                     foreach (var e in tp.Elements) Visit(e, w);
+                }
+                break;
+
+            case ParallelExpr pe:
+                w.Line($"Parallel[{pe.Tasks.Length}]");
+                using (w.Indent())
+                {
+                    foreach (var t in pe.Tasks) Visit(t, w);
+                }
+                break;
+
+            case RaceExpr re:
+                w.Line($"Race[{re.Tasks.Length}]");
+                using (w.Indent())
+                {
+                    foreach (var t in re.Tasks) Visit(t, w);
+                }
+                break;
+
+            case UnsafeExpr ue2:
+                w.Line("Unsafe");
+                using (w.Indent()) Visit(ue2.Body, w);
+                break;
+
+            case TraceExpr tre:
+                w.Line("Trace");
+                using (w.Indent()) Visit(tre.Body, w);
+                break;
+
+            case ExternDecl ext:
+                var unsafePrefix = ext.IsUnsafe ? "unsafe " : "";
+                w.Line($"{unsafePrefix}Extern \"{ext.Platform}\" {ext.Name}");
+                using (w.Indent())
+                {
+                    if (ext.Parameters.Length > 0)
+                    {
+                        w.Line("Parameters");
+                        using (w.Indent())
+                        {
+                            foreach (var p in ext.Parameters) Visit(p, w);
+                        }
+                    }
+                    if (ext.Effects is { } eff) Visit(eff, w);
+                    if (ext.ReturnType is { } rt)
+                    {
+                        w.Line("Return");
+                        using (w.Indent()) Visit(rt, w);
+                    }
+                    w.Line($"binds \"{ext.BindsTarget}\"");
+                    if (ext.FromLibrary is { } lib)
+                    {
+                        w.Line($"from \"{lib}\"");
+                    }
                 }
                 break;
 

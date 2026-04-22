@@ -368,7 +368,7 @@ public class ParserTests
         var fn = (FunctionDecl)result.Module.Declarations[0];
         Assert.Null(fn.Body.TrailingExpression);
         var let = Assert.IsType<LetStmt>(fn.Body.Statements[0]);
-        Assert.Equal("x", let.Name);
+        Assert.Equal("x", ((IdentifierPattern)let.Target).Name);
         Assert.False(let.IsMutable);
         Assert.Null(let.Type);
         Assert.IsType<IntegerLiteralExpr>(let.Initializer);
@@ -383,7 +383,7 @@ public class ParserTests
         var fn = (FunctionDecl)result.Module.Declarations[0];
         var let = Assert.IsType<LetStmt>(fn.Body.Statements[0]);
         Assert.True(let.IsMutable);
-        Assert.Equal("counter", let.Name);
+        Assert.Equal("counter", ((IdentifierPattern)let.Target).Name);
     }
 
     [Fact]
@@ -901,5 +901,152 @@ public class ParserTests
         var lex = Lexer.Lex("module m\nfn f() { match x { A => 1, B => 2 } }");
         var result = Parser.Parse(lex.Tokens);
         Assert.Empty(result.Diagnostics);
+    }
+
+    [Fact]
+    public void Parse_Match_BlockBodiedArm_NeedsNoComma()
+    {
+        // Rust-style: match arms whose body ends with `}` can omit the trailing comma.
+        var lex = Lexer.Lex(
+            "module m\nfn f() { match x { A => { 1 } B => 2 } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var m = Assert.IsType<MatchExpr>(fn.Body.TrailingExpression);
+        Assert.Equal(2, m.Arms.Length);
+    }
+
+    // --------------------------------------------------- let with patterns
+
+    [Fact]
+    public void Parse_Let_TupleDestructure()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { let (a, b) = pair }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var let = Assert.IsType<LetStmt>(fn.Body.Statements[0]);
+        var tup = Assert.IsType<TuplePattern>(let.Target);
+        Assert.Equal(2, tup.Elements.Length);
+        Assert.Equal("a", ((IdentifierPattern)tup.Elements[0]).Name);
+        Assert.Equal("b", ((IdentifierPattern)tup.Elements[1]).Name);
+    }
+
+    [Fact]
+    public void Parse_LetMut_WithTuplePattern_EmitsOV0161()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { let mut (a, b) = pair }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Contains(result.Diagnostics, d => d.Code == "OV0161");
+    }
+
+    // --------------------------------------------------- task groups + trace + unsafe
+
+    [Fact]
+    public void Parse_ParallelBlock()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { let x = parallel { a(), b(), c(), } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var let = Assert.IsType<LetStmt>(fn.Body.Statements[0]);
+        var p = Assert.IsType<ParallelExpr>(let.Initializer);
+        Assert.Equal(3, p.Tasks.Length);
+    }
+
+    [Fact]
+    public void Parse_RaceBlock()
+    {
+        var lex = Lexer.Lex(
+            "module m\nfn f() { race { primary(), backup() } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var r = Assert.IsType<RaceExpr>(fn.Body.TrailingExpression);
+        Assert.Equal(2, r.Tasks.Length);
+    }
+
+    [Fact]
+    public void Parse_UnsafeBlock()
+    {
+        var lex = Lexer.Lex("module m\nfn f() { unsafe { raw_call() } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var u = Assert.IsType<UnsafeExpr>(fn.Body.TrailingExpression);
+        Assert.IsType<CallExpr>(u.Body.TrailingExpression);
+    }
+
+    [Fact]
+    public void Parse_TraceBlock()
+    {
+        var lex = Lexer.Lex("module m\nfn f() { trace { body() } }");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var fn = (FunctionDecl)result.Module.Declarations[0];
+        var t = Assert.IsType<TraceExpr>(fn.Body.TrailingExpression);
+        Assert.IsType<CallExpr>(t.Body.TrailingExpression);
+    }
+
+    // ---------------------------------------------------- extern
+
+    [Fact]
+    public void Parse_Extern_Csharp()
+    {
+        var lex = Lexer.Lex(
+            "module m\nextern \"csharp\" fn write(s: String) !{io} -> ()\n    binds \"System.Console.Write\"");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var ext = Assert.IsType<ExternDecl>(result.Module.Declarations[0]);
+        Assert.Equal("csharp", ext.Platform);
+        Assert.Equal("write", ext.Name);
+        Assert.False(ext.IsUnsafe);
+        Assert.Equal("System.Console.Write", ext.BindsTarget);
+        Assert.Null(ext.FromLibrary);
+    }
+
+    [Fact]
+    public void Parse_Extern_UnsafeC_WithFromLibrary()
+    {
+        var lex = Lexer.Lex(
+            "module m\nunsafe extern \"c\" fn strlen(s: CString) -> Int\n    binds \"strlen\"\n    from \"libc\"");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var ext = Assert.IsType<ExternDecl>(result.Module.Declarations[0]);
+        Assert.Equal("c", ext.Platform);
+        Assert.True(ext.IsUnsafe);
+        Assert.Equal("strlen", ext.BindsTarget);
+        Assert.Equal("libc", ext.FromLibrary);
+    }
+
+    // -------------------------------------------------- smoke-parse goldens
+
+    [Theory]
+    [InlineData("hello.ov")]
+    [InlineData("mutation.ov")]
+    [InlineData("pipeline.ov")]
+    [InlineData("bst.ov")]
+    [InlineData("state_machine.ov")]
+    [InlineData("dashboard.ov")]
+    [InlineData("race.ov")]
+    [InlineData("inference.ov")]
+    [InlineData("ffi.ov")]
+    [InlineData("trace.ov")]
+    public void Parse_Example_HasNoDiagnostics(string file)
+    {
+        var result = ParseFile(file);
+        Assert.Empty(result.Diagnostics);
+        Assert.NotEmpty(result.Module.Declarations);
     }
 }
