@@ -1117,7 +1117,10 @@ public sealed class Parser
             // TODO: list literals.
         }
 
-        ReportError("OV0155", $"expected expression, got {token.Kind}", token.Span);
+        ReportErrorWithHelp("OV0155",
+            $"expected expression, got {TokenDisplay(token)}",
+            token.Span,
+            "expressions begin with an identifier, literal, `(`, `{`, `if`, `match`, `while`, `parallel`, `race`, `trace`, `unsafe`, `-`, or `!`");
         Advance(); // skip offending token so the parser can make progress
         return new UnitExpr(token.Span);
     }
@@ -1357,7 +1360,10 @@ public sealed class Parser
             return ParseIdentifierOrConstructorPattern();
         }
 
-        ReportError("OV0158", $"expected pattern, got {Current.Kind}", Current.Span);
+        ReportErrorWithHelp("OV0158",
+            $"expected pattern, got {TokenDisplay(Current)}",
+            Current.Span,
+            "patterns are `_`, an identifier, a dotted path, a constructor call `Name(pat, ...)`, a record destructure `Name { field = pat, ... }`, or a tuple `(pat, ...)`");
         var skipped = Advance();
         return new WildcardPattern(skipped.Span);
     }
@@ -1650,6 +1656,22 @@ public sealed class Parser
     {
         _diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, code, message, span));
     }
+
+    private void ReportErrorWithHelp(string code, string message, SourceSpan span, string help)
+    {
+        _diagnostics.Add(
+            new Diagnostic(DiagnosticSeverity.Error, code, message, span).WithHelp(help));
+    }
+
+    private static string TokenDisplay(Token token) => token.Kind switch
+    {
+        TokenKind.EndOfFile => "end of file",
+        TokenKind.Identifier => $"identifier `{token.Lexeme}`",
+        TokenKind.StringLiteral or TokenKind.StringHead => "string literal",
+        TokenKind.IntegerLiteral => $"integer `{token.Lexeme}`",
+        TokenKind.FloatLiteral => $"float `{token.Lexeme}`",
+        _ => $"`{token.Lexeme}`",
+    };
 }
 
 public sealed record ParseResult(

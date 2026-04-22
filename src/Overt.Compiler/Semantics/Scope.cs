@@ -41,4 +41,7 @@ public sealed class Scope
     {
         _symbols[symbol.Name] = symbol;
     }
+
+    /// <summary>Names bound directly in this scope (no ancestors).</summary>
+    public IEnumerable<string> Names => _symbols.Keys;
 }

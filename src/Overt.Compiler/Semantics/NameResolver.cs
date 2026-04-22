@@ -398,7 +398,7 @@ public sealed class NameResolver
             // everything else.
             if (!IsLikelyStdlibName(id.Name))
             {
-                Report("OV0200", $"unknown name `{id.Name}`", id.Span);
+                ReportUnknownName(id.Name, id.Span, scope);
             }
             return;
         }
@@ -465,15 +465,94 @@ public sealed class NameResolver
 
     private void ReportDuplicate(Symbol incoming, Symbol existing)
     {
-        Report("OV0201",
-            $"name `{incoming.Name}` is already bound at {existing.DeclarationSpan.Start}; "
-                + "Overt does not permit shadowing",
-            incoming.DeclarationSpan);
+        var d = new Diagnostic(
+                DiagnosticSeverity.Error,
+                "OV0201",
+                $"name `{incoming.Name}` cannot be rebound; Overt does not permit shadowing",
+                incoming.DeclarationSpan)
+            .WithNoteAt(existing.DeclarationSpan, $"`{incoming.Name}` was first bound here")
+            .WithHelp("pick a different name, or remove one of the bindings");
+        _diagnostics.Add(d);
     }
 
     private void Report(string code, string message, SourceSpan span)
     {
         _diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, code, message, span));
+    }
+
+    private void ReportUnknownName(string name, SourceSpan span, Scope scope)
+    {
+        var d = new Diagnostic(
+            DiagnosticSeverity.Error,
+            "OV0200",
+            $"unknown name `{name}`",
+            span);
+        var suggestion = FindSuggestion(name, scope);
+        if (suggestion is not null)
+        {
+            d = d.WithHelp($"did you mean `{suggestion}`?");
+        }
+        _diagnostics.Add(d);
+    }
+
+    private static string? FindSuggestion(string target, Scope scope)
+    {
+        // Walk every in-scope name; return the closest match within a small Levenshtein
+        // threshold. O(n * m) per miss, but n is the scope size and m is the name length —
+        // both small enough to not matter at MVP compiler sizes.
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        var candidates = CollectNames(scope);
+        foreach (var candidate in candidates)
+        {
+            var d = Levenshtein(target, candidate);
+            var budget = Math.Max(1, target.Length / 3);
+            if (d <= budget && d < bestDistance)
+            {
+                best = candidate;
+                bestDistance = d;
+            }
+        }
+        return best;
+    }
+
+    private static IEnumerable<string> CollectNames(Scope scope)
+    {
+        // Reflect the private _symbols dictionary indirectly by keeping a small helper
+        // inside Scope would be cleaner; for now, walk through what we can reach.
+        // Since Scope exposes only Lookup, we rely on the resolver's own tracking to
+        // enumerate.
+        for (var s = scope; s is not null; s = s.Parent)
+        {
+            foreach (var n in s.Names)
+            {
+                yield return n;
+            }
+        }
+    }
+
+    private static int Levenshtein(string a, string b)
+    {
+        if (a == b) return 0;
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+
+        var prev = new int[b.Length + 1];
+        var curr = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+        for (var i = 1; i <= a.Length; i++)
+        {
+            curr[0] = i;
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                curr[j] = Math.Min(
+                    Math.Min(curr[j - 1] + 1, prev[j] + 1),
+                    prev[j - 1] + cost);
+            }
+            (prev, curr) = (curr, prev);
+        }
+        return prev[b.Length];
     }
 }
 

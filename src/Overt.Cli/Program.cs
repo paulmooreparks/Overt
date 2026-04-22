@@ -186,6 +186,19 @@ static class Cli
             var severity = d.Severity == DiagnosticSeverity.Error ? "error" : "warning";
             Console.Error.WriteLine(
                 $"{path}:{d.Span.Start.Line}:{d.Span.Start.Column}: {severity}: {d.Code}: {d.Message}");
+            foreach (var note in d.Notes)
+            {
+                var kind = note.Kind == DiagnosticNoteKind.Help ? "help" : "note";
+                if (note.Span is { } ns)
+                {
+                    Console.Error.WriteLine(
+                        $"{path}:{ns.Start.Line}:{ns.Start.Column}: {kind}: {note.Text}");
+                }
+                else
+                {
+                    Console.Error.WriteLine($"  {kind}: {note.Text}");
+                }
+            }
             if (d.Severity == DiagnosticSeverity.Error)
             {
                 errors++;
