@@ -58,13 +58,13 @@ An identifier is any maximal run matching `identifier` that is not a reserved wo
 **Reserved words (keywords):**
 
 ```
-as       async    each     else     enum     extern   false    fn
-for      from     if       in       inference io      let      loop
-match    module   mut      parallel pub      race     record   return
-trace    true     unsafe   use      where    while    with
+as       each     else     enum     extern   false    fn       for
+from     if       in       let      loop     match    module   mut
+parallel pub      race     record   return   trace    true     unsafe
+use      where    while    with
 ```
 
-> **Note on `async` / `io` / `inference`:** these are keywords at the lexer level so that effect-row syntax `!{io, async}` parses unambiguously. Whether they are truly reserved for user identifiers in all contexts is a parser-level concern handled in [`syntax.md`](syntax.md).
+> **Effect names are not keywords.** `io`, `async`, `inference` — the core effects declared in DESIGN.md §7 — lex as ordinary identifiers. The effect-row parser treats them no differently from effect-row type variables like `E`. This keeps them available as local variable names in ordinary code, and removes a special case from the lexer.
 
 > **Not keywords:** `Ok`, `Err`, `Some`, `None`, `Result`, `Option`, `List`, `Int`, `String`, `Bool`. These are ordinary identifiers that happen to name stdlib types and constructors. The lexer does not privilege them.
 
