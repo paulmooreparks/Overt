@@ -1,6 +1,11 @@
 KeywordModule(module) @ 1:1..1:7
 Identifier(ffi_example) @ 1:8..1:19
 KeywordExtern(extern) @ 9:1..9:7
+LineComment(// Three platforms, one declaration syntax.) @ 3:1..3:44
+LineComment(// The Overt signature is the normalized one the agent sees; the compiler) @ 4:1..4:74
+LineComment(// handles all boundary conversion (exceptions → Result, nullable → Option,) @ 5:1..5:76
+LineComment(// primitive marshaling).) @ 6:1..6:26
+LineComment(// Import a .NET static method. C# exceptions become Err at the boundary.) @ 8:1..8:74
 StringLiteral("csharp") @ 9:8..9:16
 KeywordFn(fn) @ 9:17..9:19
 Identifier(file_exists) @ 9:20..9:31
@@ -18,6 +23,7 @@ Identifier(Bool) @ 9:55..9:59
 Identifier(binds) @ 10:5..10:10
 StringLiteral("System.IO.File.Exists") @ 10:11..10:34
 KeywordExtern(extern) @ 13:1..13:7
+LineComment(// Import a Go function. Go's (value, ok) pattern becomes Option.) @ 12:1..12:66
 StringLiteral("go") @ 13:8..13:12
 KeywordFn(fn) @ 13:13..13:15
 Identifier(env_value) @ 13:16..13:25
@@ -38,6 +44,9 @@ Greater(>) @ 13:61..13:62
 Identifier(binds) @ 14:5..14:10
 StringLiteral("os.LookupEnv") @ 14:11..14:25
 KeywordUnsafe(unsafe) @ 19:1..19:7
+LineComment(// Import a C function. Requires `unsafe` and `from`.) @ 16:1..16:54
+LineComment(// CString and Ptr<T> are distinct types from Overt String and List — conversions) @ 17:1..17:82
+LineComment(// across the C boundary are always explicit.) @ 18:1..18:46
 KeywordExtern(extern) @ 19:8..19:14
 StringLiteral("c") @ 19:15..19:18
 KeywordFn(fn) @ 19:19..19:21
@@ -54,6 +63,8 @@ StringLiteral("strlen") @ 20:11..20:19
 Identifier(from) @ 21:5..21:9
 StringLiteral("libc") @ 21:11..21:17
 KeywordFn(fn) @ 25:1..25:3
+LineComment(// Safe Overt wrapper around the unsafe C binding.) @ 23:1..23:51
+LineComment(// From here on, no other code touches c_strlen directly.) @ 24:1..24:58
 Identifier(strlen) @ 25:4..25:10
 LeftParen(() @ 25:10..25:11
 Identifier(s) @ 25:11..25:12

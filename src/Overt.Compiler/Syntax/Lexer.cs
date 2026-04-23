@@ -414,8 +414,10 @@ public sealed class Lexer
         => new(kind, lexeme, new SourceSpan(start, CurrentPosition));
 
     /// <summary>
-    /// Skips whitespace, line terminators, and line comments. Called in default and
-    /// interpolation modes; string-body mode has its own scanning rules.
+    /// Skips whitespace and line terminators, and queues up any line-comment
+    /// tokens it encounters so they can be returned by <see cref="NextToken"/>
+    /// before the next real token. Formatter consumers use the comment tokens;
+    /// the parser skips them via <c>Advance</c>'s auto-skip.
     /// </summary>
     private void SkipTrivia()
     {
@@ -429,10 +431,18 @@ public sealed class Lexer
             }
             if (c == '/' && Peek(1) == '/')
             {
+                var commentStart = CurrentPosition;
+                var text = new System.Text.StringBuilder();
                 while (!IsAtEnd && Peek() != '\n')
                 {
+                    text.Append(Peek());
                     Advance();
                 }
+                var commentEnd = CurrentPosition;
+                _pending.Enqueue(new Token(
+                    TokenKind.LineComment,
+                    text.ToString(),
+                    new SourceSpan(commentStart, commentEnd)));
                 continue;
             }
             break;

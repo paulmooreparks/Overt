@@ -36,6 +36,9 @@ RightBrace(}) @ 11:36..11:37
 Comma(,) @ 11:37..11:38
 RightBrace(}) @ 12:1..12:2
 KeywordExtern(extern) @ 17:1..17:7
+LineComment(// Binding to an external LLM service.) @ 14:1..14:39
+LineComment(// Note `inference` alongside `io` and `async` in the effect row — this is what) @ 15:1..15:80
+LineComment(// marks a function as "calls an external AI inference service.") @ 16:1..16:65
 StringLiteral("csharp") @ 17:8..17:16
 KeywordFn(fn) @ 17:17..17:19
 Identifier(call_llm) @ 17:20..17:28
@@ -62,6 +65,7 @@ Greater(>) @ 17:95..17:96
 Identifier(binds) @ 18:5..18:10
 StringLiteral("MyApp.Llm.Complete") @ 18:11..18:31
 KeywordFn(fn) @ 21:1..21:3
+LineComment(// Any function that invokes `call_llm` inherits the `inference` effect.) @ 20:1..20:73
 Identifier(classify) @ 21:4..21:12
 LeftParen(() @ 21:12..21:13
 Identifier(text) @ 21:13..21:17
@@ -120,6 +124,7 @@ Identifier(LlmError) @ 27:62..27:70
 Greater(>) @ 27:70..27:71
 LeftBrace({) @ 27:72..27:73
 Identifier(Ok) @ 29:5..29:7
+LineComment(// Simplified — a real implementation would parse structured JSON output.) @ 28:5..28:78
 LeftParen(() @ 29:7..29:8
 Identifier(Classification) @ 29:8..29:22
 LeftBrace({) @ 29:23..29:24
@@ -134,6 +139,9 @@ RightBrace(}) @ 29:62..29:63
 RightParen()) @ 29:63..29:64
 RightBrace(}) @ 30:1..30:2
 KeywordFn(fn) @ 35:1..35:3
+LineComment(// Parallel classification. `par_map`'s effect row unifies over its callback,) @ 32:1..32:78
+LineComment(// so this function's row inherits `inference` transparently. The agent cannot) @ 33:1..33:79
+LineComment(// accidentally hide LLM calls from callers — the effect row surfaces them.) @ 34:1..34:76
 Identifier(classify_batch) @ 35:4..35:18
 LeftParen(() @ 35:18..35:19
 Identifier(texts) @ 35:19..35:24

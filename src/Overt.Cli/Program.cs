@@ -27,11 +27,16 @@ using RoslynCSharp = global::Microsoft.CodeAnalysis.CSharp;
 //
 // See docs/tooling/godbolt.md for the integration criteria this CLI honors.
 
-// Subcommand dispatch: `overt run file.ov` runs ahead of the --emit pipeline.
-// Everything else (including --help/--version) falls through to the flag parser.
+// Subcommand dispatch: `overt run file.ov` and `overt fmt file.ov` run ahead
+// of the --emit flag parser. Everything else (including --help/--version)
+// falls through to the flag parser.
 if (args.Length >= 1 && args[0] == "run")
 {
     return Cli.RunProgram(args.AsSpan(1).ToArray());
+}
+if (args.Length >= 1 && args[0] == "fmt")
+{
+    return Cli.FormatProgram(args.AsSpan(1).ToArray());
 }
 
 return Cli.Run(args);
@@ -44,10 +49,13 @@ static class Cli
         """
         usage: overt --emit=<stage> <file.ov>
                overt run <file.ov>
+               overt fmt [--write] <file.ov>
 
         commands:
           run              transpile, compile, and execute <file.ov>. Exits 0 on
                            Ok, 1 on compile errors or Err, 2 on usage errors.
+          fmt              format <file.ov> to canonical form. Writes to stdout
+                           unless --write is passed, which updates in place.
 
         options:
           --emit=<stage>   required for emit mode. one of:
@@ -302,6 +310,70 @@ static class Cli
         var err = errProp?.GetValue(result);
         Console.Error.WriteLine($"overt run: main returned Err: {err}");
         return 1;
+    }
+
+    // `overt fmt [--write] <file.ov>` — format the file. Default writes to
+    // stdout so `overt fmt foo.ov | diff foo.ov -` works; pass --write to
+    // update the file in place. Exit codes:
+    //   0  — clean format (or file already formatted with --write)
+    //   1  — lex or parse errors (cannot format a malformed file)
+    //   2  — usage errors
+    public static int FormatProgram(string[] args)
+    {
+        string? inputFile = null;
+        var write = false;
+        foreach (var arg in args)
+        {
+            if (arg is "--help" or "-h")
+            {
+                Console.Out.WriteLine("usage: overt fmt [--write] <file.ov>");
+                return 0;
+            }
+            if (arg == "--write" || arg == "-w") { write = true; continue; }
+            if (arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"overt fmt: unknown option '{arg}'");
+                return 2;
+            }
+            if (inputFile is not null)
+            {
+                Console.Error.WriteLine("overt fmt: multiple input files not supported");
+                return 2;
+            }
+            inputFile = arg;
+        }
+        if (inputFile is null)
+        {
+            Console.Error.WriteLine("overt fmt: missing input file");
+            return 2;
+        }
+        if (!File.Exists(inputFile))
+        {
+            Console.Error.WriteLine($"overt fmt: file not found: {inputFile}");
+            return 1;
+        }
+
+        var source = File.ReadAllText(inputFile);
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+
+        var diagnostics = lex.Diagnostics.AddRange(parse.Diagnostics);
+        if (WriteDiagnostics(inputFile, diagnostics) != 0)
+        {
+            Console.Error.WriteLine("overt fmt: refusing to format a file with lex/parse errors");
+            return 1;
+        }
+
+        var formatted = Formatter.Format(parse.Module, lex.Tokens);
+        if (write)
+        {
+            File.WriteAllText(inputFile, formatted);
+        }
+        else
+        {
+            Console.Out.Write(formatted);
+        }
+        return 0;
     }
 
     static int EmitCSharp(string source, string inputFile)

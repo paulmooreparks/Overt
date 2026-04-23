@@ -1,6 +1,7 @@
 KeywordModule(module) @ 1:1..1:7
 Identifier(effects_example) @ 1:8..1:23
 KeywordFn(fn) @ 4:1..4:3
+LineComment(// Pure function — no effect marker) @ 3:1..3:36
 Identifier(double) @ 4:4..4:10
 LeftParen(() @ 4:10..4:11
 Identifier(n) @ 4:11..4:12
@@ -15,6 +16,9 @@ Star(*) @ 5:7..5:8
 IntegerLiteral(2) @ 5:9..5:10
 RightBrace(}) @ 6:1..6:2
 KeywordFn(fn) @ 11:1..11:3
+LineComment(// I/O-doing function — !{io} in the signature.) @ 8:1..8:48
+LineComment(// Discard the println Result explicitly since the function's own return type is) @ 9:1..9:81
+LineComment(// `Int` (no IoError channel), and we're treating the log as fire-and-forget.) @ 10:1..10:78
 Identifier(log_and_double) @ 11:4..11:18
 LeftParen(() @ 11:18..11:19
 Identifier(n) @ 11:19..11:20
@@ -43,6 +47,9 @@ Star(*) @ 13:7..13:8
 IntegerLiteral(2) @ 13:9..13:10
 RightBrace(}) @ 14:1..14:2
 KeywordFn(fn) @ 19:1..19:3
+LineComment(// Effect-polymorphic higher-order function.) @ 16:1..16:45
+LineComment(// `E` is an effect-row type variable. The function's row is whatever row) @ 17:1..17:74
+LineComment(// the callback carries — no more, no less.) @ 18:1..18:44
 Identifier(apply_twice) @ 19:4..19:15
 Less(<) @ 19:15..19:16
 Identifier(T) @ 19:16..19:17
@@ -83,6 +90,7 @@ RightParen()) @ 20:10..20:11
 RightParen()) @ 20:11..20:12
 RightBrace(}) @ 21:1..21:2
 KeywordFn(fn) @ 24:1..24:3
+LineComment(// Pure call site: E is solved as empty, so this function is pure.) @ 23:1..23:67
 Identifier(quadruple) @ 24:4..24:13
 LeftParen(() @ 24:13..24:14
 Identifier(n) @ 24:14..24:15
@@ -104,6 +112,9 @@ Identifier(n) @ 25:33..25:34
 RightParen()) @ 25:34..25:35
 RightBrace(}) @ 26:1..26:2
 KeywordFn(fn) @ 31:1..31:3
+LineComment(// I/O call site: E is solved as {io}, so this function must declare !{io}.) @ 28:1..28:76
+LineComment(// The effect propagates through the higher-order call transparently —) @ 29:1..29:71
+LineComment(// signatures stay explicit; call sites need no effect annotations.) @ 30:1..30:68
 Identifier(noisy_quadruple) @ 31:4..31:19
 LeftParen(() @ 31:19..31:20
 Identifier(n) @ 31:20..31:21

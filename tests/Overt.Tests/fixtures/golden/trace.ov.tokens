@@ -58,6 +58,10 @@ RightBrace(}) @ 15:38..15:39
 Comma(,) @ 15:39..15:40
 RightBrace(}) @ 16:1..16:2
 KeywordFn(fn) @ 22:1..22:3
+LineComment(// A `trace` block captures structured events — function entry/exit, value) @ 18:1..18:75
+LineComment(// bindings, branches taken, pattern-match arms — for any registered consumer.) @ 19:1..19:79
+LineComment(// With no consumer subscribed, the block is a zero-cost pass-through: the body) @ 20:1..20:80
+LineComment(// still runs, but no events are allocated or dispatched.) @ 21:1..21:58
 Identifier(process_order) @ 22:4..22:17
 LeftParen(() @ 22:17..22:18
 Identifier(order) @ 22:18..22:23
@@ -161,6 +165,8 @@ RightBrace(}) @ 34:9..34:10
 RightBrace(}) @ 35:5..35:6
 RightBrace(}) @ 36:1..36:2
 KeywordFn(fn) @ 40:1..40:3
+LineComment(// Register a consumer at the start of main to observe the trace.) @ 38:1..38:66
+LineComment(// In production, this is typically not called, so traces are inert.) @ 39:1..39:69
 Identifier(main) @ 40:4..40:8
 LeftParen(() @ 40:8..40:9
 RightParen()) @ 40:9..40:10
@@ -261,6 +267,7 @@ LeftParen(() @ 51:44..51:45
 RightParen()) @ 51:45..51:46
 LeftBrace({) @ 51:47..51:48
 KeywordLet(let) @ 53:5..53:8
+LineComment(// Discard the Result explicitly (DESIGN.md §11: ignored Results are errors).) @ 52:5..52:82
 Identifier(_) @ 53:9..53:10
 Equals(=) @ 53:11..53:12
 Identifier(println) @ 53:13..53:20

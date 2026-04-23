@@ -1,6 +1,8 @@
 KeywordModule(module) @ 1:1..1:7
 Identifier(refinement_example) @ 1:8..1:26
 KeywordType(type) @ 6:1..6:5
+LineComment(// Refinement types push validation into the type system, out of scattered if-statements.) @ 3:1..3:90
+LineComment(// Syntax: `T where <predicate>`, with `self` referring to the value.) @ 4:1..4:70
 Identifier(Age) @ 6:6..6:9
 Equals(=) @ 6:18..6:19
 Identifier(Int) @ 6:20..6:23
@@ -92,6 +94,10 @@ Identifier(NoFriends) @ 21:5..21:14
 Comma(,) @ 21:14..21:15
 RightBrace(}) @ 22:1..22:2
 KeywordFn(fn) @ 28:1..28:3
+LineComment(// Each `check_*` helper uses flow-sensitive type narrowing: once a predicate) @ 24:1..24:78
+LineComment(// is proven inside a branch, the compiler narrows the base type to the) @ 25:1..25:72
+LineComment(// corresponding refinement type. That is why `Ok(raw)` type-checks in the) @ 26:1..26:75
+LineComment(// Ok branch even though `raw` was declared as `Int`.) @ 27:1..27:54
 Identifier(check_age) @ 28:4..28:13
 LeftParen(() @ 28:13..28:14
 Identifier(raw) @ 28:14..28:17

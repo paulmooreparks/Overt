@@ -39,6 +39,10 @@ public enum TokenKind
     KeywordUnsafe,
     KeywordType,
 
+    // Trivia — emitted by the lexer so the formatter can preserve them.
+    // Parser callers skip these via AdvancePastComments / token-navigation helpers.
+    LineComment,
+
     // Literals
     IntegerLiteral,
     FloatLiteral,

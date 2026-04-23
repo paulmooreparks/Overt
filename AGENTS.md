@@ -418,8 +418,8 @@ compiles cleanly but won't execute until the binding milestone lands.
   constants distinct from `let`.
 - Record and variant field names are lowercase: `IoError { narrative = "..." }`,
   not `Narrative`.
-- One canonical form is enforced by convention today; a formatter lands in a
-  later session.
+- One canonical form is enforced by `overt fmt <file>`. Pass `--write` to
+  update in place. The formatter is idempotent and comment-preserving.
 
 ---
 

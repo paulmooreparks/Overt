@@ -33,7 +33,15 @@ public sealed class Parser
 
     public static ParseResult Parse(ImmutableArray<Token> tokens)
     {
-        var parser = new Parser(tokens);
+        // Filter out comment tokens before parsing. Comments are preserved in the
+        // full token stream for the formatter; the parser's AST has no home for
+        // them today, and skipping them at navigation time would complicate every
+        // Peek() call. The formatter reads the original (unfiltered) token array
+        // from LexResult.Tokens and re-associates comments with AST spans.
+        var filtered = tokens.Length > 0 && tokens.Any(t => t.Kind == TokenKind.LineComment)
+            ? tokens.Where(t => t.Kind != TokenKind.LineComment).ToImmutableArray()
+            : tokens;
+        var parser = new Parser(filtered);
         var module = parser.ParseModule();
         return new ParseResult(module, parser._diagnostics.ToImmutableArray());
     }
