@@ -67,17 +67,17 @@ Two-tier split: language-level work is shared across all backends; anything that
 flowchart TB
     src["<b>Overt source</b> (.ov)"]
 
-    subgraph tier1 ["<b>Backend-independent</b> · <code>Overt.Compiler</code>"]
+    subgraph tier1 ["<code>Overt.Compiler</code>"]
         direction TB
         pipe["Lex · Parse · Resolve · Type-check"]
         shared["Formatter · Module graph<br/>Diagnostics · LSP protocol<br/>--emit=tokens/ast/resolved/typed"]
     end
 
-    subgraph tier2 ["<b>Per-backend</b> · <code>Overt.Backend.*</code>"]
+    subgraph tier2 ["<code>Overt.Backend.*</code>"]
         direction LR
         cs["<b>C#</b> (today)<br/>Emitter · Runtime<br/>BindGen · Runner<br/>#line + PDB · NuGet"]
         go["<b>Go</b> (scaffold)"]
-        cpp["<b>C++ / future</b>"]
+        future["<b>Future: TypeScript, Rust, C++, etc.</b>"]
     end
 
     src --> tier1

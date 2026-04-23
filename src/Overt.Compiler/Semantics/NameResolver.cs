@@ -140,6 +140,23 @@ public sealed class NameResolver
                 // can seed their types. Key by alias-qualified name to avoid
                 // collisions with selective imports of the same bare name.
                 _importedSymbols[$"{alias}.{name}"] = sym;
+
+                // Types come along unqualified even in the aliased form —
+                // you can't practically call `alias.make_foo()` without being
+                // able to spell `Foo` as a type. This is not a wildcard-guess
+                // hazard (types are a bounded, enumerable set within each
+                // module), and matches the common C#/Rust pattern of
+                // `using alias` bringing type-class names into scope.
+                if (sym.Kind is SymbolKind.Record
+                    or SymbolKind.Enum
+                    or SymbolKind.TypeAlias)
+                {
+                    if (moduleScope.FindConflict(name) is null)
+                    {
+                        moduleScope.Define(sym);
+                        _importedSymbols[name] = sym;
+                    }
+                }
             }
             return;
         }
@@ -171,6 +188,9 @@ public sealed class NameResolver
         EnumDecl e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
         TypeAliasDecl t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
         ExternDecl x => new Symbol(SymbolKind.Extern, x.Name, x.Span, x),
+        // Extern types act like nominal types — symbol kind Record keeps them
+        // in the "this is a type, not a value" bucket.
+        ExternTypeDecl xt => new Symbol(SymbolKind.Record, xt.Name, xt.Span, xt),
         _ => null,
     };
 

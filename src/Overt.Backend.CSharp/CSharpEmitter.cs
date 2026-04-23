@@ -195,6 +195,19 @@ public sealed class CSharpEmitter
             }
         }
 
+        // Extern opaque-type declarations map to C# type aliases so a name
+        // like `StringBuilder` in the Overt source lowers to the host type
+        // `System.Text.StringBuilder` without any rename pass. The Overt
+        // compiler treats the opaque type as a nominal type; the C# side
+        // sees only the aliased spelling.
+        foreach (var xt in module.Declarations.OfType<ExternTypeDecl>())
+        {
+            if (xt.Platform == "csharp")
+            {
+                _w.WriteLine($"using {EscapeId(xt.Name)} = global::{xt.BindsTarget};");
+            }
+        }
+
         _w.WriteLine();
         _w.WriteLine($"namespace Overt.Generated.{ModuleNameToCSharp(module.Name)};");
         _w.WriteLine();
@@ -489,18 +502,47 @@ public sealed class CSharpEmitter
         var returnsResult = x.ReturnType is NamedType
             { Name: "Result", TypeArguments.Length: 2 };
 
-        // Build the C# call expression: <global::><binds target>(arg1, arg2, ...).
-        // The `global::` prefix forces resolution against the compilation's root
-        // namespace rather than the current file's namespace — critical when a
-        // facade module is declared under something like `stdlib.csharp.system.io.path`
-        // because the emitted C# namespace `Overt.Generated.Stdlib.System.Io.Path`
-        // shadows the real `System` namespace for the duration of that file.
-        var args = string.Join(", ",
-            x.Parameters.Select(p => EscapeId(p.Name)));
-        var prefixedTarget = "global::" + x.BindsTarget;
-        var callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
-            ? prefixedTarget
-            : $"{prefixedTarget}({args})";
+        // Recognize three binds-target shapes:
+        //   Ns.Type.Method         — static method/property/field
+        //   Ns.Type::Method        — instance method; first Overt param is receiver
+        //   Ns.Type..ctor          — constructor; emit `new Ns.Type(args)`
+        // Each lowers to a different C# call expression. `global::` prefix on
+        // the type portion forces resolution against the root namespace so
+        // facade modules whose C# namespace shadows `System.*` still work.
+        string callExpr;
+        if (x.BindsTarget.EndsWith("..ctor", StringComparison.Ordinal))
+        {
+            var typeName = x.BindsTarget[..^"..ctor".Length];
+            var ctorArgs = string.Join(", ",
+                x.Parameters.Select(p => EscapeId(p.Name)));
+            callExpr = $"new global::{typeName}({ctorArgs})";
+        }
+        else if (x.BindsTarget.Contains("::"))
+        {
+            // Instance method: first Overt parameter IS the receiver.
+            if (x.Parameters.Length == 0)
+            {
+                _w.WriteLine(
+                    "throw new InvalidOperationException("
+                    + "\"extern with `::` binds target requires a `self` parameter\");");
+                return;
+            }
+            var splitIdx = x.BindsTarget.IndexOf("::", StringComparison.Ordinal);
+            var methodName = x.BindsTarget[(splitIdx + 2)..];
+            var receiver = EscapeId(x.Parameters[0].Name);
+            var rest = string.Join(", ",
+                x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
+            callExpr = $"{receiver}.{methodName}({rest})";
+        }
+        else
+        {
+            var args = string.Join(", ",
+                x.Parameters.Select(p => EscapeId(p.Name)));
+            var prefixedTarget = "global::" + x.BindsTarget;
+            callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
+                ? prefixedTarget
+                : $"{prefixedTarget}({args})";
+        }
 
         if (!returnsResult)
         {

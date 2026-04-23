@@ -76,6 +76,18 @@ public static class BindGenerator
         sb.AppendLine("// hand-curated effect annotations on top.");
         sb.AppendLine();
 
+        // For reference types, emit an `extern type` declaration so the Overt
+        // module can refer to the opaque type by name. Non-classes (structs,
+        // enums) are value types and aren't modeled as opaque externs today —
+        // they skip this step and only static members emit.
+        var overtTypeName = targetType.Name;
+        var isReferenceType = targetType.IsClass && !targetType.IsAbstract;
+        if (isReferenceType)
+        {
+            sb.AppendLine($"extern \"csharp\" type {overtTypeName} binds \"{targetType.FullName}\"");
+            sb.AppendLine();
+        }
+
         // Static read-only properties and fields emit as zero-arg externs; the
         // extern runtime detects them via reflection and emits bare member
         // access instead of a call. Properties without a public getter and
@@ -131,11 +143,165 @@ public static class BindGenerator
             // differ in primitive type — `Abs(int)` vs `Abs(double)` both
             // become `abs_1` under arity-only. Type-suffixing yields
             // `abs_int` / `abs_double`.
-            var name = needsSuffix ? $"{overt}_{OverloadSuffix(method)}" : overt;
+            var suffix = OverloadSuffix(method);
+            var name = needsSuffix && suffix.Length > 0 ? $"{overt}_{suffix}" : overt;
             EmitMethod(sb, targetType, method, effects, pure, name, topLevelNames);
         }
 
+        // Instance-side: constructors + instance methods. Only emitted when
+        // the target type is a reference type we modeled as an opaque extern
+        // type above — otherwise an instance method has no self-type to hang
+        // onto. Param/return types are limited to primitives or the target
+        // type itself (so `StringBuilder.Append(string) -> StringBuilder`
+        // works; anything that would pull in another opaque type skips).
+        if (isReferenceType)
+        {
+            var typeOverloads = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            var ctors = targetType
+                .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                .Where(c => IsRenderableCtor(c, targetType))
+                .OrderBy(c => c.GetParameters().Length)
+                .ToList();
+            foreach (var ctor in ctors)
+            {
+                var ctorSuffix = OverloadSuffixParams(ctor.GetParameters());
+                var overtName = (ctors.Count > 1 && ctorSuffix.Length > 0)
+                    ? $"new_{ctorSuffix}"
+                    : "new_";
+                EmitCtor(sb, targetType, overtTypeName, ctor, effects, pure, overtName, topLevelNames);
+                topLevelNames.Add(overtName);
+            }
+
+            var instanceMethods = targetType
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => IsRenderableInstance(m, targetType))
+                .OrderBy(m => m.Name, StringComparer.Ordinal)
+                .ThenBy(m => m.GetParameters().Length)
+                .ToList();
+            var renderableInstanceByName = instanceMethods
+                .GroupBy(m => ToSnakeCase(m.Name), StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Count());
+            foreach (var m in instanceMethods)
+            {
+                var overt = ToSnakeCase(m.Name);
+                var needsSuffix = renderableInstanceByName[overt] > 1;
+                var suffix = OverloadSuffix(m);
+                var name = needsSuffix && suffix.Length > 0 ? $"{overt}_{suffix}" : overt;
+                EmitInstanceMethod(sb, targetType, overtTypeName, m, effects, pure, name, topLevelNames);
+                topLevelNames.Add(name);
+            }
+        }
+
         return sb.ToString();
+    }
+
+    private static bool IsRenderableCtor(ConstructorInfo ctor, Type targetType)
+    {
+        foreach (var p in ctor.GetParameters())
+        {
+            if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
+            if (!IsRenderableType(p.ParameterType, targetType)) return false;
+        }
+        return true;
+    }
+
+    private static bool IsRenderableInstance(MethodInfo method, Type targetType)
+    {
+        if (method.IsGenericMethod) return false;
+        foreach (var p in method.GetParameters())
+        {
+            if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
+            if (!IsRenderableType(p.ParameterType, targetType)) return false;
+        }
+        if (method.ReturnType != typeof(void)
+            && !IsRenderableType(method.ReturnType, targetType)) return false;
+        return true;
+    }
+
+    /// <summary>For instance-side rendering, the set of supported types is
+    /// the same primitive set as <see cref="MapCSharpTypeToOvert"/>, plus the
+    /// target type itself (which we're modeling as an opaque extern type
+    /// above). Cross-type opaque references — e.g. a method returning an
+    /// unrelated reference type — aren't yet tracked and skip.</summary>
+    private static bool IsRenderableType(Type t, Type targetType)
+    {
+        if (t == targetType) return true;
+        return MapCSharpTypeToOvert(t) is not null;
+    }
+
+    /// <summary>Map a type to its Overt spelling, treating the target type
+    /// as its bare Overt name (since we emit an `extern type` for it above).</summary>
+    private static string? MapInstanceType(Type t, Type targetType)
+    {
+        if (t == targetType) return targetType.Name;
+        return MapCSharpTypeToOvert(t);
+    }
+
+    private static string OverloadSuffixParams(ParameterInfo[] ps)
+        => ps.Length == 0 ? "" : string.Join("_", ps.Select(p => CSharpTypeSuffix(p.ParameterType)));
+
+    private static void EmitCtor(
+        StringBuilder sb, Type targetType, string overtTypeName, ConstructorInfo ctor,
+        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames)
+    {
+        var paramList = new List<string>();
+        foreach (var p in ctor.GetParameters())
+        {
+            var overtType = MapInstanceType(p.ParameterType, targetType);
+            if (overtType is null) return;
+            var paramName = ToSnakeCase(p.Name ?? "arg");
+            if (topLevelNames.Contains(paramName)) paramName = paramName + "_arg";
+            paramList.Add($"{paramName}: {overtType}");
+        }
+
+        sb.Append("extern \"csharp\" fn ");
+        sb.Append(overtName);
+        sb.Append('(');
+        sb.Append(string.Join(", ", paramList));
+        sb.Append(") -> ");
+        sb.Append(overtTypeName);
+        sb.AppendLine();
+        sb.AppendLine($"    binds \"{targetType.FullName}..ctor\"");
+        sb.AppendLine();
+    }
+
+    private static void EmitInstanceMethod(
+        StringBuilder sb, Type targetType, string overtTypeName, MethodInfo method,
+        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames)
+    {
+        // First parameter is always `self: TargetType` — the convention the
+        // extern runtime uses to recognize an instance-method binding.
+        var paramList = new List<string> { $"self: {overtTypeName}" };
+        foreach (var p in method.GetParameters())
+        {
+            var overtType = MapInstanceType(p.ParameterType, targetType);
+            if (overtType is null) return;
+            var paramName = ToSnakeCase(p.Name ?? "arg");
+            if (topLevelNames.Contains(paramName) || paramName == "self")
+                paramName = paramName + "_arg";
+            paramList.Add($"{paramName}: {overtType}");
+        }
+
+        var returnOvertType = method.ReturnType == typeof(void)
+            ? "()"
+            : MapInstanceType(method.ReturnType, targetType);
+        if (returnOvertType is null) return;
+        var retText = (pure || returnOvertType == "()")
+            ? returnOvertType
+            : $"Result<{returnOvertType}, IoError>";
+
+        sb.Append("extern \"csharp\" fn ");
+        sb.Append(overtName);
+        sb.Append('(');
+        sb.Append(string.Join(", ", paramList));
+        sb.Append(')');
+        if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
+        sb.Append($" -> {retText}");
+        sb.AppendLine();
+        sb.AppendLine($"    binds \"{targetType.FullName}::{method.Name}\"");
+        sb.AppendLine();
     }
 
     private static void EmitProperty(
@@ -188,13 +354,15 @@ public static class BindGenerator
     /// C# type names so <c>Abs(float)</c> and <c>Abs(double)</c> get distinct
     /// Overt names (both would map to Overt's <c>Float</c>). Names are the
     /// C# primitive aliases where known, or the type's Name for others.
+    /// Zero-param overloads return the empty string — callers should drop the
+    /// trailing underscore to yield the bare name.
     /// </summary>
     private static string OverloadSuffix(MethodInfo method)
     {
         var parts = method.GetParameters()
             .Select(p => CSharpTypeSuffix(p.ParameterType))
             .ToArray();
-        return parts.Length == 0 ? "noargs" : string.Join("_", parts);
+        return parts.Length == 0 ? "" : string.Join("_", parts);
     }
 
     private static string CSharpTypeSuffix(Type t)

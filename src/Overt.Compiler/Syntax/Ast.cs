@@ -74,6 +74,22 @@ public sealed record UseDecl(
     public string ModuleName => string.Join(".", ModulePath);
 }
 
+/// <summary>
+/// FFI type import — an opaque Overt type whose representation is a host-language
+/// type. Shape:
+/// <code>
+///   extern type "platform" Name binds "Namespace.HostType"
+/// </code>
+/// Lets Overt refer to host types by name (e.g. <c>StringBuilder</c>, <c>HttpClient</c>)
+/// without declaring their fields. Paired with <see cref="ExternDecl"/>s that take
+/// a <c>self: T</c> parameter (instance methods) or return the type (constructors).
+/// </summary>
+public sealed record ExternTypeDecl(
+    string Platform,
+    string Name,
+    string BindsTarget,
+    SourceSpan Span) : Declaration(Span);
+
 public sealed record ExternDecl(
     string Platform,
     bool IsUnsafe,

@@ -157,7 +157,7 @@ public sealed class Parser
         return null;
     }
 
-    private ExternDecl ParseExternDecl()
+    private Declaration ParseExternDecl()
     {
         var startPos = Current.Span.Start;
         var isUnsafe = Match(TokenKind.KeywordUnsafe);
@@ -165,6 +165,18 @@ public sealed class Parser
 
         var platformToken = Expect(TokenKind.StringLiteral, "extern platform string");
         var platform = StripQuotes(platformToken.Lexeme);
+
+        // `extern "platform" type Name binds "..."` — opaque type import.
+        if (Check(TokenKind.KeywordType))
+        {
+            if (isUnsafe)
+            {
+                ReportError("OV0157",
+                    "`unsafe` is not applicable to extern type declarations",
+                    new SourceSpan(startPos, Current.Span.End));
+            }
+            return ParseExternTypeDeclRest(platform, startPos);
+        }
 
         Expect(TokenKind.KeywordFn, "extern function signature");
         var nameToken = Expect(TokenKind.Identifier, "extern function name");
@@ -211,6 +223,20 @@ public sealed class Parser
             bindsTarget,
             fromLibrary,
             new SourceSpan(startPos, endPos));
+    }
+
+    private ExternTypeDecl ParseExternTypeDeclRest(string platform, SourcePosition startPos)
+    {
+        Expect(TokenKind.KeywordType, "extern type declaration");
+        var nameToken = Expect(TokenKind.Identifier, "extern type name");
+        ExpectContextualKeyword("binds", "extern type declaration");
+        var bindsToken = Expect(TokenKind.StringLiteral, "binds target string");
+        var bindsTarget = StripQuotes(bindsToken.Lexeme);
+        return new ExternTypeDecl(
+            platform,
+            nameToken.Lexeme,
+            bindsTarget,
+            new SourceSpan(startPos, bindsToken.Span.End));
     }
 
     private void ExpectContextualKeyword(string word, string context)

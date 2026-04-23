@@ -564,6 +564,44 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternInstanceMethodsAndConstructor_RoundTripStringBuilder()
+    {
+        // Exercises the opaque-type + instance-method + constructor machinery
+        // against a real BCL class. `StringBuilder` is declared as an
+        // `extern type`; `new_()` binds to `..ctor`; `append(self, s)` and
+        // `to_string(self)` use `::` instance-method bindings. Verifies the
+        // full chain emits valid C# that compiles and runs.
+        const string src = """
+            module sb_e2e
+
+            extern "csharp" type StringBuilder binds "System.Text.StringBuilder"
+
+            extern "csharp" fn sb_new() -> StringBuilder
+                binds "System.Text.StringBuilder..ctor"
+
+            extern "csharp" fn sb_append(self: StringBuilder, s: String) -> StringBuilder
+                binds "System.Text.StringBuilder::Append"
+
+            extern "csharp" fn sb_to_string(self: StringBuilder) -> String
+                binds "System.Text.StringBuilder::ToString"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let b1: StringBuilder = sb_new()
+                let b2: StringBuilder = sb_append(self = b1, s = "hello ")
+                let b3: StringBuilder = sb_append(self = b2, s = "world")
+                let result: String = sb_to_string(b3)
+                println(result)?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "sb_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("hello world", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ExternCsharp_CallsBcl()
     {
         // Pure BCL static call through extern — should return the same string

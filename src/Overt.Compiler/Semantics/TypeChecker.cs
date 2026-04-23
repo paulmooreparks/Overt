@@ -130,6 +130,7 @@ public sealed class TypeChecker
         EnumDecl e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
         TypeAliasDecl t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
         ExternDecl x => new Symbol(SymbolKind.Extern, x.Name, x.Span, x),
+        ExternTypeDecl xt => new Symbol(SymbolKind.Record, xt.Name, xt.Span, xt),
         _ => null,
     };
 
@@ -147,6 +148,7 @@ public sealed class TypeChecker
         RecordDecl r => new NamedTypeRef(r.Name),
         EnumDecl e => new NamedTypeRef(e.Name),
         TypeAliasDecl t => LowerType(t.Target),
+        ExternTypeDecl xt => new NamedTypeRef(xt.Name),
         _ => UnknownType.Instance,
     };
 

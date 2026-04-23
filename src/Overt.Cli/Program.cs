@@ -472,6 +472,7 @@ static class Cli
                 RecordDecl r => new Symbol(SymbolKind.Record, r.Name, r.Span, r),
                 EnumDecl e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
                 TypeAliasDecl t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
+                ExternTypeDecl xt => new Symbol(SymbolKind.Record, xt.Name, xt.Span, xt),
                 _ => (Symbol?)null,
             };
             if (sym is not null) builder[sym.Name] = sym;
