@@ -4,8 +4,14 @@ module stdlib.csharp.system.guid
 // Hand-edits may be overwritten; prefer regenerating and layering
 // hand-curated effect annotations on top.
 
-// skipped System.Guid.AllBitsSet: property type 'System.Guid' is unsupported
-// skipped System.Guid.Empty: field type 'System.Guid' is unsupported
+extern "csharp" type Guid binds "System.Guid"
+
+extern "csharp" fn all_bits_set() !{io, fails} -> Result<Guid, IoError>
+    binds "System.Guid.AllBitsSet"
+
+extern "csharp" fn empty() !{io, fails} -> Result<Guid, IoError>
+    binds "System.Guid.Empty"
+
 // skipped System.Guid.CreateVersion7: return type 'System.Guid' is unsupported
 // skipped System.Guid.CreateVersion7: parameter 'timestamp' has unsupported type 'System.DateTimeOffset'
 // skipped System.Guid.NewGuid: return type 'System.Guid' is unsupported
@@ -21,3 +27,27 @@ module stdlib.csharp.system.guid
 // skipped System.Guid.TryParse: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.Guid.TryParseExact: parameter 'result' has unsupported type 'System.Guid&'
 // skipped System.Guid.TryParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn new_(g: String) -> Guid
+    binds "System.Guid..ctor"
+
+extern "csharp" fn variant(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid::Variant"
+
+extern "csharp" fn version(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid::Version"
+
+extern "csharp" fn compare_to(self: Guid, value: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid::CompareTo"
+
+extern "csharp" fn equals(self: Guid, g: Guid) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Guid::Equals"
+
+extern "csharp" fn get_hash_code(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid::GetHashCode"
+
+extern "csharp" fn to_string(self: Guid) !{io, fails} -> Result<String, IoError>
+    binds "System.Guid::ToString"
+
+extern "csharp" fn to_string_string(self: Guid, format: String) !{io, fails} -> Result<String, IoError>
+    binds "System.Guid::ToString"
+

@@ -519,7 +519,7 @@ public sealed class CSharpEmitter
         }
         else if (x.BindsTarget.Contains("::"))
         {
-            // Instance method: first Overt parameter IS the receiver.
+            // Instance method or property: first Overt parameter IS the receiver.
             if (x.Parameters.Length == 0)
             {
                 _w.WriteLine(
@@ -528,11 +528,24 @@ public sealed class CSharpEmitter
                 return;
             }
             var splitIdx = x.BindsTarget.IndexOf("::", StringComparison.Ordinal);
-            var methodName = x.BindsTarget[(splitIdx + 2)..];
+            var typeName = x.BindsTarget[..splitIdx];
+            var memberName = x.BindsTarget[(splitIdx + 2)..];
             var receiver = EscapeId(x.Parameters[0].Name);
-            var rest = string.Join(", ",
-                x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
-            callExpr = $"{receiver}.{methodName}({rest})";
+
+            // If the member is a property or field (detected via reflection
+            // against the declaring type), emit bare access `self.Prop`.
+            // Otherwise emit a method call `self.Member(rest-args)`.
+            if (x.Parameters.Length == 1
+                && IsInstancePropertyOrField(typeName, memberName))
+            {
+                callExpr = $"{receiver}.{memberName}";
+            }
+            else
+            {
+                var rest = string.Join(", ",
+                    x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
+                callExpr = $"{receiver}.{memberName}({rest})";
+            }
         }
         else
         {
@@ -656,6 +669,35 @@ public sealed class CSharpEmitter
             if (members.Length > 0) return true;
         }
         return false;
+    }
+
+    /// <summary>Reflection check for an instance-side <c>::</c> binds target:
+    /// returns true if the member is a public instance property or field
+    /// (accessed bare) rather than a method (accessed with parentheses).
+    /// Cached; mirrors <see cref="IsStaticPropertyOrField"/> but with
+    /// <c>BindingFlags.Instance</c>.</summary>
+    private static readonly Dictionary<string, bool> _instanceBindsIsProperty = new(StringComparer.Ordinal);
+
+    private static bool IsInstancePropertyOrField(string typeName, string memberName)
+    {
+        var key = typeName + "::" + memberName;
+        if (_instanceBindsIsProperty.TryGetValue(key, out var cached)) return cached;
+
+        var result = false;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            Type? type;
+            try { type = asm.GetType(typeName, throwOnError: false); }
+            catch { continue; }
+            if (type is null) continue;
+            var members = type.GetMember(
+                memberName,
+                System.Reflection.MemberTypes.Property | System.Reflection.MemberTypes.Field,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (members.Length > 0) { result = true; break; }
+        }
+        _instanceBindsIsProperty[key] = result;
+        return result;
     }
 
     // ----------------------------------------------------- type expressions

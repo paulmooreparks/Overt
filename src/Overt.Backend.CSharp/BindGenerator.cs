@@ -108,13 +108,16 @@ public static class BindGenerator
         }
         if (usesEmitted.Count > 0) sb.AppendLine();
 
-        // For reference types, emit an `extern type` declaration so the Overt
-        // module can refer to the opaque type by name. Non-classes (structs,
-        // enums) are value types and aren't modeled as opaque externs today —
-        // they skip this step and only static members emit.
+        // For constructible types — reference types AND value types (structs
+        // like DateTime, Guid, TimeSpan) — emit an `extern type` so the
+        // Overt module can refer to the opaque type by name. Abstract
+        // classes skip (can't construct); enums skip for now (they're
+        // better modeled as Overt enums with explicit variants).
         var overtTypeName = targetType.Name;
-        var isReferenceType = targetType.IsClass && !targetType.IsAbstract;
-        if (isReferenceType)
+        var isOpaqueConstructible =
+            (targetType.IsClass && !targetType.IsAbstract)
+            || (targetType.IsValueType && !targetType.IsEnum);
+        if (isOpaqueConstructible)
         {
             sb.AppendLine($"extern \"csharp\" type {overtTypeName} binds \"{targetType.FullName}\"");
             sb.AppendLine();
@@ -135,15 +138,15 @@ public static class BindGenerator
             .OrderBy(f => f.Name, StringComparer.Ordinal)
             .ToList();
 
-        foreach (var prop in properties) EmitProperty(sb, targetType, prop, effects, pure);
-        foreach (var field in fields)   EmitField(sb, targetType, field, effects, pure);
+        foreach (var prop in properties) EmitProperty(sb, targetType, prop, effects, pure, knownOpaques);
+        foreach (var field in fields)   EmitField(sb, targetType, field, effects, pure, knownOpaques);
 
-        // Track top-level names that become free functions in the facade.
-        // Parameter names that collide are mangled (suffix `_arg`) so Overt's
-        // no-shadowing rule (§3) doesn't reject the facade. The collision
-        // typically shows up when a type has both a property (e.g.
-        // `Environment.ExitCode`) and a method parameter with the matching
-        // snake_case name (e.g. `Environment.Exit(exitCode)`).
+        // Track every name that will become a free function in this facade —
+        // static methods/properties/fields AND instance methods/properties.
+        // Instance members come through as `fn name(self: T, ...)` so their
+        // names live in the same flat namespace as static ones. Parameter
+        // names that collide (e.g. `DaysInMonth(year, month)` with instance
+        // property `Year`) are later mangled with an `_arg` suffix.
         var topLevelNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var p in properties) topLevelNames.Add(ToSnakeCase(p.Name));
         foreach (var f in fields)     topLevelNames.Add(ToSnakeCase(f.Name));
@@ -155,6 +158,26 @@ public static class BindGenerator
             .ThenBy(m => m.GetParameters().Length)
             .ToList();
         foreach (var m in methods) topLevelNames.Add(ToSnakeCase(m.Name));
+
+        // Pre-seed instance-side names too, so static-method params don't
+        // collide with instance-side emit that happens later. E.g.
+        // `DaysInMonth(year, month)` emits before `fn year(self: DateTime)`,
+        // but param `year` must already know it will clash.
+        if (isOpaqueConstructible)
+        {
+            foreach (var p in targetType
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(p => p.CanRead && p.GetMethod is { IsPublic: true }))
+            {
+                topLevelNames.Add(ToSnakeCase(p.Name));
+            }
+            foreach (var m in targetType
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(m => !m.IsSpecialName))
+            {
+                topLevelNames.Add(ToSnakeCase(m.Name));
+            }
+        }
 
         // Overt doesn't support function overloading — one name per function.
         // First we count how many renderable overloads each Overt name has, so
@@ -181,12 +204,11 @@ public static class BindGenerator
         }
 
         // Instance-side: constructors + instance methods. Only emitted when
-        // the target type is a reference type we modeled as an opaque extern
-        // type above — otherwise an instance method has no self-type to hang
-        // onto. Param/return types can be primitives, the target type
+        // the target type is constructible (see `isOpaqueConstructible`
+        // above). Param/return types can be primitives, the target type
         // itself, OR any type in <paramref name="knownOpaques"/> (cross-type
         // references).
-        if (isReferenceType)
+        if (isOpaqueConstructible)
         {
             var ctors = targetType
                 .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
@@ -201,6 +223,22 @@ public static class BindGenerator
                     : "new_";
                 EmitCtor(sb, targetType, overtTypeName, ctor, effects, pure, overtName, topLevelNames, knownOpaques);
                 topLevelNames.Add(overtName);
+            }
+
+            // Instance properties (read-only ones — setters would need more
+            // machinery). Each becomes a zero-arg-besides-self extern with
+            // the `::` binds target; the runtime detects the property via
+            // reflection and emits bare member access.
+            var instanceProps = targetType
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(p => p.CanRead && p.GetMethod is { IsPublic: true })
+                .Where(p => MapInstanceType(p.PropertyType, targetType, knownOpaques) is not null)
+                .OrderBy(p => p.Name, StringComparer.Ordinal)
+                .ToList();
+            foreach (var p in instanceProps)
+            {
+                EmitInstanceProperty(sb, targetType, overtTypeName, p, effects, pure, knownOpaques, topLevelNames);
+                topLevelNames.Add(ToSnakeCase(p.Name));
             }
 
             var instanceMethods = targetType
@@ -302,6 +340,27 @@ public static class BindGenerator
         sb.AppendLine();
     }
 
+    private static void EmitInstanceProperty(
+        StringBuilder sb, Type targetType, string overtTypeName, PropertyInfo prop,
+        string[] effects, bool pure, Dictionary<Type, OpaqueTypeRef> knownOpaques,
+        HashSet<string> topLevelNames)
+    {
+        var overtType = MapInstanceType(prop.PropertyType, targetType, knownOpaques);
+        if (overtType is null) return;
+
+        var name = ToSnakeCase(prop.Name);
+        var retText = pure ? overtType : $"Result<{overtType}, IoError>";
+
+        sb.Append("extern \"csharp\" fn ");
+        sb.Append(name);
+        sb.Append($"(self: {overtTypeName})");
+        if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
+        sb.Append($" -> {retText}");
+        sb.AppendLine();
+        sb.AppendLine($"    binds \"{targetType.FullName}::{prop.Name}\"");
+        sb.AppendLine();
+    }
+
     private static void EmitInstanceMethod(
         StringBuilder sb, Type targetType, string overtTypeName, MethodInfo method,
         string[] effects, bool pure, string overtName, HashSet<string> topLevelNames,
@@ -341,9 +400,13 @@ public static class BindGenerator
     }
 
     private static void EmitProperty(
-        StringBuilder sb, Type targetType, PropertyInfo prop, string[] effects, bool pure)
+        StringBuilder sb, Type targetType, PropertyInfo prop, string[] effects, bool pure,
+        Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
-        var overtType = MapCSharpTypeToOvert(prop.PropertyType);
+        // MapInstanceType picks up target-type self-references and known
+        // cross-type opaques in addition to the primitive map. Lets a
+        // static field like `TimeSpan.MaxValue: TimeSpan` render.
+        var overtType = MapInstanceType(prop.PropertyType, targetType, knownOpaques);
         if (overtType is null)
         {
             sb.AppendLine($"// skipped {targetType.FullName}.{prop.Name}: "
@@ -364,9 +427,10 @@ public static class BindGenerator
     }
 
     private static void EmitField(
-        StringBuilder sb, Type targetType, FieldInfo field, string[] effects, bool pure)
+        StringBuilder sb, Type targetType, FieldInfo field, string[] effects, bool pure,
+        Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
-        var overtType = MapCSharpTypeToOvert(field.FieldType);
+        var overtType = MapInstanceType(field.FieldType, targetType, knownOpaques);
         if (overtType is null)
         {
             sb.AppendLine($"// skipped {targetType.FullName}.{field.Name}: "

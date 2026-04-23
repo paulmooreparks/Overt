@@ -79,6 +79,26 @@ public class BindGeneratorTests
     }
 
     [Fact]
+    public void Generate_ValueType_EmitsOpaqueTypeAndInstanceMembers()
+    {
+        // Struct types (IsValueType) should also emit `extern type` and
+        // instance members, not just static ones. DateTime is the motivating
+        // case: before struct support, only `DaysInMonth` rendered; with it,
+        // `year(self)`, `month(self)`, utc_now, now, etc. all emit.
+        var src = BindGenerator.Generate(
+            "stdlib.csharp.system.datetime",
+            typeof(System.DateTime));
+        Assert.Contains("extern \"csharp\" type DateTime binds \"System.DateTime\"", src);
+        // Instance property access (zero-arg-besides-self extern).
+        Assert.Contains("fn year(self: DateTime)", src);
+        Assert.Contains("fn month(self: DateTime)", src);
+        // Static property returning the target type itself — needs
+        // MapInstanceType-aware field/prop emission.
+        Assert.Contains("fn utc_now()", src);
+        Assert.Contains("-> Result<DateTime, IoError>", src);
+    }
+
+    [Fact]
     public void Generate_CrossTypeOpaqueRefs_EmitUseImportAndSignature()
     {
         // StreamReader has a constructor taking Stream. When we bind
