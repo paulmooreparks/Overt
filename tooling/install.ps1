@@ -18,6 +18,11 @@
 .PARAMETER Bin
     Install location. Defaults to $HOME\bin.
 
+.PARAMETER Force
+    Delete a stale $Bin\overt.exe (typically left over from an earlier manual
+    copy-based install) before writing the shim. Without -Force the script
+    warns about it and leaves the file alone so you can decide.
+
 .EXAMPLE
     .\tooling\install.ps1
         Publish Release and install to $HOME\bin.
@@ -26,13 +31,20 @@
     .\tooling\install.ps1 -Configuration Debug
         Publish Debug and install to $HOME\bin — useful while iterating on the
         compiler.
+
+.EXAMPLE
+    .\tooling\install.ps1 -Force
+        Replace a previous manual install outright. Removes $Bin\overt.exe
+        first, then installs.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
 
-    [string]$Bin = (Join-Path $HOME 'bin')
+    [string]$Bin = (Join-Path $HOME 'bin'),
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,12 +74,18 @@ $shim = Join-Path $Bin 'overt.cmd'
 "%~dp0overt\overt.exe" %*
 "@ | Set-Content -Path $shim -Encoding ASCII
 
-# Warn about a previously-manual install that might shadow the new shim. On
+# Handle a previously-manual install that would shadow the new shim. On
 # Windows, PATHEXT puts .EXE ahead of .CMD, so a stray overt.exe in $Bin wins.
+# With -Force we just remove it; without, warn and leave it.
 $strayExe = Join-Path $Bin 'overt.exe'
 if (Test-Path $strayExe) {
-    Write-Warning "$strayExe exists and will shadow the new overt.cmd shim (PATHEXT puts .EXE before .CMD)."
-    Write-Warning "Delete it — the published copy under $installDir is what the shim uses now."
+    if ($Force) {
+        Remove-Item $strayExe -Force
+        Write-Host "Removed stale $strayExe" -ForegroundColor Yellow
+    } else {
+        Write-Warning "$strayExe exists and will shadow the new overt.cmd shim (PATHEXT puts .EXE before .CMD)."
+        Write-Warning "Re-run with -Force to remove it, or delete it manually."
+    }
 }
 
 Write-Host ""
