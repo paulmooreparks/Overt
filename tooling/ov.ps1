@@ -1,9 +1,14 @@
 # ov.ps1 — convenience wrapper around the Overt CLI.
 #
-# Usage: ov [--emit=<stage>] <file.ov> [extra args...]
+# Usage:
+#   ov hello.ov              emit transpiled C# to stdout (defaults --emit=csharp)
+#   ov --emit=tokens f.ov    any explicit --emit=<stage> passes through
+#   ov run hello.ov          transpile, compile, and execute
+#   ov --version             print version
+#   ov --help                print usage
 #
-# Defaults to `--emit=csharp` when no --emit flag is present, so the common case
-# `ov hello.ov` prints the transpiled C# to stdout.
+# Defaults to `--emit=csharp` only when no --emit flag and no subcommand
+# (`run`) is present.
 #
 # Install: copy or symlink this file into a directory on your PATH (e.g.
 # $HOME\bin or C:\Users\paul\bin). PowerShell picks up .ps1 files by name if
@@ -27,13 +32,19 @@ if (-not (Test-Path $OvertCli)) {
     exit 1
 }
 
-# If the user didn't pass an --emit=... flag, default to csharp.
+# Default to --emit=csharp only if no --emit flag AND no subcommand like `run`
+# AND no info flag like --version/--help is present. Subcommands and flags
+# forward verbatim.
 $hasEmit = $false
+$isSubcommand = $false
+$isInfoFlag = $false
 foreach ($a in $args) {
-    if ($a -like '--emit=*') { $hasEmit = $true; break }
+    if ($a -like '--emit=*') { $hasEmit = $true }
+    if ($a -eq 'run') { $isSubcommand = $true }
+    if ($a -eq '--version' -or $a -eq '--help' -or $a -eq '-h') { $isInfoFlag = $true }
 }
 
-if ($hasEmit) {
+if ($hasEmit -or $isSubcommand -or $isInfoFlag) {
     & dotnet $OvertCli @args
 } else {
     & dotnet $OvertCli '--emit=csharp' @args

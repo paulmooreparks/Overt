@@ -1,12 +1,19 @@
 using System.Collections.Immutable;
+using System.Reflection;
 using Overt.Backend.CSharp;
 using Overt.Compiler.Diagnostics;
 using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
 
+// Roslyn types collide with Overt's `Diagnostic` and `SyntaxNode`; import them
+// under aliased namespaces and reference via the aliases in RunProgram.
+using RoslynCore = global::Microsoft.CodeAnalysis;
+using RoslynCSharp = global::Microsoft.CodeAnalysis.CSharp;
+
 // CLI contract — stable for external integrators (Compiler Explorer, CI, agent tools):
 //
 //   overt --emit=<stage> <file.ov>    emit compiler output for one pipeline stage
+//   overt run <file.ov>               transpile, compile, and execute
 //   overt --version                   single-line version string
 //   overt --help | -h                 usage
 //
@@ -20,6 +27,13 @@ using Overt.Compiler.Syntax;
 //
 // See docs/tooling/godbolt.md for the integration criteria this CLI honors.
 
+// Subcommand dispatch: `overt run file.ov` runs ahead of the --emit pipeline.
+// Everything else (including --help/--version) falls through to the flag parser.
+if (args.Length >= 1 && args[0] == "run")
+{
+    return Cli.RunProgram(args.AsSpan(1).ToArray());
+}
+
 return Cli.Run(args);
 
 static class Cli
@@ -29,9 +43,15 @@ static class Cli
     const string Usage =
         """
         usage: overt --emit=<stage> <file.ov>
+               overt run <file.ov>
+
+        commands:
+          run              transpile, compile, and execute <file.ov>. Exits 0 on
+                           Ok, 1 on compile errors or Err, 2 on usage errors.
 
         options:
-          --emit=<stage>   required. one of: tokens, ast, resolved, typed, csharp, go
+          --emit=<stage>   required for emit mode. one of:
+                           tokens, ast, resolved, typed, csharp, go
           --no-color       accepted for tool compatibility (output is never colored)
           --version        print version and exit
           --help, -h       print this message and exit
@@ -135,6 +155,153 @@ static class Cli
             .AddRange(resolved.Diagnostics)
             .AddRange(typed.Diagnostics);
         return WriteDiagnostics(inputFile, combined);
+    }
+
+    // `overt run <file.ov>` — transpile, compile the resulting C# in-memory
+    // against Overt.Runtime, load the assembly, and invoke `Module.main()`.
+    // Exit codes:
+    //   0  — main returned Ok
+    //   1  — Overt compile errors, Roslyn compile errors, or main returned Err
+    //   2  — usage errors
+    public static int RunProgram(string[] args)
+    {
+        string? inputFile = null;
+        foreach (var arg in args)
+        {
+            if (arg is "--help" or "-h")
+            {
+                Console.Out.WriteLine("usage: overt run <file.ov>");
+                return 0;
+            }
+            if (arg.StartsWith("--", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"overt run: unknown option '{arg}'");
+                return 2;
+            }
+            if (inputFile is not null)
+            {
+                Console.Error.WriteLine("overt run: multiple input files not supported");
+                return 2;
+            }
+            inputFile = arg;
+        }
+        if (inputFile is null)
+        {
+            Console.Error.WriteLine("overt run: missing input file");
+            return 2;
+        }
+        if (!File.Exists(inputFile))
+        {
+            Console.Error.WriteLine($"overt run: file not found: {inputFile}");
+            return 1;
+        }
+
+        // Transpile.
+        var source = File.ReadAllText(inputFile);
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+        var resolved = NameResolver.Resolve(parse.Module);
+        var typed = TypeChecker.Check(parse.Module, resolved);
+
+        var diagnostics = lex.Diagnostics
+            .AddRange(parse.Diagnostics)
+            .AddRange(resolved.Diagnostics)
+            .AddRange(typed.Diagnostics);
+        if (WriteDiagnostics(inputFile, diagnostics) != 0)
+        {
+            return 1;
+        }
+
+        // sourcePath=null: skip #line directives for the in-memory compile. They're
+        // for PDB generation and can land mid-line when the emitter wraps match-arm
+        // bodies in IIFE lambdas (a known emitter gap — tracked for a follow-up);
+        // omitting them here lets `run` work while the fix is pending.
+        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath: null);
+
+        // Compile in-memory. Reference the Overt runtime + whatever's loaded in
+        // the current AppDomain (BCL + System.*).
+        var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
+            csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
+        var refs = ImmutableArray.CreateBuilder<RoslynCore.MetadataReference>();
+        var runtimeAssembly = typeof(global::Overt.Runtime.Unit).Assembly;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (asm.IsDynamic) continue;
+            if (string.IsNullOrEmpty(asm.Location)) continue;
+            refs.Add(RoslynCore.MetadataReference.CreateFromFile(asm.Location));
+        }
+        if (!string.IsNullOrEmpty(runtimeAssembly.Location)
+            && !refs.Any(r => r.Display?.Contains("Overt.Runtime") == true))
+        {
+            refs.Add(RoslynCore.MetadataReference.CreateFromFile(runtimeAssembly.Location));
+        }
+
+        var compilation = RoslynCSharp.CSharpCompilation.Create(
+            assemblyName: Path.GetFileNameWithoutExtension(inputFile),
+            syntaxTrees: new[] { tree },
+            references: refs.ToImmutable(),
+            options: new RoslynCSharp.CSharpCompilationOptions(
+                RoslynCore.OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: RoslynCore.NullableContextOptions.Enable));
+
+        using var ms = new MemoryStream();
+        var emit = compilation.Emit(ms);
+        if (!emit.Success)
+        {
+            foreach (var d in emit.Diagnostics.Where(d => d.Severity == RoslynCore.DiagnosticSeverity.Error))
+            {
+                Console.Error.WriteLine($"overt run: generated C# failed to compile: {d.GetMessage()}");
+            }
+            return 1;
+        }
+        ms.Position = 0;
+        var asmLoaded = Assembly.Load(ms.ToArray());
+
+        // Locate Module.main and invoke. Every Overt program's entry point lowers
+        // to `Overt.Generated.<ModuleName>.Module.main`; we don't constrain on
+        // full name in case the user renames the module.
+        var moduleType = asmLoaded.GetTypes().FirstOrDefault(t => t.Name == "Module");
+        if (moduleType is null)
+        {
+            Console.Error.WriteLine("overt run: no `Module` type in emitted assembly");
+            return 1;
+        }
+        var mainMethod = moduleType.GetMethod("main", BindingFlags.Public | BindingFlags.Static);
+        if (mainMethod is null)
+        {
+            Console.Error.WriteLine("overt run: module has no `main` function");
+            return 1;
+        }
+        if (mainMethod.GetParameters().Length != 0)
+        {
+            Console.Error.WriteLine("overt run: `main` must take no arguments");
+            return 1;
+        }
+
+        object? result;
+        try
+        {
+            result = mainMethod.Invoke(null, null);
+        }
+        catch (TargetInvocationException tie)
+        {
+            Console.Error.WriteLine($"overt run: unhandled exception: {tie.InnerException?.Message ?? tie.Message}");
+            return 1;
+        }
+
+        // If main returns Result<_, _>, check IsOk. Ok → exit 0. Err → print + exit 1.
+        if (result is null) return 0;
+        var isOkProp = result.GetType().GetProperty("IsOk");
+        if (isOkProp is null) return 0;
+
+        if ((bool)isOkProp.GetValue(result)!)
+        {
+            return 0;
+        }
+        var errProp = result.GetType().GetProperty("Error");
+        var err = errProp?.GetValue(result);
+        Console.Error.WriteLine($"overt run: main returned Err: {err}");
+        return 1;
     }
 
     static int EmitCSharp(string source, string inputFile)

@@ -4,6 +4,14 @@
     <ProjectReference Include="..\Overt.Compiler\Overt.Compiler.csproj" />
     <ProjectReference Include="..\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
     <ProjectReference Include="..\Overt.Backend.Go\Overt.Backend.Go.csproj" />
+    <!-- Overt.Runtime is pulled in so `overt run` can compile emitted C# against
+         the same runtime assembly the rest of the toolchain uses. -->
+    <ProjectReference Include="..\Overt.Runtime\Overt.Runtime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Roslyn: used by `overt run` to compile emitted C# in-memory. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
   </ItemGroup>
 
   <PropertyGroup>
