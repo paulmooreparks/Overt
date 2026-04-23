@@ -144,7 +144,11 @@ static class Cli
         var resolved = NameResolver.Resolve(parse.Module);
         var typed = TypeChecker.Check(parse.Module, resolved);
 
-        var csharp = CSharpEmitter.Emit(parse.Module, typed);
+        // Source path flows into #line directives so PDBs map runtime errors back to
+        // the .ov file, not the generated .cs. The absolute path is resolved so PDB
+        // entries survive the build being invoked from anywhere.
+        var sourcePath = Path.GetFullPath(inputFile);
+        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath);
         Console.Out.Write(csharp);
 
         var combined = lex.Diagnostics
