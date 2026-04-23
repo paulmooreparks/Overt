@@ -79,6 +79,53 @@ public class BindGeneratorTests
     }
 
     [Fact]
+    public void Generate_CrossTypeOpaqueRefs_EmitUseImportAndSignature()
+    {
+        // StreamReader has a constructor taking Stream. When we bind
+        // StreamReader with Stream registered as an opaque reference
+        // (plus an import-from module), the generator should:
+        //   1. Emit `use stdlib.csharp.system.io.stream.{Stream}` at top
+        //   2. Render the constructor's Stream parameter as the Overt
+        //      type `Stream`, not skip the method
+        var opaques = new[]
+        {
+            new BindGenerator.OpaqueTypeRef(
+                typeof(System.IO.Stream),
+                "Stream",
+                "stdlib.csharp.system.io.stream"),
+        };
+        var src = BindGenerator.Generate(
+            "stdlib.csharp.system.io.streamreader",
+            typeof(System.IO.StreamReader),
+            opaques);
+
+        Assert.Contains("use stdlib.csharp.system.io.stream.{Stream}", src);
+        Assert.Contains("stream: Stream", src);
+        // The bare constructor (no Stream) should still exist; overloads
+        // disambiguate by param type.
+        Assert.Contains("new_stream(", src);
+    }
+
+    [Fact]
+    public void Generate_OpaqueRefWithoutImportModule_StillRendersType()
+    {
+        // Registering an opaque ref without an import module still lets
+        // the generator render its name — the user is responsible for
+        // importing the type in their consuming code.
+        var opaques = new[]
+        {
+            new BindGenerator.OpaqueTypeRef(typeof(System.IO.Stream), "Stream", null),
+        };
+        var src = BindGenerator.Generate(
+            "stdlib.csharp.system.io.streamreader",
+            typeof(System.IO.StreamReader),
+            opaques);
+
+        Assert.DoesNotContain("use stdlib.csharp.system.io.stream", src);
+        Assert.Contains("stream: Stream", src);
+    }
+
+    [Fact]
     public void Generate_SingleOverloadKeepsBareName()
     {
         // `Path.Exists(string)` is the only renderable Exists overload (the

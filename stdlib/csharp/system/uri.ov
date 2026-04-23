@@ -1,0 +1,125 @@
+module stdlib.csharp.system.uri
+
+// Auto-generated from `System.Uri` via `overt bind`.
+// Hand-edits may be overwritten; prefer regenerating and layering
+// hand-curated effect annotations on top.
+
+extern "csharp" type Uri binds "System.Uri"
+
+extern "csharp" fn scheme_delimiter() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.SchemeDelimiter"
+
+extern "csharp" fn uri_scheme_file() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeFile"
+
+extern "csharp" fn uri_scheme_ftp() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeFtp"
+
+extern "csharp" fn uri_scheme_ftps() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeFtps"
+
+extern "csharp" fn uri_scheme_gopher() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeGopher"
+
+extern "csharp" fn uri_scheme_http() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeHttp"
+
+extern "csharp" fn uri_scheme_https() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeHttps"
+
+extern "csharp" fn uri_scheme_mailto() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeMailto"
+
+extern "csharp" fn uri_scheme_net_pipe() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeNetPipe"
+
+extern "csharp" fn uri_scheme_net_tcp() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeNetTcp"
+
+extern "csharp" fn uri_scheme_news() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeNews"
+
+extern "csharp" fn uri_scheme_nntp() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeNntp"
+
+extern "csharp" fn uri_scheme_sftp() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeSftp"
+
+extern "csharp" fn uri_scheme_ssh() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeSsh"
+
+extern "csharp" fn uri_scheme_telnet() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeTelnet"
+
+extern "csharp" fn uri_scheme_ws() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeWs"
+
+extern "csharp" fn uri_scheme_wss() !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UriSchemeWss"
+
+// skipped System.Uri.CheckHostName: return type 'System.UriHostNameType' is unsupported
+extern "csharp" fn check_scheme_name(scheme_name: String) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.CheckSchemeName"
+
+// skipped System.Uri.Compare: parameter 'uri1' has unsupported type 'System.Uri'
+extern "csharp" fn escape_data_string(string_to_escape: String) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.EscapeDataString"
+
+// skipped System.Uri.EscapeDataString: parameter 'charsToEscape' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn escape_uri_string(string_to_escape: String) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.EscapeUriString"
+
+// skipped System.Uri.FromHex: parameter 'digit' has unsupported type 'System.Char'
+// skipped System.Uri.HexEscape: parameter 'character' has unsupported type 'System.Char'
+// skipped System.Uri.HexUnescape: parameter 'index' has unsupported type 'System.Int32&'
+// skipped System.Uri.IsHexDigit: parameter 'character' has unsupported type 'System.Char'
+extern "csharp" fn is_hex_encoding(pattern: String, index: Int) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsHexEncoding"
+
+// skipped System.Uri.IsWellFormedUriString: parameter 'uriKind' has unsupported type 'System.UriKind'
+// skipped System.Uri.TryCreate: parameter 'uriKind' has unsupported type 'System.UriKind'
+// skipped System.Uri.TryCreate: parameter 'creationOptions' has unsupported type 'System.UriCreationOptions&'
+// skipped System.Uri.TryCreate: parameter 'baseUri' has unsupported type 'System.Uri'
+// skipped System.Uri.TryCreate: parameter 'baseUri' has unsupported type 'System.Uri'
+// skipped System.Uri.TryEscapeDataString: parameter 'charsToEscape' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Uri.TryUnescapeDataString: parameter 'charsToUnescape' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn unescape_data_string(string_to_unescape: String) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UnescapeDataString"
+
+// skipped System.Uri.UnescapeDataString: parameter 'charsToUnescape' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn new_string(uri_string: String) -> Uri
+    binds "System.Uri..ctor"
+
+extern "csharp" fn new_string_bool(uri_string: String, dont_escape: Bool) -> Uri
+    binds "System.Uri..ctor"
+
+extern "csharp" fn new_uri_string(base_uri: Uri, relative_uri: String) -> Uri
+    binds "System.Uri..ctor"
+
+extern "csharp" fn new_uri_uri(base_uri: Uri, relative_uri: Uri) -> Uri
+    binds "System.Uri..ctor"
+
+extern "csharp" fn new_uri_string_bool(base_uri: Uri, relative_uri: String, dont_escape: Bool) -> Uri
+    binds "System.Uri..ctor"
+
+extern "csharp" fn equals(self: Uri, other: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri::Equals"
+
+extern "csharp" fn get_hash_code(self: Uri) !{io, fails} -> Result<Int, IoError>
+    binds "System.Uri::GetHashCode"
+
+extern "csharp" fn is_base_of(self: Uri, uri: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri::IsBaseOf"
+
+extern "csharp" fn is_well_formed_original_string(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri::IsWellFormedOriginalString"
+
+extern "csharp" fn make_relative(self: Uri, to_uri: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri::MakeRelative"
+
+extern "csharp" fn make_relative_uri(self: Uri, uri: Uri) !{io, fails} -> Result<Uri, IoError>
+    binds "System.Uri::MakeRelativeUri"
+
+extern "csharp" fn to_string(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri::ToString"
+

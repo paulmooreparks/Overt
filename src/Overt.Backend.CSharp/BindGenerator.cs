@@ -64,10 +64,28 @@ public static class BindGenerator
         ("System.Threading.Tasks", new[] { "async" }, false),
     };
 
+    /// <summary>Descriptor for an opaque type that the facade may reference
+    /// but does not itself define. Maps a .NET <see cref="Type"/> to its
+    /// Overt name plus an optional module path to import it from. Used when
+    /// <c>overt bind</c> generates methods whose parameters or returns are
+    /// other opaque types the user has declared facades for separately
+    /// (e.g., <c>HttpClient</c> referencing <c>Uri</c>).</summary>
+    public sealed record OpaqueTypeRef(Type CSharpType, string OvertName, string? ImportModule);
+
     public static string Generate(string moduleName, Type targetType)
+        => Generate(moduleName, targetType, Array.Empty<OpaqueTypeRef>());
+
+    public static string Generate(
+        string moduleName,
+        Type targetType,
+        IReadOnlyList<OpaqueTypeRef> opaqueRefs)
     {
         var (effects, pure) = EffectsFor(targetType.FullName ?? "");
         var sb = new StringBuilder();
+
+        // Lookup helpers for the opaque-ref registry. Keyed by Type for speed
+        // during the reflection walk below.
+        var knownOpaques = opaqueRefs.ToDictionary(r => r.CSharpType);
 
         sb.AppendLine($"module {moduleName}");
         sb.AppendLine();
@@ -75,6 +93,20 @@ public static class BindGenerator
         sb.AppendLine("// Hand-edits may be overwritten; prefer regenerating and layering");
         sb.AppendLine("// hand-curated effect annotations on top.");
         sb.AppendLine();
+
+        // For each opaque-ref with an import module, emit a `use` at the top.
+        // Refs without a module assume the user will define the type locally
+        // (e.g. an `extern type` of their own) or import it from some other
+        // module they'll specify at the call site.
+        var usesEmitted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in opaqueRefs)
+        {
+            if (r.ImportModule is { } modPath && usesEmitted.Add(modPath))
+            {
+                sb.AppendLine($"use {modPath}.{{{r.OvertName}}}");
+            }
+        }
+        if (usesEmitted.Count > 0) sb.AppendLine();
 
         // For reference types, emit an `extern type` declaration so the Overt
         // module can refer to the opaque type by name. Non-classes (structs,
@@ -151,16 +183,14 @@ public static class BindGenerator
         // Instance-side: constructors + instance methods. Only emitted when
         // the target type is a reference type we modeled as an opaque extern
         // type above — otherwise an instance method has no self-type to hang
-        // onto. Param/return types are limited to primitives or the target
-        // type itself (so `StringBuilder.Append(string) -> StringBuilder`
-        // works; anything that would pull in another opaque type skips).
+        // onto. Param/return types can be primitives, the target type
+        // itself, OR any type in <paramref name="knownOpaques"/> (cross-type
+        // references).
         if (isReferenceType)
         {
-            var typeOverloads = new Dictionary<string, int>(StringComparer.Ordinal);
-
             var ctors = targetType
                 .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
-                .Where(c => IsRenderableCtor(c, targetType))
+                .Where(c => IsRenderableCtor(c, targetType, knownOpaques))
                 .OrderBy(c => c.GetParameters().Length)
                 .ToList();
             foreach (var ctor in ctors)
@@ -169,14 +199,14 @@ public static class BindGenerator
                 var overtName = (ctors.Count > 1 && ctorSuffix.Length > 0)
                     ? $"new_{ctorSuffix}"
                     : "new_";
-                EmitCtor(sb, targetType, overtTypeName, ctor, effects, pure, overtName, topLevelNames);
+                EmitCtor(sb, targetType, overtTypeName, ctor, effects, pure, overtName, topLevelNames, knownOpaques);
                 topLevelNames.Add(overtName);
             }
 
             var instanceMethods = targetType
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
                 .Where(m => !m.IsSpecialName)
-                .Where(m => IsRenderableInstance(m, targetType))
+                .Where(m => IsRenderableInstance(m, targetType, knownOpaques))
                 .OrderBy(m => m.Name, StringComparer.Ordinal)
                 .ThenBy(m => m.GetParameters().Length)
                 .ToList();
@@ -189,7 +219,7 @@ public static class BindGenerator
                 var needsSuffix = renderableInstanceByName[overt] > 1;
                 var suffix = OverloadSuffix(m);
                 var name = needsSuffix && suffix.Length > 0 ? $"{overt}_{suffix}" : overt;
-                EmitInstanceMethod(sb, targetType, overtTypeName, m, effects, pure, name, topLevelNames);
+                EmitInstanceMethod(sb, targetType, overtTypeName, m, effects, pure, name, topLevelNames, knownOpaques);
                 topLevelNames.Add(name);
             }
         }
@@ -197,45 +227,49 @@ public static class BindGenerator
         return sb.ToString();
     }
 
-    private static bool IsRenderableCtor(ConstructorInfo ctor, Type targetType)
+    private static bool IsRenderableCtor(
+        ConstructorInfo ctor, Type targetType, Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         foreach (var p in ctor.GetParameters())
         {
             if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
-            if (!IsRenderableType(p.ParameterType, targetType)) return false;
+            if (!IsRenderableType(p.ParameterType, targetType, knownOpaques)) return false;
         }
         return true;
     }
 
-    private static bool IsRenderableInstance(MethodInfo method, Type targetType)
+    private static bool IsRenderableInstance(
+        MethodInfo method, Type targetType, Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         if (method.IsGenericMethod) return false;
         foreach (var p in method.GetParameters())
         {
             if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
-            if (!IsRenderableType(p.ParameterType, targetType)) return false;
+            if (!IsRenderableType(p.ParameterType, targetType, knownOpaques)) return false;
         }
         if (method.ReturnType != typeof(void)
-            && !IsRenderableType(method.ReturnType, targetType)) return false;
+            && !IsRenderableType(method.ReturnType, targetType, knownOpaques)) return false;
         return true;
     }
 
-    /// <summary>For instance-side rendering, the set of supported types is
-    /// the same primitive set as <see cref="MapCSharpTypeToOvert"/>, plus the
-    /// target type itself (which we're modeling as an opaque extern type
-    /// above). Cross-type opaque references — e.g. a method returning an
-    /// unrelated reference type — aren't yet tracked and skip.</summary>
-    private static bool IsRenderableType(Type t, Type targetType)
+    /// <summary>For instance-side rendering, a type is renderable if it is:
+    /// a primitive we handle, the target type itself, or a user-declared
+    /// opaque type in <paramref name="knownOpaques"/>.</summary>
+    private static bool IsRenderableType(
+        Type t, Type targetType, Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         if (t == targetType) return true;
+        if (knownOpaques.ContainsKey(t)) return true;
         return MapCSharpTypeToOvert(t) is not null;
     }
 
-    /// <summary>Map a type to its Overt spelling, treating the target type
-    /// as its bare Overt name (since we emit an `extern type` for it above).</summary>
-    private static string? MapInstanceType(Type t, Type targetType)
+    /// <summary>Map a type to its Overt spelling. Priority: target type →
+    /// known opaque reference → primitive.</summary>
+    private static string? MapInstanceType(
+        Type t, Type targetType, Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         if (t == targetType) return targetType.Name;
+        if (knownOpaques.TryGetValue(t, out var opaque)) return opaque.OvertName;
         return MapCSharpTypeToOvert(t);
     }
 
@@ -244,12 +278,13 @@ public static class BindGenerator
 
     private static void EmitCtor(
         StringBuilder sb, Type targetType, string overtTypeName, ConstructorInfo ctor,
-        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames)
+        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames,
+        Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         var paramList = new List<string>();
         foreach (var p in ctor.GetParameters())
         {
-            var overtType = MapInstanceType(p.ParameterType, targetType);
+            var overtType = MapInstanceType(p.ParameterType, targetType, knownOpaques);
             if (overtType is null) return;
             var paramName = ToSnakeCase(p.Name ?? "arg");
             if (topLevelNames.Contains(paramName)) paramName = paramName + "_arg";
@@ -269,14 +304,15 @@ public static class BindGenerator
 
     private static void EmitInstanceMethod(
         StringBuilder sb, Type targetType, string overtTypeName, MethodInfo method,
-        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames)
+        string[] effects, bool pure, string overtName, HashSet<string> topLevelNames,
+        Dictionary<Type, OpaqueTypeRef> knownOpaques)
     {
         // First parameter is always `self: TargetType` — the convention the
         // extern runtime uses to recognize an instance-method binding.
         var paramList = new List<string> { $"self: {overtTypeName}" };
         foreach (var p in method.GetParameters())
         {
-            var overtType = MapInstanceType(p.ParameterType, targetType);
+            var overtType = MapInstanceType(p.ParameterType, targetType, knownOpaques);
             if (overtType is null) return;
             var paramName = ToSnakeCase(p.Name ?? "arg");
             if (topLevelNames.Contains(paramName) || paramName == "self")
@@ -286,7 +322,7 @@ public static class BindGenerator
 
         var returnOvertType = method.ReturnType == typeof(void)
             ? "()"
-            : MapInstanceType(method.ReturnType, targetType);
+            : MapInstanceType(method.ReturnType, targetType, knownOpaques);
         if (returnOvertType is null) return;
         var retText = (pure || returnOvertType == "()")
             ? returnOvertType

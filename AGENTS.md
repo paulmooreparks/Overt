@@ -500,9 +500,23 @@ Constructors bind to `..ctor` and emit `new T(args)`.
 
 `overt bind` generates all of the above automatically for public types —
 constructors, static members, and instance methods get emitted in one pass.
-Instance methods whose parameters or return types reference other opaque
-types (not the target itself) are skipped until cross-type reference
-tracking lands.
+
+**Cross-type references.** For methods that take or return other opaque
+types, register them with `--with-opaque`:
+
+```
+overt bind --type System.IO.StreamReader \
+           --module stdlib.csharp.system.io.streamreader \
+           --with-opaque System.IO.Stream=stdlib.csharp.system.io.stream \
+           --output stdlib/csharp/system/io/streamreader.ov
+```
+
+Each `--with-opaque <FullName>[=<module>]` tells the generator: "this
+other type is available as an opaque reference." If a module path is
+provided, the generated facade emits `use <module>.{<Name>}` at the top
+so consumers don't need to import the cross-type by hand. Without a
+module path, the type is registered for rendering but the consumer
+supplies its own import. Repeatable.
 
 Auto-exception conversion works for error types with a single `narrative`
 string constructor (currently only `IoError`). Other error types rethrow;

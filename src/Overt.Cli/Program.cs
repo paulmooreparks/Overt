@@ -366,6 +366,43 @@ static class Cli
         return new CompiledGraph(graph.Modules, moduleResolutions, moduleTypes, allDiagnostics);
     }
 
+    // ------------------------------------------- bind helpers
+
+    /// <summary>Force-load a curated set of BCL assemblies that don't get
+    /// pulled into the default AppDomain by touching any of our own code.
+    /// Without this, <c>overt bind --type System.Net.Http.HttpClient</c>
+    /// fails to resolve even though the assembly ships with .NET.</summary>
+    static void PreloadCommonBclAssemblies()
+    {
+        // Touch a type from each assembly. Collecting to a volatile field
+        // (via GC.KeepAlive) guarantees the JIT doesn't elide the
+        // references as dead code — we need the loader to actually pull
+        // each assembly in, not the code to observe the reference.
+        var types = new Type[]
+        {
+            typeof(System.Net.Http.HttpClient),
+            typeof(System.Uri),
+            typeof(System.Text.Json.JsonSerializer),
+            typeof(System.Text.RegularExpressions.Regex),
+            typeof(System.Collections.Generic.Dictionary<,>),
+        };
+        GC.KeepAlive(types);
+    }
+
+    /// <summary>Resolve a full type name against every currently-loaded
+    /// assembly. Returns the first match; null if nothing matches. Also
+    /// falls back to <see cref="Type.GetType(string,bool)"/>'s
+    /// assembly-qualified resolution for edge cases.</summary>
+    static Type? ResolveTypeFromLoadedAssemblies(string fullName)
+    {
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var t = asm.GetType(fullName, throwOnError: false);
+            if (t is not null) return t;
+        }
+        return Type.GetType(fullName, throwOnError: false);
+    }
+
     // ------------------------------------------- search-path discovery
 
     /// <summary>
@@ -552,6 +589,7 @@ static class Cli
         string? typeName = null;
         string? moduleName = null;
         string? outputPath = null;
+        var withOpaque = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
@@ -559,7 +597,12 @@ static class Cli
             {
                 case "--help" or "-h":
                     Console.Out.WriteLine(
-                        "usage: overt bind --type <FullName> [--module <name>] [--output <file>]");
+                        "usage: overt bind --type <FullName> [--module <name>] [--output <file>]\n"
+                        + "                  [--with-opaque <FullName>[=<module.path>]]...\n\n"
+                        + "  --with-opaque registers another type as a usable opaque reference\n"
+                        + "    during generation. Repeatable. Optionally specify the module to\n"
+                        + "    import the type from; otherwise the user is expected to import it\n"
+                        + "    themselves when consuming this facade.");
                     return 0;
                 case "--type":
                     if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --type needs a value"); return 2; }
@@ -573,6 +616,10 @@ static class Cli
                     if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --output needs a value"); return 2; }
                     outputPath = args[i];
                     break;
+                case "--with-opaque":
+                    if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --with-opaque needs a value"); return 2; }
+                    withOpaque.Add(args[i]);
+                    break;
                 default:
                     Console.Error.WriteLine($"overt bind: unknown argument '{arg}'");
                     return 2;
@@ -584,20 +631,13 @@ static class Cli
             return 2;
         }
 
-        // Resolve via the currently-loaded assemblies. For BCL types this is
-        // fine; for custom assemblies the caller would need to pre-load them
-        // (a future --assembly flag) — out of MVP scope.
-        Type? targetType = null;
-        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            targetType = asm.GetType(typeName, throwOnError: false);
-            if (targetType is not null) break;
-        }
-        if (targetType is null)
-        {
-            // Try to load via Type.GetType's assembly-qualified resolution.
-            targetType = Type.GetType(typeName, throwOnError: false);
-        }
+        // Resolve via the currently-loaded assemblies. Some BCL assemblies
+        // (System.Net.Http, System.Text.Json) aren't loaded until a type
+        // from them is touched; force-load the common ones so `overt bind`
+        // can reach them.
+        PreloadCommonBclAssemblies();
+
+        Type? targetType = ResolveTypeFromLoadedAssemblies(typeName);
         if (targetType is null)
         {
             Console.Error.WriteLine(
@@ -608,7 +648,38 @@ static class Cli
         // Default module name: last segment of the type's full name, lower-cased.
         moduleName ??= (targetType.Name).ToLowerInvariant();
 
-        var overtSource = BindGenerator.Generate(moduleName, targetType);
+        // Resolve --with-opaque entries into OpaqueTypeRef records. Each
+        // entry is `FullName[=module.path]`; the optional module path becomes
+        // a `use` import in the generated facade so the referenced type is
+        // in scope without the consumer needing to import it manually.
+        var opaqueRefs = new List<BindGenerator.OpaqueTypeRef>();
+        foreach (var entry in withOpaque)
+        {
+            string fullName;
+            string? importModule;
+            var eq = entry.IndexOf('=');
+            if (eq >= 0)
+            {
+                fullName = entry[..eq];
+                importModule = entry[(eq + 1)..];
+            }
+            else
+            {
+                fullName = entry;
+                importModule = null;
+            }
+
+            var opaqueType = ResolveTypeFromLoadedAssemblies(fullName);
+            if (opaqueType is null)
+            {
+                Console.Error.WriteLine(
+                    $"overt bind: --with-opaque type '{fullName}' not found in loaded assemblies");
+                return 1;
+            }
+            opaqueRefs.Add(new BindGenerator.OpaqueTypeRef(opaqueType, opaqueType.Name, importModule));
+        }
+
+        var overtSource = BindGenerator.Generate(moduleName, targetType, opaqueRefs);
         if (outputPath is not null)
         {
             File.WriteAllText(outputPath, overtSource);
