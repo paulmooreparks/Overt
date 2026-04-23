@@ -305,6 +305,16 @@ public sealed class TypeChecker
 
     private TypeRef InferFieldAccess(FieldAccessExpr fa)
     {
+        // Module-qualified resolution (e.g. `List.empty`, `Trace.subscribe`) — the
+        // resolver already recorded the qualified symbol; if we see it, its signature
+        // is the type of this field-access expression.
+        if (_resolution.Resolutions.TryGetValue(fa.Span, out var resolved)
+            && _symbolTypes.TryGetValue(resolved, out var resolvedType))
+        {
+            AnnotateExpression(fa.Target); // still walk the target for nested annotation
+            return resolvedType;
+        }
+
         var targetType = AnnotateExpression(fa.Target);
         if (targetType is NamedTypeRef nt)
         {
@@ -926,12 +936,23 @@ public sealed class TypeChecker
 
     private bool TryGetCalleeFunctionType(Expression callee, out FunctionTypeRef ft)
     {
+        // Bare identifier callees — look up through the resolver → symbol-type map.
         if (callee is IdentifierExpr id
             && _resolution.Resolutions.TryGetValue(id.Span, out var sym)
             && _symbolTypes.TryGetValue(sym, out var type)
             && type is FunctionTypeRef f)
         {
             ft = f;
+            return true;
+        }
+        // Module-qualified callees (`List.empty`, `Trace.subscribe`) — the resolver
+        // recorded the qualified symbol on the FieldAccessExpr span.
+        if (callee is FieldAccessExpr fa
+            && _resolution.Resolutions.TryGetValue(fa.Span, out var qsym)
+            && _symbolTypes.TryGetValue(qsym, out var qtype)
+            && qtype is FunctionTypeRef qf)
+        {
+            ft = qf;
             return true;
         }
         ft = null!;

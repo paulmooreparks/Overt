@@ -255,8 +255,19 @@ public sealed class NameResolver
                 break;
 
             case FieldAccessExpr fa:
-                // Resolve the target; the field itself is not a name in any scope.
+                // Resolve the target first; field lookup against record types happens
+                // later in the type checker.
                 ResolveExpression(fa.Target, scope);
+                // If the target is a bare identifier that names a stdlib namespace
+                // (List, Trace, CString), try a module-qualified lookup `X.Y` in the
+                // stdlib table. This lets references like `List.empty` / `Trace.subscribe`
+                // carry real function types through to the type checker and effect walker.
+                if (fa.Target is IdentifierExpr moduleIdent
+                    && Stdlib.Symbols.TryGetValue(
+                        $"{moduleIdent.Name}.{fa.FieldName}", out var qualified))
+                {
+                    _resolutions[fa.Span] = qualified;
+                }
                 break;
 
             case PropagateExpr pr:

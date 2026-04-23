@@ -171,6 +171,53 @@ public static class Stdlib
             },
             ret: TV("U")));
 
+        // ---- Module-qualified stdlib members --------------------------------
+        // These resolve via the name-qualified lookup path the resolver takes for
+        // `Module.member` callees. Adding entries here lets the type checker see
+        // their signatures (and, via effects, lets OV0310 reach through them).
+
+        // List.empty<T>() -> List<T>
+        e.Add(Fn("List.empty",
+            typeParams: new[] { "T" },
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("List", TV("T"))));
+
+        // List.singleton<T>(value: T) -> List<T>
+        e.Add(Fn("List.singleton",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { TV("T") },
+            ret: Generic("List", TV("T"))));
+
+        // List.concat_three<T>(first: List<T>, middle: List<T>, last: List<T>) -> List<T>
+        e.Add(Fn("List.concat_three",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                Generic("List", TV("T")),
+                Generic("List", TV("T")),
+            },
+            ret: Generic("List", TV("T"))));
+
+        // Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
+        e.Add(Fn("Trace.subscribe",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[]
+            {
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(Named("TraceEvent")),
+                    PrimitiveType.Unit,
+                    ImmutableArray.Create("io")),
+            },
+            ret: PrimitiveType.Unit,
+            effects: new[] { "io" }));
+
+        // CString.from(s: String) -> CString (C-FFI boundary conversion; no effects)
+        e.Add(Fn("CString.from",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Named("CString")));
+
         return e;
     }
 
