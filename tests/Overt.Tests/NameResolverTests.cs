@@ -34,7 +34,7 @@ public class NameResolverTests
     public void Resolve_LetBinding()
     {
         var result = ResolveSource(
-            "module m\nfn f() -> Int { let x = 42; x }");
+            "module m\nfn f() -> Int { let x = 42\n x }");
         Assert.Empty(result.Diagnostics);
 
         var fn = (FunctionDecl)result.Module.Declarations[0];
@@ -73,7 +73,7 @@ public class NameResolverTests
     public void Resolve_DuplicateLet_EmitsOV0201()
     {
         var result = ResolveSource(
-            "module m\nfn f() -> Int { let x = 1; let x = 2; x }");
+            "module m\nfn f() -> Int { let x = 1\n let x = 2\n x }");
         Assert.Contains(result.Diagnostics, d => d.Code == "OV0201");
     }
 
@@ -82,7 +82,7 @@ public class NameResolverTests
     {
         // DESIGN.md §3: every name has one binding. Inner scope cannot redefine.
         var result = ResolveSource(
-            "module m\nfn f(x: Int) -> Int { let x = 2; x }");
+            "module m\nfn f(x: Int) -> Int { let x = 2\n x }");
         Assert.Contains(result.Diagnostics, d => d.Code == "OV0201");
     }
 

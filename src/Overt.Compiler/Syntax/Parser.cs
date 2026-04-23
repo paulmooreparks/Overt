@@ -85,6 +85,15 @@ public sealed class Parser
         var declarations = ImmutableArray.CreateBuilder<Declaration>();
         while (!Check(TokenKind.EndOfFile))
         {
+            // Stray semicolons at the top level get a targeted OV0170 rather
+            // than the generic OV0150 unknown-token message — they're a common
+            // reflex from other languages.
+            if (Check(TokenKind.Semicolon))
+            {
+                RejectStrayStatementTerminator();
+                continue;
+            }
+
             var before = _cursor;
             var decl = ParseDeclaration();
             if (decl is not null)
@@ -246,6 +255,25 @@ public sealed class Parser
     /// <summary>A reasonable default for the `add module X` hint. The parser
     /// doesn't know the filename, so suggest a generic placeholder.</summary>
     private static string SuggestModuleNameFromContext() => "your_module_name";
+
+    /// <summary>Overt doesn't use semicolons as statement terminators —
+    /// newlines separate statements. This helper runs at every point the
+    /// parser might have previously consumed a trailing <c>;</c>; now it
+    /// emits OV0170 if one is present and keeps the token stream stable by
+    /// consuming it (so the rest of the file parses cleanly with one error
+    /// per stray semicolon).</summary>
+    private void RejectStrayStatementTerminator()
+    {
+        while (Check(TokenKind.Semicolon))
+        {
+            var tok = Advance();
+            ReportErrorWithHelp("OV0170",
+                "semicolons are not used in Overt",
+                tok.Span,
+                "remove the `;`; newlines separate statements and the trailing "
+                    + "expression of a block is its value — see DESIGN.md §7 and §21");
+        }
+    }
 
     private ExternTypeDecl ParseExternTypeDeclRest(string platform, SourcePosition startPos)
     {
@@ -714,7 +742,7 @@ public sealed class Parser
             if (Check(TokenKind.KeywordLet))
             {
                 statements.Add(ParseLetStmt());
-                Match(TokenKind.Semicolon); // optional trailing `;`
+                RejectStrayStatementTerminator();
                 continue;
             }
 
@@ -724,14 +752,14 @@ public sealed class Parser
             {
                 var tok = Advance();
                 statements.Add(new BreakStmt(tok.Span));
-                Match(TokenKind.Semicolon);
+                RejectStrayStatementTerminator();
                 continue;
             }
             if (Check(TokenKind.KeywordContinue))
             {
                 var tok = Advance();
                 statements.Add(new ContinueStmt(tok.Span));
-                Match(TokenKind.Semicolon);
+                RejectStrayStatementTerminator();
                 continue;
             }
 
@@ -742,14 +770,18 @@ public sealed class Parser
             if (Check(TokenKind.Identifier) && Peek(1).Kind == TokenKind.Equals)
             {
                 statements.Add(ParseAssignmentStmt());
-                Match(TokenKind.Semicolon);
+                RejectStrayStatementTerminator();
                 continue;
             }
 
             var expr = ParseExpression();
 
-            if (Match(TokenKind.Semicolon))
+            if (Check(TokenKind.Semicolon))
             {
+                // Statement form with explicit terminator — Overt doesn't allow
+                // semicolons; the presence of a `;` here is the error, not a
+                // signal to promote this to an ExpressionStmt.
+                RejectStrayStatementTerminator();
                 statements.Add(new ExpressionStmt(expr, expr.Span));
                 continue;
             }
@@ -760,8 +792,8 @@ public sealed class Parser
                 break;
             }
 
-            // Bare expression without semicolon before another statement — the expression's
-            // value is discarded.
+            // Bare expression without a terminator before another statement —
+            // the expression's value is discarded.
             statements.Add(new ExpressionStmt(expr, expr.Span));
         }
 
@@ -804,7 +836,7 @@ public sealed class Parser
         if (Match(TokenKind.KeywordAs))
         {
             var aliasTok = Expect(TokenKind.Identifier, "use ... as <alias>");
-            Match(TokenKind.Semicolon);
+            RejectStrayStatementTerminator();
             return new UseDecl(
                 path,
                 ImmutableArray<string>.Empty,
@@ -828,7 +860,7 @@ public sealed class Parser
                 }
             }
             var closing = Expect(TokenKind.RightBrace, "use selector");
-            Match(TokenKind.Semicolon);
+            RejectStrayStatementTerminator();
             return new UseDecl(
                 path,
                 symbols.ToImmutable(),

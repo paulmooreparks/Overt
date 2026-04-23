@@ -444,7 +444,7 @@ public class TypeDiagnosticTests
     {
         var r = Check(
             "module t\ntype Age = Int where 0 <= self && self <= 150\n"
-            + "fn f(a: Age) -> Age { let b: Age = 999; b }");
+            + "fn f(a: Age) -> Age { let b: Age = 999\n b }");
         var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0311");
         Assert.Contains("let binding", d.Message);
     }

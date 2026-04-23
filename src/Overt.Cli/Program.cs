@@ -793,6 +793,7 @@ static class Cli
         ["OV0161"] = "AGENTS.md §7 (let mut)",
         ["OV0162"] = "AGENTS.md §6 (match arms)",
         ["OV0169"] = "AGENTS.md §2 (every file starts with `module <name>`)",
+        ["OV0170"] = "AGENTS.md §7 (no semicolons; newlines separate statements)",
 
         // Resolve
         ["OV0200"] = "AGENTS.md §2 (declarations and scope)",

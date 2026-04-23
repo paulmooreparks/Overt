@@ -401,7 +401,7 @@ public class ParserTests
     [Fact]
     public void Parse_AssignmentStatement()
     {
-        var lex = Lexer.Lex("module m\nfn f() { let mut x = 0; x = x + 1 }");
+        var lex = Lexer.Lex("module m\nfn f() { let mut x = 0\n x = x + 1 }");
         var result = Parser.Parse(lex.Tokens);
 
         var fn = (FunctionDecl)result.Module.Declarations[0];
@@ -669,7 +669,7 @@ public class ParserTests
         // following expression to demote it to a statement). That's fine — the type
         // checker will require while's value `()` to match the enclosing block's type.
         var lex = Lexer.Lex(
-            "module m\nfn f() { let mut i = 0; while i <= 10 { i = i + 1 } }");
+            "module m\nfn f() { let mut i = 0\n while i <= 10 { i = i + 1 } }");
         var result = Parser.Parse(lex.Tokens);
         Assert.Empty(result.Diagnostics);
 
@@ -686,7 +686,7 @@ public class ParserTests
     {
         // Matches mutation.ov shape: while { ... } followed by a trailing value.
         var lex = Lexer.Lex(
-            "module m\nfn f() -> Int { let mut t = 0; while t < 10 { t = t + 1 } t }");
+            "module m\nfn f() -> Int { let mut t = 0\n while t < 10 { t = t + 1 }\n t }");
         var result = Parser.Parse(lex.Tokens);
         Assert.Empty(result.Diagnostics);
 
