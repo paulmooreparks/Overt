@@ -16,8 +16,9 @@ The name *is* the design philosophy: every effect, error, dispatch, mutation, an
 
 ## Where to start reading
 
-1. **[`README.md`](README.md)** — status, layout, and a walk through the compiler pipeline. This is the fastest orientation.
-2. **[`DESIGN.md`](DESIGN.md)** — authoritative design. 26 sections, ~1100 lines.
+1. **[`AGENTS.md`](AGENTS.md)** — the operational doc for agents writing Overt. Every construct with one canonical example, every diagnostic code with its fix, the stdlib surface with real signatures, known gaps called out. Load this into context at session start whenever you'll be authoring `.ov` code. Not `DESIGN.md` — that's rationale.
+2. **[`README.md`](README.md)** — status, layout, and a walk through the compiler pipeline. Fastest orientation for working on the compiler itself.
+3. **[`DESIGN.md`](DESIGN.md)** — authoritative design. 26 sections, ~1100 lines.
 
 Fastest DESIGN.md orientation path (≈15 minutes):
 
@@ -84,9 +85,9 @@ What's notably absent, ordered by impact on "can I write real code in this":
 
 Ordered by "how directly this unblocks someone writing real Overt code":
 
-1. **Conditional-context `?` hoisting** (½ session). Extend the hoisting pass to walk into `if` / `while` arms, hoisting each arm's `?` sites into the arm's body with a proper early-return chain. (Match arms already work via IIFE wrapping.) Closes the last remaining gap in "errors are values, no hidden unwinding."
+1. **Conditional-context `?` hoisting — the real fix** (1 session). Statement-level restructuring: when a let/assignment/return contains an `if`/`while` used as an expression that has a `?` in an arm, lower the whole thing to C# `if/else` with assignments into a pre-declared temp, so the `?`-hoist's early-return reaches the enclosing function directly. Current state (as of commit tip) includes a narrow tail-hoist for match-arm trailing expressions when the arm's expected type is `Result<_, E>`; the broader "`?` inside if-expression arm used at non-Result type" case still falls back to `.Unwrap()` (throws). Closes the last real gap in "errors are values, no hidden unwinding."
 3. **Runtime-assertion emission for undecidable refinement predicates** (1 session). The emitter's implicit-operator generator on wrapper records should evaluate the predicate and throw on violation. Closes the last gap in the refinement-types guarantee.
-4. **`AGENTS.md` — the agent-facing grounding doc** (1 session, best done after #1 so stubs are real). ~400–600 line operational reference: every construct gets one canonical example, effect rows and their meanings, `Result`/`?` idioms, the stdlib surface with real signatures, what each OV diagnostic means and how to fix it. Designed to be loaded verbatim into an agent's context at session start. Not `DESIGN.md` — that's rationale; this is *how to write Overt today*. Paired with a pass over diagnostics to add `note:` pointers into `AGENTS.md` sections so an agent hitting an error learns the rule in situ.
+4. **Diagnostic upgrade: `note:` pointers into `AGENTS.md`** (½ session). `AGENTS.md` exists now. Next is plumbing diagnostics to include `note: see AGENTS.md §<N>` so an agent hitting an OV code learns the rule from the error message, in context, without needing to go look. Touches every diagnostic site in the compiler but each touch is one line.
 5. **Formatter** (2 sessions). Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed for `@review` / `@agent` comment tooling and for asserting "one canonical form" mechanically.
 6. **Tuple-of-enum exhaustiveness** (1 session). Cartesian-product walk over arm patterns in `match (a, b)` against enum types. Additive to OV0308.
 7. **Go backend** (2–3 sessions). Fresh emitter against the same AST + TypeCheckResult. Real forcing function for the IR being runtime-neutral per §20. Once a single example emits identically through both, the conformance suite is real.
@@ -152,4 +153,4 @@ The author (paul@smartsam.com) has 26 years of C# experience and concurrent Go e
 
 ---
 
-**Semantic-enforcement arc is operationally complete: 13 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, refinement predicates, and loop-control-flow placement. Real stdlib runtime is in. `?` / `|>?` lower to faithful early-return propagation. Control flow (for each / loop / break / continue) and literal patterns in match are all wired end-to-end. 322/322 tests. Godbolt release engineering staged and waiting on a tag push. The remaining threshold for "write a real CLI tool in Overt" is the conditional-context `?` hoisting gap (if/while arms still use `.Unwrap()`-that-throws) and, orthogonally, `AGENTS.md` as the grounding doc for agents writing Overt.**
+**Semantic-enforcement arc is operationally complete: 13 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, refinement predicates, and loop-control-flow placement. Real stdlib runtime is in. `?` / `|>?` lower to faithful early-return propagation. Control flow (for each / loop / break / continue) and literal patterns in match are all wired end-to-end. `AGENTS.md` — the grounding doc for agents writing Overt — is in the repo root. 322/322 tests. Godbolt release engineering staged and waiting on a tag push. The remaining threshold for "write a real CLI tool in Overt" is the conditional-context `?` hoisting gap (if/while arm expressions still use `.Unwrap()`-that-throws) and, orthogonally, formatter / LSP / MSBuild integration as the next architectural tiers.**

@@ -1,0 +1,541 @@
+# AGENTS.md — writing Overt
+
+This file tells an LLM how to write working Overt code *today*. Load it into
+context at the start of any session that will author or modify `.ov` files.
+
+It is not rationale — that lives in `DESIGN.md`. Each section here shows the
+**one canonical form** for a construct (no alternatives, no history) and the
+diagnostic you'll see if you miswrite it.
+
+Status as of commit tip: 322 tests; `overt run` executes transpiled programs
+via in-memory Roslyn. The C# backend is primary; Go is scaffolded only. Three
+example programs run end-to-end today: `hello.ov`, `arith_eval.ov`, `trace.ov`.
+
+---
+
+## 1. A complete program
+
+```overt
+module hello
+
+fn main() !{io} -> Result<(), IoError> {
+    println("Hello, LLM!")?
+    Ok(())
+}
+```
+
+Rules on display:
+- `module <name>` is required as the first declaration.
+- `main` takes no args and returns `Result<(), IoError>`. The process exits 0
+  on `Ok`, 1 on `Err`.
+- `!{io}` declares the effect row; any function performing I/O must list `io`.
+- `println(...)` returns `Result<(), IoError>` — errors are values, not
+  exceptions. The `?` propagates `Err` as an early return.
+- `Ok(())` constructs the success value explicitly. There is no implicit
+  return; the last expression of a block is the value if it isn't a statement.
+
+To build and run:
+```
+overt run hello.ov    # compiles via Roslyn, executes, prints, exits 0
+overt --emit=csharp hello.ov    # dumps the transpiled C# to stdout
+```
+
+---
+
+## 2. Modules and declarations
+
+A module is one `.ov` file. `use` parses but the module system spans one file
+today — don't write multi-file programs yet.
+
+Top-level declarations:
+- `fn <name>(...) ...` — function
+- `record <Name> { field: Type, ... }` — product type, immutable
+- `enum <Name> { Variant, Variant { field: Type }, ... }` — sum type
+- `type <Name> = <Type> where <pred>` — type alias, optionally refined
+- `extern "c" fn <name>(...) -> <Type>` — FFI declaration (body throws at
+  runtime; binding is unimplemented)
+
+Declaration order does not matter — forward references within a file are
+fine.
+
+---
+
+## 3. Types
+
+Primitives: `Int`, `Float`, `Bool`, `String`, `()` (unit).
+
+Generic stdlib types:
+- `Result<T, E>` — success or failure
+- `Option<T>` — present or absent
+- `List<T>` — ordered immutable collection
+
+Records — immutable, constructed with `{ field = value, ... }`:
+
+```overt
+record User {
+    id:     Int,
+    name:   String,
+    active: Bool,
+}
+
+let u = User { id = 1, name = "ada", active = true }
+```
+
+Enums — closed sums, fully-qualified variant references:
+
+```overt
+enum Status {
+    Pending,
+    Shipped,
+    Delivered,
+}
+
+@derive(Debug)
+enum OrderError {
+    OutOfStock   { sku: String },
+    InvalidPrice { cents: Int },
+}
+
+let s = Status.Pending
+let e = OrderError.OutOfStock { sku = "A-1" }
+```
+
+Tuples:
+
+```overt
+let pair: (Int, String) = (1, "hi")
+```
+
+`let` always requires either a type annotation or enough context that the
+compiler can infer the type. Prefer annotations on public-shape bindings.
+
+---
+
+## 4. Type aliases and refinements
+
+Non-generic aliases are transparent for equality — `Age` and `Int` compare
+equal, distinguished only by a refinement predicate:
+
+```overt
+type Age = Int where 0 <= self && self <= 150
+```
+
+Literal crossings into a refined type are checked at compile time in the
+decidable fragment (numeric / boolean / string comparisons, `&&`, `||`, `!`,
+`self` references). Predicates outside this fragment are silently deferred
+(runtime-assertion emission isn't wired yet; the emitted code does not
+currently check them at runtime).
+
+**Don't write chained comparisons.** `0 <= self <= 150` is a parse error
+(non-associative comparison). Spell it `0 <= self && self <= 150`.
+
+Generic aliases are nominal, not transparent:
+
+```overt
+type NonEmpty<T> = List<T> where size(self) > 0
+```
+
+---
+
+## 5. Effect rows
+
+Every function declares its effects as part of its signature:
+
+```overt
+fn pure_calc(n: Int) -> Int { n * 2 }
+fn log_calc(n: Int) !{io} -> Int { println("n=${n}")?; n * 2 }
+fn maybe_fetch(id: Int) !{io, async} -> Result<User, IoError> { ... }
+```
+
+Core effects: `io`, `async`, `inference`, `fails`.
+
+Effect rows are **covering, not minimal** — if a function performs effect `X`,
+`X` must appear in its row. Missing effects are **OV0310**. There is no
+effect polymorphism notation in source today; the compiler approximates
+effect-variable propagation through function-typed arguments.
+
+---
+
+## 6. Expressions
+
+### if
+
+```overt
+let x: Int = if cond { 1 } else { 2 }
+
+// else is optional when the body evaluates to ()
+if cond { println("ok")? }
+```
+
+Both arms must produce the same type when there's an else. If else is absent,
+the body must be `()`.
+
+### match — exhaustive
+
+```overt
+match status {
+    Status.Pending   => "waiting",
+    Status.Shipped   => "moving",
+    Status.Delivered => "done",
+}
+
+// Literal patterns on Int / Float / Bool / String — need a `_` arm.
+match n {
+    0  => "zero",
+    1  => "one",
+    -1 => "neg",
+    _  => "other",
+}
+
+// Record destructure
+match order {
+    OrderError.OutOfStock { sku = s }   => s,
+    OrderError.InvalidPrice { cents = c } => "bad price",
+}
+
+// Tuple match
+match (state, event) {
+    (State.Closed, Event.Open) => State.Listening,
+    _                          => state,
+}
+```
+
+Missing arms fire **OV0308**. Literal patterns don't contribute to
+exhaustiveness (infinite domain); they require `_`.
+
+### with — record update
+
+```overt
+let updated = u with { active = false }
+```
+
+Produces a new record; `u` is unchanged. There is no in-place mutation of
+record fields.
+
+### Block as expression
+
+```overt
+let v = {
+    let a = compute()
+    let b = other()
+    a + b
+}
+```
+
+The last expression is the value. Statements before it must end with the
+previous newline or `;` (both accepted).
+
+---
+
+## 7. Statements
+
+```overt
+let x: Int = 42               // immutable binding
+let mut counter = 0           // mutable rebinding of a single name
+counter = counter + 1         // assignment — only valid on `let mut`
+break                         // only inside a loop body
+continue                      // only inside a loop body
+```
+
+`let mut` rebinds the **local name**, not the record's fields. Field-level
+mutation doesn't exist; `with` copies instead.
+
+Shadowing across nested scopes is rejected (**OV0201**). Patterns and locals
+may reuse a prelude name (so `Some(v) => v` binds `v` without colliding with
+the `None` stdlib symbol).
+
+---
+
+## 8. Control flow
+
+```overt
+// Collection iteration — must be a List<T>
+for each x in xs {
+    println("got ${x}")?
+}
+
+// Infinite loop — exits via break
+let mut n = 0
+loop {
+    if n == 3 { break }
+    n = n + 1
+}
+
+// Condition loop
+while m < 10 {
+    if m == 5 { m = m + 1; continue }
+    m = m + 1
+}
+```
+
+`break`/`continue` outside a loop body fire **OV0312**. `for each` on a
+non-`List` iterable fires **OV0313**.
+
+---
+
+## 9. Errors as values
+
+### Result and `?`
+
+```overt
+fn try_parse(s: String) -> Result<Int, ParseError> { ... }
+
+fn doubled(s: String) -> Result<Int, ParseError> {
+    let n: Int = try_parse(s)?   // propagates Err as early return
+    Ok(n * 2)
+}
+```
+
+The `?` operator works only when the enclosing function returns
+`Result<_, E>` with a matching `E`. An ignored `Result<_, _>` in statement
+position is **OV0307** — every `Result` must be consumed via `?`,
+`let _ = ...`, or `match`.
+
+### Pipe-propagate
+
+```overt
+ids |>? par_map(fetch_user) |> filter(is_active) |> map(get_name) |> Ok
+```
+
+`|>?` unwraps `Result<T, E>` to `T` along the pipe, propagating `Err` to the
+enclosing function's return. `|>` is the infallible form.
+
+### Known gap: conditional-context `?`
+
+`?` inside an `if`/`while` arm body that is used as an expression (not a
+statement) currently lowers to `.Unwrap()` which throws on `Err`. Works in
+practice if the `Err` path is rare. The proper fix (statement-level
+restructuring) is tracked in `CARRYOVER.md`. If correctness on cold paths
+matters, lift the `?` into a let or a match on the `Result` instead of
+embedding it in an if-expression arm.
+
+---
+
+## 10. Calls and pipes
+
+**All multi-argument calls must use named arguments.** Positional is only
+legal on single-argument calls. Mixing is not allowed.
+
+```overt
+concat_three(first = a, middle = b, last = c)    // correct
+concat_three(a, b, c)                            // OV0154
+insert(tree = t, value = 5)                      // correct
+foo(42)                                          // correct (single arg)
+```
+
+Pipe composition splices the piped value as the **first** argument:
+
+```overt
+xs |> filter(is_even)            // filter(xs, is_even)
+xs |> fold(seed = 0, step = add) // fold(xs, seed=0, step=add)
+```
+
+There is **no method-call syntax**. Dots mean record field access or
+module-qualified stdlib lookup (`List.empty`, `Trace.subscribe`), nothing
+else.
+
+---
+
+## 11. Stdlib surface (runnable subset)
+
+### Result / Option
+
+```overt
+Ok(value)            // -> Result<T, E>
+Err(error)           // -> Result<T, E>
+Some(value)          // -> Option<T>
+None                 // -> Option<T>
+```
+
+### I/O
+
+```overt
+println(line: String) !{io} -> Result<(), IoError>
+eprintln(line: String) !{io} -> Result<(), IoError>
+```
+
+### Lists
+
+```overt
+List.empty() -> List<T>                              // needs context for T
+List.singleton(value: T) -> List<T>
+List.concat_three(first: List<T>, middle: List<T>, last: List<T>) -> List<T>
+
+size(list: List<T>) -> Int
+len(list: List<T>) -> Int
+length(s: String) -> Int
+
+map(list: List<T>, f: fn(T) -> U) -> List<U>
+filter(list: List<T>, pred: fn(T) -> Bool) -> List<T>
+fold(list: List<T>, seed: U, step: fn(U, T) -> U) -> U
+
+par_map(list: List<T>, f: fn(T) !{io, async} -> Result<U, E>)
+    !{io, async} -> Result<List<U>, E>
+```
+
+`par_map` runs the callback concurrently (TPL) and returns the first `Err`
+by original index on failure; order of the output list matches the input.
+
+### Trace
+
+```overt
+Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
+```
+
+A `trace { ... }` block is a pass-through today — no events are actually
+emitted. Subscribe works, but you won't see anything.
+
+### FFI
+
+```overt
+extern "c" fn c_strlen(s: CString) -> Int
+
+fn strlen(s: String) -> Int {
+    let cs: CString = CString.from(s)
+    unsafe { c_strlen(cs) }
+}
+```
+
+`CString.from` constructs a byte-string at the FFI boundary. **`extern`
+bindings don't actually call native code yet** — they throw at runtime. FFI
+compiles cleanly but won't execute until the binding milestone lands.
+
+---
+
+## 12. Formatting and naming
+
+- Two-space indent. Not indentation-significant (C-family braces).
+- Identifiers: `snake_case` for values and functions, `PascalCase` for types,
+  `SCREAMING_SNAKE_CASE` nowhere in particular — Overt doesn't have
+  constants distinct from `let`.
+- Record and variant field names are lowercase: `IoError { narrative = "..." }`,
+  not `Narrative`.
+- One canonical form is enforced by convention today; a formatter lands in a
+  later session.
+
+---
+
+## 13. What doesn't work yet
+
+**If you try these, you will get an error or a runtime failure. Don't.**
+
+- **Multi-file modules.** `use` parses but cross-file resolution isn't wired.
+  One module = one file.
+- **FFI calls at runtime.** `extern` compiles; invocation throws.
+- **`trace { ... }` emission.** The block is pass-through; no events fire.
+- **`?` inside if-expression / while-expression arms that are used as a value.**
+  Lowers to `.Unwrap()`, which throws on Err. Match arms used as a value
+  work in Result context only; same IIFE issue for non-Result contexts.
+- **Conditional-context refinement runtime checks.** Decidable predicates
+  are checked at literal crossings; undecidable ones are silently deferred
+  (no runtime assertion emitted).
+- **`f64` literal patterns in `match`.** Parse OK but don't fire — float
+  equality isn't a well-defined match.
+- **Block comments (`/* ... */`).** Only line comments (`//`) work.
+- **Module-system-aware package management.** No `import`, no `cargo`-style
+  manifest.
+
+---
+
+## 14. Diagnostic codes
+
+Every error comes with `help:` text naming the fix; this table is a quick
+reference. Codes are stable.
+
+| Code | Stage | Meaning | Fix |
+|------|-------|---------|-----|
+| OV0001–0003 | lex | malformed literal, unterminated string, unknown char | follow lexical.md |
+| OV0102–0103 | lex | interpolation errors | balance `${...}` |
+| OV0150 | parse | unexpected token at top level | check declaration shape |
+| OV0151 | parse | expected effect name | spell the effect word |
+| OV0152 | parse | expected type | use `Int`/`String`/`Result<...>` etc. |
+| OV0153 | parse | tuple types unsupported in declarations | use a record instead |
+| OV0154 | parse | positional arg in multi-arg call | use `name = value` |
+| OV0155 | parse | malformed pattern | see OV0158 guidance |
+| OV0156 | parse | malformed interpolation | balance `${...}` / `$ident` |
+| OV0157 | parse | generic structural errors | consult the reported span |
+| OV0158 | parse | expected pattern | `_`, identifier, path, `Name(..)`, `Name {..}`, tuple, literal |
+| OV0159 | parse | unit pattern `()` unsupported | bind or ignore with `_` |
+| OV0160 | parse | duplicate field / variant / parameter | rename |
+| OV0161 | parse | `let mut` with non-identifier pattern | mutable bindings take a single name |
+| OV0162 | parse | missing comma between match arms | add `,` |
+| OV0200 | resolve | unknown name | check spelling; did-you-mean suggested |
+| OV0201 | resolve | shadowed name | rename; no shadowing across nested scopes |
+| OV0300 | type | argument type mismatch | match the parameter type |
+| OV0301 | type | return type mismatch | match the declared return |
+| OV0302 | type | field type mismatch | match the record's field type |
+| OV0303 | type | arm / branch type mismatch | both arms must produce the same type |
+| OV0304 | type | condition must be Bool | wrap in comparison or Bool-returning call |
+| OV0306 | type | argument count mismatch | match the signature's arity |
+| OV0307 | type | ignored `Result<_, _>` | use `?`, `let _ = expr`, or `match` |
+| OV0308 | type | non-exhaustive match | add missing arms or a `_` |
+| OV0310 | type | function performs an undeclared effect | add it to the effect row |
+| OV0311 | type | refinement violated at literal boundary | change the literal or widen the predicate |
+| OV0312 | type | `break`/`continue` outside loop | only valid in while / for each / loop |
+| OV0313 | type | `for each` on non-`List` | convert to a `List<T>` first |
+
+---
+
+## 15. Canonical templates
+
+**Fallible function with I/O:**
+```overt
+fn read_and_double(s: String) !{io} -> Result<Int, IoError> {
+    let raw: Int = try_parse(s)?
+    println("parsed ${raw}")?
+    Ok(raw * 2)
+}
+```
+
+**Tree-walking interpreter shape** (see `examples/arith_eval.ov`):
+```overt
+enum Expr {
+    Lit { value: Int },
+    Bin { op: BinOp, left: Expr, right: Expr },
+}
+
+fn eval(expr: Expr) -> Result<Int, EvalError> {
+    match expr {
+        Expr.Lit { value = v } => Ok(v),
+        Expr.Bin { op = op, left = l, right = r } => {
+            let lv: Int = eval(l)?
+            let rv: Int = eval(r)?
+            apply(op = op, left = lv, right = rv)
+        }
+    }
+}
+```
+
+**Collection pipeline:**
+```overt
+fn summarize(xs: List<Int>) -> Int {
+    xs
+      |> filter(is_positive)
+      |> map(square)
+      |> fold(seed = 0, step = add)
+}
+```
+
+**Parallel failing pipeline:**
+```overt
+fn all_users(ids: List<UserId>) !{io, async} -> Result<List<User>, LoadError> {
+    ids |>? par_map(fetch_user) |> Ok
+}
+```
+
+**State machine:**
+```overt
+fn transition(state: State, event: Event) -> Result<State, TransitionError> {
+    match (state, event) {
+        (State.Closed, Event.Open)    => Ok(State.Listening),
+        (State.Listening, Event.Data) => Ok(State.Receiving),
+        _                             => Err(TransitionError.Invalid { from = state, event = event }),
+    }
+}
+```
+
+---
+
+**When in doubt, prefer the shape in `examples/`.** Every example there
+compiles; if a pattern isn't shown in an example, it may not be supported
+yet.
