@@ -489,13 +489,18 @@ public sealed class CSharpEmitter
         var returnsResult = x.ReturnType is NamedType
             { Name: "Result", TypeArguments.Length: 2 };
 
-        // Build the C# call expression: <binds target>(arg1, arg2, ...).
-        // Static properties don't take args, so bare member access.
+        // Build the C# call expression: <global::><binds target>(arg1, arg2, ...).
+        // The `global::` prefix forces resolution against the compilation's root
+        // namespace rather than the current file's namespace — critical when a
+        // facade module is declared under something like `stdlib.system.io.path`
+        // because the emitted C# namespace `Overt.Generated.Stdlib.System.Io.Path`
+        // shadows the real `System` namespace for the duration of that file.
         var args = string.Join(", ",
             x.Parameters.Select(p => EscapeId(p.Name)));
+        var prefixedTarget = "global::" + x.BindsTarget;
         var callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
-            ? x.BindsTarget
-            : $"{x.BindsTarget}({args})";
+            ? prefixedTarget
+            : $"{prefixedTarget}({args})";
 
         if (!returnsResult)
         {

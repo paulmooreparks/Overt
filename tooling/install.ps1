@@ -70,4 +70,21 @@ Get-ChildItem -Path $Bin -File |
 
 Write-Host ""
 Write-Host "Installed to $Bin ($replaced replaced, $added added)." -ForegroundColor Green
+
+# Also publish the blessed stdlib — facade files that the CLI auto-discovers
+# when resolving `use stdlib.*`. Robocopy'd into `$Bin\stdlib\` so the CLI's
+# walk-up search (see DiscoverSearchDirs) finds them next to overt.exe.
+$stdlibSrc = Join-Path $repoRoot 'stdlib'
+$stdlibDst = Join-Path $Bin 'stdlib'
+if (Test-Path $stdlibSrc) {
+    if (-not (Test-Path $stdlibDst)) {
+        New-Item -ItemType Directory -Path $stdlibDst | Out-Null
+    }
+    # Copy-Item recursively. -Force overwrites existing files (intended — this
+    # script always replaces).
+    Copy-Item -Path (Join-Path $stdlibSrc '*') -Destination $stdlibDst -Recurse -Force
+    $facadeCount = (Get-ChildItem -Path $stdlibDst -Recurse -Filter '*.ov').Count
+    Write-Host "Installed stdlib to $stdlibDst ($facadeCount facades)." -ForegroundColor Green
+}
+
 Write-Host "Check: overt --version"

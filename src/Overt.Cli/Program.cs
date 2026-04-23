@@ -212,65 +212,25 @@ static class Cli
             return 1;
         }
 
-        // Resolve the module graph: the entry file plus everything its `use`
-        // declarations transitively import. For each module, parse it; for
-        // each module in topological order, name-resolve and type-check with
-        // its imports' symbols already in scope.
-        var graph = ModuleGraph.Resolve(inputFile, ImmutableArray<string>.Empty);
-        var allDiagnostics = graph.Diagnostics;
-        if (graph.Modules.Length == 0)
+        // Resolve + type-check the module graph through the shared pipeline,
+        // which applies stdlib auto-discovery (DiscoverSearchDirs).
+        var compiled = CompileGraph(inputFile);
+        if (compiled.Modules.Length == 0)
         {
-            if (WriteDiagnostics(inputFile, allDiagnostics) != 0) return 1;
+            if (WriteDiagnostics(inputFile, compiled.Diagnostics) != 0) return 1;
             Console.Error.WriteLine("overt run: module graph is empty");
             return 1;
         }
-
-        // Per-module resolutions + type-check, threading imports through so
-        // downstream modules see their dependencies' typed symbols.
-        var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
-        var moduleTypes = new Dictionary<string, TypeCheckResult>(StringComparer.Ordinal);
-        var exportedSymbols = new Dictionary<string, ImmutableDictionary<string, Symbol>>(
-            StringComparer.Ordinal);
-        var symbolTypesByModule = new Dictionary<string, ImmutableDictionary<Symbol, TypeRef>>(
-            StringComparer.Ordinal);
-
-        foreach (var module in graph.Modules)
-        {
-            // Build the importable-modules table from everything resolved
-            // before this one (the graph is topologically ordered).
-            var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
-
-            var resolved = NameResolver.Resolve(module.Ast, importable);
-            allDiagnostics = allDiagnostics.AddRange(resolved.Diagnostics);
-            moduleResolutions[module.Name] = resolved;
-
-            // Seed the type checker with imported symbol types from every
-            // module `module` uses. Each imported symbol maps to its type in
-            // the defining module's symbol-types table.
-            var importedTypes = CollectImportedSymbolTypes(
-                module.Ast, exportedSymbols, symbolTypesByModule);
-
-            var typed = TypeChecker.Check(module.Ast, resolved, importedTypes);
-            allDiagnostics = allDiagnostics.AddRange(typed.Diagnostics);
-            moduleTypes[module.Name] = typed;
-
-            // Export this module's top-level symbols for downstream modules
-            // to import. ImportedSymbols here means the module's own decls,
-            // not its imports (an Overt export is any top-level fn/extern).
-            exportedSymbols[module.Name] = CollectTopLevelExports(module.Ast);
-            symbolTypesByModule[module.Name] = typed.SymbolTypes;
-        }
-
-        if (WriteDiagnostics(inputFile, allDiagnostics) != 0) return 1;
+        if (WriteDiagnostics(inputFile, compiled.Diagnostics) != 0) return 1;
 
         // Emit C# for every module in the graph. The entry module's
         // assembly name matches the input file so stack traces point there.
         var trees = new List<RoslynCore.SyntaxTree>();
-        foreach (var module in graph.Modules)
+        foreach (var module in compiled.Modules)
         {
             var csharp = CSharpEmitter.Emit(
                 module.Ast,
-                moduleTypes[module.Name],
+                compiled.TypeChecks[module.Name],
                 module.SourcePath);
             var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
                 csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
@@ -373,7 +333,8 @@ static class Cli
     /// </summary>
     public static CompiledGraph CompileGraph(string entryFile)
     {
-        var graph = ModuleGraph.Resolve(entryFile, ImmutableArray<string>.Empty);
+        var searchDirs = DiscoverSearchDirs();
+        var graph = ModuleGraph.Resolve(entryFile, searchDirs);
         var allDiagnostics = graph.Diagnostics;
 
         var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
@@ -400,6 +361,70 @@ static class Cli
         }
 
         return new CompiledGraph(graph.Modules, moduleResolutions, moduleTypes, allDiagnostics);
+    }
+
+    // ------------------------------------------- search-path discovery
+
+    /// <summary>
+    /// Locate the search directories that <see cref="ModuleGraph.Resolve"/>
+    /// will walk for <c>use</c> targets.
+    ///
+    /// The stdlib is a module tree rooted at <c>stdlib.*</c>; a file
+    /// <c>stdlib/system/io/path.ov</c> declares <c>module stdlib.system.io.path</c>.
+    /// Because the first segment of the import path is <c>stdlib</c>, the
+    /// search dir must be the PARENT of the <c>stdlib</c> directory, not the
+    /// directory itself — otherwise a lookup for <c>stdlib/system/...</c>
+    /// would double up.
+    ///
+    /// Order:
+    /// <list type="number">
+    ///   <item>The entry file's own directory (applied by ModuleGraph itself;
+    ///     doesn't need to appear here).</item>
+    ///   <item><c>$OVERT_STDLIB</c> if set — an explicit override pointing at
+    ///     the stdlib root (the directory containing <c>stdlib/</c>).</item>
+    ///   <item>A directory walking up from the running executable, looking
+    ///     for any ancestor that contains <c>stdlib/</c>. Handles both
+    ///     installed (<c>bin/stdlib</c> next to <c>overt.exe</c>) and dev
+    ///     (<c>repo/stdlib/</c>) layouts without further configuration.</item>
+    /// </list>
+    /// </summary>
+    static ImmutableArray<string> DiscoverSearchDirs()
+    {
+        var dirs = ImmutableArray.CreateBuilder<string>();
+
+        var envStdlib = Environment.GetEnvironmentVariable("OVERT_STDLIB");
+        if (!string.IsNullOrWhiteSpace(envStdlib) && Directory.Exists(envStdlib))
+        {
+            // Accept either "path-to-stdlib" or "path-to-stdlib-parent" here.
+            // If the supplied dir is itself named `stdlib`, use its parent;
+            // otherwise assume the user already pointed at a parent.
+            var full = Path.GetFullPath(envStdlib);
+            var asParent = string.Equals(
+                Path.GetFileName(full), "stdlib", StringComparison.Ordinal)
+                ? Path.GetDirectoryName(full)
+                : full;
+            if (!string.IsNullOrEmpty(asParent) && Directory.Exists(asParent))
+            {
+                dirs.Add(asParent);
+            }
+        }
+
+        var exeDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrEmpty(exeDir))
+        {
+            var cursor = new DirectoryInfo(exeDir);
+            for (var depth = 0; depth < 8 && cursor is not null; depth++)
+            {
+                if (Directory.Exists(Path.Combine(cursor.FullName, "stdlib")))
+                {
+                    var full = Path.GetFullPath(cursor.FullName);
+                    if (!dirs.Contains(full)) dirs.Add(full);
+                }
+                cursor = cursor.Parent;
+            }
+        }
+
+        return dirs.ToImmutable();
     }
 
     // ------------------------------------------- multi-module helpers (run)

@@ -1,0 +1,99 @@
+module stdlib.system.io.path
+
+// Auto-generated from `System.IO.Path` via `overt bind`.
+// Hand-edits may be overwritten; prefer regenerating and layering
+// hand-curated effect annotations on top.
+
+extern "csharp" fn change_extension(path: String, extension: String) -> String
+    binds "System.IO.Path.ChangeExtension"
+
+// skipped System.IO.Path.Combine: parameter 'paths' has unsupported type 'System.String[]'
+// skipped System.IO.Path.Combine: parameter 'paths' has unsupported type 'System.ReadOnlySpan`1[[System.String, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn combine_2(path1: String, path2: String) -> String
+    binds "System.IO.Path.Combine"
+
+extern "csharp" fn combine_3(path1: String, path2: String, path3: String) -> String
+    binds "System.IO.Path.Combine"
+
+extern "csharp" fn combine_4(path1: String, path2: String, path3: String, path4: String) -> String
+    binds "System.IO.Path.Combine"
+
+// skipped System.IO.Path.EndsInDirectorySeparator: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn ends_in_directory_separator(path: String) -> Bool
+    binds "System.IO.Path.EndsInDirectorySeparator"
+
+extern "csharp" fn exists(path: String) -> Bool
+    binds "System.IO.Path.Exists"
+
+extern "csharp" fn get_directory_name(path: String) -> String
+    binds "System.IO.Path.GetDirectoryName"
+
+// skipped System.IO.Path.GetDirectoryName: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn get_extension(path: String) -> String
+    binds "System.IO.Path.GetExtension"
+
+// skipped System.IO.Path.GetExtension: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn get_file_name(path: String) -> String
+    binds "System.IO.Path.GetFileName"
+
+// skipped System.IO.Path.GetFileName: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn get_file_name_without_extension(path: String) -> String
+    binds "System.IO.Path.GetFileNameWithoutExtension"
+
+// skipped System.IO.Path.GetFileNameWithoutExtension: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn get_full_path_1(path: String) -> String
+    binds "System.IO.Path.GetFullPath"
+
+extern "csharp" fn get_full_path_2(path: String, base_path: String) -> String
+    binds "System.IO.Path.GetFullPath"
+
+// skipped System.IO.Path.GetInvalidFileNameChars: return type 'System.Char[]' is unsupported
+// skipped System.IO.Path.GetInvalidPathChars: return type 'System.Char[]' is unsupported
+extern "csharp" fn get_path_root(path: String) -> String
+    binds "System.IO.Path.GetPathRoot"
+
+// skipped System.IO.Path.GetPathRoot: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn get_random_file_name() -> String
+    binds "System.IO.Path.GetRandomFileName"
+
+extern "csharp" fn get_relative_path(relative_to: String, path: String) -> String
+    binds "System.IO.Path.GetRelativePath"
+
+extern "csharp" fn get_temp_file_name() -> String
+    binds "System.IO.Path.GetTempFileName"
+
+extern "csharp" fn get_temp_path() -> String
+    binds "System.IO.Path.GetTempPath"
+
+extern "csharp" fn has_extension(path: String) -> Bool
+    binds "System.IO.Path.HasExtension"
+
+// skipped System.IO.Path.HasExtension: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn is_path_fully_qualified(path: String) -> Bool
+    binds "System.IO.Path.IsPathFullyQualified"
+
+// skipped System.IO.Path.IsPathFullyQualified: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn is_path_rooted(path: String) -> Bool
+    binds "System.IO.Path.IsPathRooted"
+
+// skipped System.IO.Path.IsPathRooted: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.IO.Path.Join: parameter 'paths' has unsupported type 'System.String[]'
+// skipped System.IO.Path.Join: parameter 'paths' has unsupported type 'System.ReadOnlySpan`1[[System.String, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn join_2(path1: String, path2: String) -> String
+    binds "System.IO.Path.Join"
+
+// skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn join_3(path1: String, path2: String, path3: String) -> String
+    binds "System.IO.Path.Join"
+
+// skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn join_4(path1: String, path2: String, path3: String, path4: String) -> String
+    binds "System.IO.Path.Join"
+
+extern "csharp" fn trim_ending_directory_separator(path: String) -> String
+    binds "System.IO.Path.TrimEndingDirectorySeparator"
+
+// skipped System.IO.Path.TrimEndingDirectorySeparator: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.IO.Path.TryJoin: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.IO.Path.TryJoin: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
