@@ -19,8 +19,8 @@ extern "csharp" fn call_llm(prompt: String) !{io, async, inference} -> Result<St
 
 // Any function that invokes `call_llm` inherits the `inference` effect.
 fn classify(text: String) !{io, async, inference} -> Result<Classification, LlmError> {
-    let prompt   = "Classify as positive or negative: $text"
-    let response = call_llm(prompt)?
+    let prompt: String   = "Classify as positive or negative: $text"
+    let response: String = call_llm(prompt)?
     parse_classification(response)
 }
 

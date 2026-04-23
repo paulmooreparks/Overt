@@ -207,6 +207,15 @@ public sealed class TypeChecker
     private static bool IsPrimitive(string name) =>
         name is "Int" or "Int64" or "Float" or "Bool" or "String";
 
+    /// <summary>Best-effort rendering of a let's target name for diagnostic
+    /// help text. Falls back to a placeholder when the target isn't a plain
+    /// identifier (tuple destructuring, etc.).</summary>
+    private static string LetTargetName(Pattern target) => target switch
+    {
+        IdentifierPattern ip => ip.Name,
+        _ => "<name>",
+    };
+
     private static PrimitiveType PrimitiveFor(string name) => name switch
     {
         "Int" => PrimitiveType.Int,
@@ -834,7 +843,18 @@ public sealed class TypeChecker
                     var initType = AnnotateExpression(ls.Initializer);
                     var bindingType = ls.Type is { } annotated ? LowerType(annotated) : initType;
                     BindPatternSymbols(ls.Target, bindingType, SymbolKind.LetBinding);
-                    if (ls.Type is not null)
+                    if (ls.Type is null)
+                    {
+                        // Per DESIGN.md §4's tie-breaker rule: annotations are
+                        // required on every let to prevent silent re-inference
+                        // when upstream types change and to keep each line
+                        // self-describing for agent RWRA.
+                        ReportErrorWithHelp("OV0314",
+                            "`let` requires an explicit type annotation",
+                            ls.Span,
+                            $"annotate the binding: `let {LetTargetName(ls.Target)}: <Type> = ...`");
+                    }
+                    else
                     {
                         CheckRefinementAtBoundary(ls.Initializer, bindingType,
                             boundaryDescription: "let binding");

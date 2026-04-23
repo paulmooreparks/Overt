@@ -40,7 +40,7 @@ fn process_order(order: Order) -> Result<Order, ProcessError> {
 fn main() !{io} -> Result<(), IoError> {
     Trace.subscribe(print_event)
 
-    let order = Order { id = 42, amount = 500, status = OrderStatus.Pending }
+    let order: Order = Order { id = 42, amount = 500, status = OrderStatus.Pending }
     match process_order(order) {
         Ok(updated) => println("shipped: ${updated.id}"),
         Err(e)      => println("failed: $e"),
@@ -50,5 +50,5 @@ fn main() !{io} -> Result<(), IoError> {
 
 fn print_event(event: TraceEvent) !{io} -> () {
     // Discard the Result explicitly (DESIGN.md §11: ignored Results are errors).
-    let _ = println("[trace] $event")
+    let _: Result<(), IoError> = println("[trace] $event")
 }

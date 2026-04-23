@@ -112,11 +112,13 @@ Greater(>) @ 30:38..30:39
 LeftBrace({) @ 30:40..30:41
 KeywordLet(let) @ 31:5..31:8
 Identifier(exists) @ 31:9..31:15
-Equals(=) @ 31:16..31:17
-Identifier(file_exists) @ 31:18..31:29
-LeftParen(() @ 31:29..31:30
-StringLiteral("/tmp/hello.txt") @ 31:30..31:46
-RightParen()) @ 31:46..31:47
+Colon(:) @ 31:15..31:16
+Identifier(Bool) @ 31:17..31:21
+Equals(=) @ 31:22..31:23
+Identifier(file_exists) @ 31:24..31:35
+LeftParen(() @ 31:35..31:36
+StringLiteral("/tmp/hello.txt") @ 31:36..31:52
+RightParen()) @ 31:52..31:53
 Identifier(println) @ 32:5..32:12
 LeftParen(() @ 32:12..32:13
 StringHead("file exists: ) @ 32:13..32:27

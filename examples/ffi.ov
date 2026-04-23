@@ -28,7 +28,7 @@ fn strlen(s: String) -> Int {
 }
 
 fn main() !{io} -> Result<(), IoError> {
-    let exists = file_exists("/tmp/hello.txt")
+    let exists: Bool = file_exists("/tmp/hello.txt")
     println("file exists: $exists")?
 
     match env_value("HOME") {

@@ -494,7 +494,7 @@ public class StdlibTranspiledEndToEndTests
                     println("got ${x}")?
                 }
 
-                let mut n = 0
+                let mut n: Int = 0
                 loop {
                     if n == 3 {
                         break
@@ -503,7 +503,7 @@ public class StdlibTranspiledEndToEndTests
                     n = n + 1
                 }
 
-                let mut m = 0
+                let mut m: Int = 0
                 while m < 5 {
                     if m == 2 {
                         m = m + 1

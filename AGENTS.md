@@ -159,8 +159,18 @@ Tuples:
 let pair: (Int, String) = (1, "hi")
 ```
 
-`let` always requires either a type annotation or enough context that the
-compiler can infer the type. Prefer annotations on public-shape bindings.
+**Every `let` requires an explicit type annotation.** Missing annotations
+fire **OV0314**. The rule serves two purposes: it prevents silent
+re-inference when an upstream function's return type changes, and it
+keeps each line self-describing so an agent reading a fragment out of
+context still knows what each binding is.
+
+```overt
+let x: Int = 42                          // correct
+let mut counter: Int = 0                 // correct
+let _: Result<(), IoError> = println(s)  // correct — annotated discard
+let x = 42                               // OV0314
+```
 
 ---
 
@@ -675,6 +685,8 @@ reference. Codes are stable.
 | OV0160 | parse | duplicate field / variant / parameter | rename |
 | OV0161 | parse | `let mut` with non-identifier pattern | mutable bindings take a single name |
 | OV0162 | parse | missing comma between match arms | add `,` |
+| OV0169 | parse | file missing its `module <name>` header | add `module <name>` as the first line |
+| OV0170 | parse | stray `;` | remove it; newlines separate statements |
 | OV0200 | resolve | unknown name | check spelling; did-you-mean suggested |
 | OV0201 | resolve | shadowed name | rename; no shadowing across nested scopes |
 | OV0300 | type | argument type mismatch | match the parameter type |
@@ -689,6 +701,7 @@ reference. Codes are stable.
 | OV0311 | type | refinement violated at literal boundary | change the literal or widen the predicate |
 | OV0312 | type | `break`/`continue` outside loop | only valid in while / for each / loop |
 | OV0313 | type | `for each` on non-`List` | convert to a `List<T>` first |
+| OV0314 | type | `let` without type annotation | add `: <Type>` after the binder |
 
 ---
 

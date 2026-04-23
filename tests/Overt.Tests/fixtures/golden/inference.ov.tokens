@@ -90,19 +90,23 @@ Greater(>) @ 21:85..21:86
 LeftBrace({) @ 21:87..21:88
 KeywordLet(let) @ 22:5..22:8
 Identifier(prompt) @ 22:9..22:15
-Equals(=) @ 22:18..22:19
-StringHead("Classify as positive or negative: ) @ 22:20..22:55
-Dollar($) @ 22:55..22:56
-Identifier(text) @ 22:56..22:60
-StringTail(") @ 22:60..22:61
+Colon(:) @ 22:15..22:16
+Identifier(String) @ 22:17..22:23
+Equals(=) @ 22:26..22:27
+StringHead("Classify as positive or negative: ) @ 22:28..22:63
+Dollar($) @ 22:63..22:64
+Identifier(text) @ 22:64..22:68
+StringTail(") @ 22:68..22:69
 KeywordLet(let) @ 23:5..23:8
 Identifier(response) @ 23:9..23:17
-Equals(=) @ 23:18..23:19
-Identifier(call_llm) @ 23:20..23:28
-LeftParen(() @ 23:28..23:29
-Identifier(prompt) @ 23:29..23:35
-RightParen()) @ 23:35..23:36
-Question(?) @ 23:36..23:37
+Colon(:) @ 23:17..23:18
+Identifier(String) @ 23:19..23:25
+Equals(=) @ 23:26..23:27
+Identifier(call_llm) @ 23:28..23:36
+LeftParen(() @ 23:36..23:37
+Identifier(prompt) @ 23:37..23:43
+RightParen()) @ 23:43..23:44
+Question(?) @ 23:44..23:45
 Identifier(parse_classification) @ 24:5..24:25
 LeftParen(() @ 24:25..24:26
 Identifier(response) @ 24:26..24:34

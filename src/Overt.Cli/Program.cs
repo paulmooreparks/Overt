@@ -812,6 +812,7 @@ static class Cli
         ["OV0311"] = "AGENTS.md §4 (refinement types)",
         ["OV0312"] = "AGENTS.md §8 (control flow — break/continue)",
         ["OV0313"] = "AGENTS.md §8 (control flow — for each)",
+        ["OV0314"] = "AGENTS.md §3 (every let requires a type annotation)",
     };
 
     static int WriteDiagnostics(string path, ImmutableArray<Diagnostic> diagnostics)
