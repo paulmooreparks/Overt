@@ -1518,10 +1518,16 @@ public sealed class CSharpEmitter
     }
 
     /// <summary>
-    /// Emit a block as an expression. Pure trailing-expression blocks inline directly
-    /// and inherit the outer expected type; blocks with statements become
-    /// immediately-invoked lambdas so the full body runs. The lambda is typed to the
-    /// current <see cref="_expectedType"/> so the IIFE's result matches the consumer.
+    /// Emit a block as an expression. Pure trailing-expression blocks inline
+    /// directly; blocks with statements become an immediately-invoked lambda
+    /// typed to the current <see cref="_expectedType"/>. A trailing <c>?</c>/<c>|&gt;?</c>
+    /// on a single-expression block is NOT hoisted — the IIFE's return type is
+    /// the consumer's expected type, which may not be a <c>Result</c>, so an
+    /// early-return <c>Err(...)</c> would either fail to compile or silently
+    /// miscompile via implicit boxing to <c>object?</c>. Such sites stay on
+    /// <c>.Unwrap()</c> and are covered by the conditional-context note in
+    /// CARRYOVER — a proper fix statement-level-restructures the entire `let x
+    /// = if cond { foo()? } else { ... }` into C# if/else with an assignment.
     /// </summary>
     private void EmitBlockAsExpression(BlockExpr block)
     {
@@ -1542,6 +1548,16 @@ public sealed class CSharpEmitter
         }
         if (block.TrailingExpression is { } tail)
         {
+            // Hoist `?` in the trailing position only when the IIFE's return type
+            // is a Result<_, E>. Otherwise the hoist's `return Err<E>(...)` would
+            // either fail to compile (if return is a concrete non-Result type) or
+            // silently box as object? (if expected is unknown), corrupting the
+            // value flowing out. Non-Result trailing `?` keeps its `.Unwrap()`
+            // fallback at the site.
+            if (expected is NamedTypeRef { Name: "Result" })
+            {
+                EmitHoistsForExpression(tail);
+            }
             _w.Write("return ");
             WithExpected(expected, () => EmitExpression(tail));
             _w.Write(";");
