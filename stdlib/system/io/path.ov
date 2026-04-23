@@ -4,18 +4,23 @@ module stdlib.system.io.path
 // Hand-edits may be overwritten; prefer regenerating and layering
 // hand-curated effect annotations on top.
 
+// skipped System.IO.Path.AltDirectorySeparatorChar: field type 'System.Char' is unsupported
+// skipped System.IO.Path.DirectorySeparatorChar: field type 'System.Char' is unsupported
+// skipped System.IO.Path.InvalidPathChars: field type 'System.Char[]' is unsupported
+// skipped System.IO.Path.PathSeparator: field type 'System.Char' is unsupported
+// skipped System.IO.Path.VolumeSeparatorChar: field type 'System.Char' is unsupported
 extern "csharp" fn change_extension(path: String, extension: String) -> String
     binds "System.IO.Path.ChangeExtension"
 
 // skipped System.IO.Path.Combine: parameter 'paths' has unsupported type 'System.String[]'
 // skipped System.IO.Path.Combine: parameter 'paths' has unsupported type 'System.ReadOnlySpan`1[[System.String, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn combine_2(path1: String, path2: String) -> String
+extern "csharp" fn combine_string_string(path1: String, path2: String) -> String
     binds "System.IO.Path.Combine"
 
-extern "csharp" fn combine_3(path1: String, path2: String, path3: String) -> String
+extern "csharp" fn combine_string_string_string(path1: String, path2: String, path3: String) -> String
     binds "System.IO.Path.Combine"
 
-extern "csharp" fn combine_4(path1: String, path2: String, path3: String, path4: String) -> String
+extern "csharp" fn combine_string_string_string_string(path1: String, path2: String, path3: String, path4: String) -> String
     binds "System.IO.Path.Combine"
 
 // skipped System.IO.Path.EndsInDirectorySeparator: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
@@ -41,10 +46,10 @@ extern "csharp" fn get_file_name_without_extension(path: String) -> String
     binds "System.IO.Path.GetFileNameWithoutExtension"
 
 // skipped System.IO.Path.GetFileNameWithoutExtension: parameter 'path' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn get_full_path_1(path: String) -> String
+extern "csharp" fn get_full_path_string(path: String) -> String
     binds "System.IO.Path.GetFullPath"
 
-extern "csharp" fn get_full_path_2(path: String, base_path: String) -> String
+extern "csharp" fn get_full_path_string_string(path: String, base_path: String) -> String
     binds "System.IO.Path.GetFullPath"
 
 // skipped System.IO.Path.GetInvalidFileNameChars: return type 'System.Char[]' is unsupported
@@ -80,15 +85,15 @@ extern "csharp" fn is_path_rooted(path: String) -> Bool
 // skipped System.IO.Path.Join: parameter 'paths' has unsupported type 'System.String[]'
 // skipped System.IO.Path.Join: parameter 'paths' has unsupported type 'System.ReadOnlySpan`1[[System.String, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn join_2(path1: String, path2: String) -> String
+extern "csharp" fn join_string_string(path1: String, path2: String) -> String
     binds "System.IO.Path.Join"
 
 // skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn join_3(path1: String, path2: String, path3: String) -> String
+extern "csharp" fn join_string_string_string(path1: String, path2: String, path3: String) -> String
     binds "System.IO.Path.Join"
 
 // skipped System.IO.Path.Join: parameter 'path1' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn join_4(path1: String, path2: String, path3: String, path4: String) -> String
+extern "csharp" fn join_string_string_string_string(path1: String, path2: String, path3: String, path4: String) -> String
     binds "System.IO.Path.Join"
 
 extern "csharp" fn trim_ending_directory_separator(path: String) -> String

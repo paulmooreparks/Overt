@@ -1,0 +1,23 @@
+module stdlib.system.guid
+
+// Auto-generated from `System.Guid` via `overt bind`.
+// Hand-edits may be overwritten; prefer regenerating and layering
+// hand-curated effect annotations on top.
+
+// skipped System.Guid.AllBitsSet: property type 'System.Guid' is unsupported
+// skipped System.Guid.Empty: field type 'System.Guid' is unsupported
+// skipped System.Guid.CreateVersion7: return type 'System.Guid' is unsupported
+// skipped System.Guid.CreateVersion7: parameter 'timestamp' has unsupported type 'System.DateTimeOffset'
+// skipped System.Guid.NewGuid: return type 'System.Guid' is unsupported
+// skipped System.Guid.Parse: return type 'System.Guid' is unsupported
+// skipped System.Guid.Parse: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Guid.Parse: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Guid.Parse: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Guid.ParseExact: return type 'System.Guid' is unsupported
+// skipped System.Guid.ParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Guid.TryParse: parameter 'result' has unsupported type 'System.Guid&'
+// skipped System.Guid.TryParse: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Guid.TryParse: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Guid.TryParse: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Guid.TryParseExact: parameter 'result' has unsupported type 'System.Guid&'
+// skipped System.Guid.TryParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'

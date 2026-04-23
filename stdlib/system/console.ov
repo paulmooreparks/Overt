@@ -1,0 +1,178 @@
+module stdlib.system.console
+
+// Auto-generated from `System.Console` via `overt bind`.
+// Hand-edits may be overwritten; prefer regenerating and layering
+// hand-curated effect annotations on top.
+
+// skipped System.Console.BackgroundColor: property type 'System.ConsoleColor' is unsupported
+extern "csharp" fn buffer_height() !{io} -> Result<Int, IoError>
+    binds "System.Console.BufferHeight"
+
+extern "csharp" fn buffer_width() !{io} -> Result<Int, IoError>
+    binds "System.Console.BufferWidth"
+
+extern "csharp" fn caps_lock() !{io} -> Result<Bool, IoError>
+    binds "System.Console.CapsLock"
+
+extern "csharp" fn cursor_left() !{io} -> Result<Int, IoError>
+    binds "System.Console.CursorLeft"
+
+extern "csharp" fn cursor_size() !{io} -> Result<Int, IoError>
+    binds "System.Console.CursorSize"
+
+extern "csharp" fn cursor_top() !{io} -> Result<Int, IoError>
+    binds "System.Console.CursorTop"
+
+extern "csharp" fn cursor_visible() !{io} -> Result<Bool, IoError>
+    binds "System.Console.CursorVisible"
+
+// skipped System.Console.Error: property type 'System.IO.TextWriter' is unsupported
+// skipped System.Console.ForegroundColor: property type 'System.ConsoleColor' is unsupported
+// skipped System.Console.In: property type 'System.IO.TextReader' is unsupported
+// skipped System.Console.InputEncoding: property type 'System.Text.Encoding' is unsupported
+extern "csharp" fn is_error_redirected() !{io} -> Result<Bool, IoError>
+    binds "System.Console.IsErrorRedirected"
+
+extern "csharp" fn is_input_redirected() !{io} -> Result<Bool, IoError>
+    binds "System.Console.IsInputRedirected"
+
+extern "csharp" fn is_output_redirected() !{io} -> Result<Bool, IoError>
+    binds "System.Console.IsOutputRedirected"
+
+extern "csharp" fn key_available() !{io} -> Result<Bool, IoError>
+    binds "System.Console.KeyAvailable"
+
+extern "csharp" fn largest_window_height() !{io} -> Result<Int, IoError>
+    binds "System.Console.LargestWindowHeight"
+
+extern "csharp" fn largest_window_width() !{io} -> Result<Int, IoError>
+    binds "System.Console.LargestWindowWidth"
+
+extern "csharp" fn number_lock() !{io} -> Result<Bool, IoError>
+    binds "System.Console.NumberLock"
+
+// skipped System.Console.Out: property type 'System.IO.TextWriter' is unsupported
+// skipped System.Console.OutputEncoding: property type 'System.Text.Encoding' is unsupported
+extern "csharp" fn title() !{io} -> Result<String, IoError>
+    binds "System.Console.Title"
+
+extern "csharp" fn treat_control_c_as_input() !{io} -> Result<Bool, IoError>
+    binds "System.Console.TreatControlCAsInput"
+
+extern "csharp" fn window_height() !{io} -> Result<Int, IoError>
+    binds "System.Console.WindowHeight"
+
+extern "csharp" fn window_left() !{io} -> Result<Int, IoError>
+    binds "System.Console.WindowLeft"
+
+extern "csharp" fn window_top() !{io} -> Result<Int, IoError>
+    binds "System.Console.WindowTop"
+
+extern "csharp" fn window_width() !{io} -> Result<Int, IoError>
+    binds "System.Console.WindowWidth"
+
+extern "csharp" fn beep_noargs() !{io} -> ()
+    binds "System.Console.Beep"
+
+extern "csharp" fn beep_int_int(frequency: Int, duration: Int) !{io} -> ()
+    binds "System.Console.Beep"
+
+extern "csharp" fn clear() !{io} -> ()
+    binds "System.Console.Clear"
+
+// skipped System.Console.GetCursorPosition: return type 'System.ValueTuple`2[[System.Int32, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.Int32, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]' is unsupported
+extern "csharp" fn move_buffer_area(source_left: Int, source_top: Int, source_width: Int, source_height: Int, target_left: Int, target_top: Int) !{io} -> ()
+    binds "System.Console.MoveBufferArea"
+
+// skipped System.Console.MoveBufferArea: parameter 'sourceChar' has unsupported type 'System.Char'
+// skipped System.Console.OpenStandardError: return type 'System.IO.Stream' is unsupported
+// skipped System.Console.OpenStandardError: return type 'System.IO.Stream' is unsupported
+// skipped System.Console.OpenStandardInput: return type 'System.IO.Stream' is unsupported
+// skipped System.Console.OpenStandardInput: return type 'System.IO.Stream' is unsupported
+// skipped System.Console.OpenStandardOutput: return type 'System.IO.Stream' is unsupported
+// skipped System.Console.OpenStandardOutput: return type 'System.IO.Stream' is unsupported
+extern "csharp" fn read() !{io} -> Result<Int, IoError>
+    binds "System.Console.Read"
+
+// skipped System.Console.ReadKey: return type 'System.ConsoleKeyInfo' is unsupported
+// skipped System.Console.ReadKey: return type 'System.ConsoleKeyInfo' is unsupported
+extern "csharp" fn read_line() !{io} -> Result<String, IoError>
+    binds "System.Console.ReadLine"
+
+extern "csharp" fn reset_color() !{io} -> ()
+    binds "System.Console.ResetColor"
+
+extern "csharp" fn set_buffer_size(width: Int, height: Int) !{io} -> ()
+    binds "System.Console.SetBufferSize"
+
+extern "csharp" fn set_cursor_position(left: Int, top: Int) !{io} -> ()
+    binds "System.Console.SetCursorPosition"
+
+// skipped System.Console.SetError: parameter 'newError' has unsupported type 'System.IO.TextWriter'
+// skipped System.Console.SetIn: parameter 'newIn' has unsupported type 'System.IO.TextReader'
+// skipped System.Console.SetOut: parameter 'newOut' has unsupported type 'System.IO.TextWriter'
+extern "csharp" fn set_window_position(left: Int, top: Int) !{io} -> ()
+    binds "System.Console.SetWindowPosition"
+
+extern "csharp" fn set_window_size(width: Int, height: Int) !{io} -> ()
+    binds "System.Console.SetWindowSize"
+
+extern "csharp" fn write_bool(value: Bool) !{io} -> ()
+    binds "System.Console.Write"
+
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Console.Write: parameter 'buffer' has unsupported type 'System.Char[]'
+extern "csharp" fn write_double(value: Float) !{io} -> ()
+    binds "System.Console.Write"
+
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.Decimal'
+extern "csharp" fn write_float(value: Float) !{io} -> ()
+    binds "System.Console.Write"
+
+extern "csharp" fn write_int(value: Int) !{io} -> ()
+    binds "System.Console.Write"
+
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Console.Write: parameter 'value' has unsupported type 'System.Object'
+extern "csharp" fn write_string(value: String) !{io} -> ()
+    binds "System.Console.Write"
+
+// skipped System.Console.Write: parameter 'arg0' has unsupported type 'System.Object'
+// skipped System.Console.Write: parameter 'arg' has unsupported type 'System.Object[]'
+// skipped System.Console.Write: parameter 'arg' has unsupported type 'System.ReadOnlySpan`1[[System.Object, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Console.Write: parameter 'arg0' has unsupported type 'System.Object'
+// skipped System.Console.Write: parameter 'buffer' has unsupported type 'System.Char[]'
+// skipped System.Console.Write: parameter 'arg0' has unsupported type 'System.Object'
+extern "csharp" fn write_line_noargs() !{io} -> ()
+    binds "System.Console.WriteLine"
+
+extern "csharp" fn write_line_bool(value: Bool) !{io} -> ()
+    binds "System.Console.WriteLine"
+
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Console.WriteLine: parameter 'buffer' has unsupported type 'System.Char[]'
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.Decimal'
+extern "csharp" fn write_line_double(value: Float) !{io} -> ()
+    binds "System.Console.WriteLine"
+
+extern "csharp" fn write_line_float(value: Float) !{io} -> ()
+    binds "System.Console.WriteLine"
+
+extern "csharp" fn write_line_int(value: Int) !{io} -> ()
+    binds "System.Console.WriteLine"
+
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Console.WriteLine: parameter 'value' has unsupported type 'System.Object'
+extern "csharp" fn write_line_string(value: String) !{io} -> ()
+    binds "System.Console.WriteLine"
+
+// skipped System.Console.WriteLine: parameter 'arg0' has unsupported type 'System.Object'
+// skipped System.Console.WriteLine: parameter 'arg' has unsupported type 'System.Object[]'
+// skipped System.Console.WriteLine: parameter 'arg' has unsupported type 'System.ReadOnlySpan`1[[System.Object, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Console.WriteLine: parameter 'buffer' has unsupported type 'System.Char[]'
+// skipped System.Console.WriteLine: parameter 'arg0' has unsupported type 'System.Object'
+// skipped System.Console.WriteLine: parameter 'arg0' has unsupported type 'System.Object'

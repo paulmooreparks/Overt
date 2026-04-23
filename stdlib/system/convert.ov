@@ -1,0 +1,387 @@
+module stdlib.system.convert
+
+// Auto-generated from `System.Convert` via `overt bind`.
+// Hand-edits may be overwritten; prefer regenerating and layering
+// hand-curated effect annotations on top.
+
+// skipped System.Convert.DBNull: field type 'System.Object' is unsupported
+// skipped System.Convert.ChangeType: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ChangeType: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ChangeType: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ChangeType: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.FromBase64CharArray: parameter 'inArray' has unsupported type 'System.Char[]'
+// skipped System.Convert.FromBase64String: return type 'System.Byte[]' is unsupported
+// skipped System.Convert.FromHexString: return type 'System.Byte[]' is unsupported
+// skipped System.Convert.FromHexString: parameter 'chars' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.FromHexString: parameter 'destination' has unsupported type 'System.Span`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.FromHexString: parameter 'source' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.GetTypeCode: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.IsDBNull: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToBase64CharArray: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBase64CharArray: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBase64String: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBase64String: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBase64String: parameter 'bytes' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.ToBase64String: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBase64String: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Object'
+extern "csharp" fn to_boolean_bool(value: Bool) -> Bool
+    binds "System.Convert.ToBoolean"
+
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.UInt16'
+extern "csharp" fn to_boolean_int(value: Int) -> Bool
+    binds "System.Convert.ToBoolean"
+
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.UInt64'
+extern "csharp" fn to_boolean_string(value: String) -> Bool
+    binds "System.Convert.ToBoolean"
+
+extern "csharp" fn to_boolean_float(value: Float) -> Bool
+    binds "System.Convert.ToBoolean"
+
+extern "csharp" fn to_boolean_double(value: Float) -> Bool
+    binds "System.Convert.ToBoolean"
+
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToBoolean: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToByte: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToChar: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDateTime: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDecimal: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.UInt16'
+extern "csharp" fn to_double_int(value: Int) -> Float
+    binds "System.Convert.ToDouble"
+
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.UInt64'
+extern "csharp" fn to_double_float(value: Float) -> Float
+    binds "System.Convert.ToDouble"
+
+extern "csharp" fn to_double_double(value: Float) -> Float
+    binds "System.Convert.ToDouble"
+
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Decimal'
+extern "csharp" fn to_double_string(value: String) -> Float
+    binds "System.Convert.ToDouble"
+
+extern "csharp" fn to_double_bool(value: Bool) -> Float
+    binds "System.Convert.ToDouble"
+
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToDouble: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToHexString: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToHexString: parameter 'bytes' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.ToHexString: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToHexStringLower: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToHexStringLower: parameter 'bytes' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.ToHexStringLower: parameter 'inArray' has unsupported type 'System.Byte[]'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToInt16: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Object'
+extern "csharp" fn to_int32_bool(value: Bool) -> Int
+    binds "System.Convert.ToInt32"
+
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.UInt32'
+extern "csharp" fn to_int32_int(value: Int) -> Int
+    binds "System.Convert.ToInt32"
+
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.UInt64'
+extern "csharp" fn to_int32_float(value: Float) -> Int
+    binds "System.Convert.ToInt32"
+
+extern "csharp" fn to_int32_double(value: Float) -> Int
+    binds "System.Convert.ToInt32"
+
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Decimal'
+extern "csharp" fn to_int32_string(value: String) -> Int
+    binds "System.Convert.ToInt32"
+
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToInt32: parameter 'provider' has unsupported type 'System.IFormatProvider'
+extern "csharp" fn to_int32_string_int(value: String, from_base: Int) -> Int
+    binds "System.Convert.ToInt32"
+
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToInt64: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToSByte: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.UInt16'
+extern "csharp" fn to_single_int(value: Int) -> Float
+    binds "System.Convert.ToSingle"
+
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.UInt64'
+extern "csharp" fn to_single_float(value: Float) -> Float
+    binds "System.Convert.ToSingle"
+
+extern "csharp" fn to_single_double(value: Float) -> Float
+    binds "System.Convert.ToSingle"
+
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Decimal'
+extern "csharp" fn to_single_string(value: String) -> Float
+    binds "System.Convert.ToSingle"
+
+extern "csharp" fn to_single_bool(value: Bool) -> Float
+    binds "System.Convert.ToSingle"
+
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToSingle: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Object'
+extern "csharp" fn to_string_bool(value: Bool) -> String
+    binds "System.Convert.ToString"
+
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt16'
+extern "csharp" fn to_string_int(value: Int) -> String
+    binds "System.Convert.ToString"
+
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt64'
+extern "csharp" fn to_string_float(value: Float) -> String
+    binds "System.Convert.ToString"
+
+extern "csharp" fn to_string_double(value: Float) -> String
+    binds "System.Convert.ToString"
+
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.DateTime'
+extern "csharp" fn to_string_string(value: String) -> String
+    binds "System.Convert.ToString"
+
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int16'
+extern "csharp" fn to_string_int_int(value: Int, to_base: Int) -> String
+    binds "System.Convert.ToString"
+
+// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt16: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt32: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Char'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.SByte'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Byte'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Int16'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt16'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt32'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt64'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Decimal'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.DateTime'
+// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Object'
+// skipped System.Convert.ToUInt64: parameter 'provider' has unsupported type 'System.IFormatProvider'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
+// skipped System.Convert.TryFromBase64Chars: parameter 'chars' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.TryFromBase64String: parameter 'bytes' has unsupported type 'System.Span`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.TryToBase64Chars: parameter 'bytes' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.TryToHexString: parameter 'source' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+// skipped System.Convert.TryToHexStringLower: parameter 'source' has unsupported type 'System.ReadOnlySpan`1[[System.Byte, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'

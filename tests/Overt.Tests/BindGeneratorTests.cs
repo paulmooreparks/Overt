@@ -39,16 +39,42 @@ public class BindGeneratorTests
     }
 
     [Fact]
-    public void Generate_OverloadsGetAritySuffix()
+    public void Generate_OverloadsGetTypeSuffix()
     {
-        // System.IO.Path has Combine(2 args), Combine(3 args), Combine(4 args) —
-        // all renderable, so each overload gets an arity suffix.
+        // System.IO.Path has Combine(string, string), Combine(string, string, string),
+        // etc. — all renderable. Overloads disambiguate by C# parameter-type names
+        // so arity-alike overloads (Math.Abs(int) vs Math.Abs(double)) stay distinct
+        // even when they'd share an arity suffix.
         var src = BindGenerator.Generate("path", typeof(System.IO.Path));
-        Assert.Contains("fn combine_2(", src);
-        Assert.Contains("fn combine_3(", src);
-        Assert.Contains("fn combine_4(", src);
-        // The bare name shouldn't clash — no `fn combine(` in the output.
+        Assert.Contains("fn combine_string_string(", src);
+        Assert.Contains("fn combine_string_string_string(", src);
+        Assert.Contains("fn combine_string_string_string_string(", src);
         Assert.DoesNotContain("fn combine(", src);
+    }
+
+    [Fact]
+    public void Generate_PublicStaticPropertiesBecomeZeroArgExterns()
+    {
+        // System.Environment exposes several public static properties
+        // (MachineName, UserName, ProcessorCount); each should emit as a
+        // zero-arg extern. The runtime-side detection (bare member access
+        // vs. method call) is handled by CSharpEmitter's reflection check,
+        // not by the generator.
+        var src = BindGenerator.Generate("env", typeof(System.Environment));
+        Assert.Contains("fn machine_name()", src);
+        Assert.Contains("fn user_name()", src);
+        Assert.Contains("fn processor_count()", src);
+    }
+
+    [Fact]
+    public void Generate_ParameterCollidingWithTopLevelGetsMangled()
+    {
+        // System.Environment has both `ExitCode` (property) and
+        // `Exit(int exitCode)`. Without mangling, the parameter name
+        // `exit_code` collides with the free function `exit_code`, hitting
+        // Overt's no-shadowing rule. Parameter gets `_arg` suffix.
+        var src = BindGenerator.Generate("env", typeof(System.Environment));
+        Assert.Contains("exit_code_arg", src);
     }
 
     [Fact]

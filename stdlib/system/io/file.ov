@@ -23,10 +23,10 @@ extern "csharp" fn append_all_text(path: String, contents: String) !{io, fails} 
 // skipped System.IO.File.AppendAllTextAsync: parameter 'encoding' has unsupported type 'System.Text.Encoding'
 // skipped System.IO.File.AppendAllTextAsync: parameter 'contents' has unsupported type 'System.ReadOnlyMemory`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.IO.File.AppendText: return type 'System.IO.StreamWriter' is unsupported
-extern "csharp" fn copy_2(source_file_name: String, dest_file_name: String) !{io, fails} -> ()
+extern "csharp" fn copy_string_string(source_file_name: String, dest_file_name: String) !{io, fails} -> ()
     binds "System.IO.File.Copy"
 
-extern "csharp" fn copy_3(source_file_name: String, dest_file_name: String, overwrite: Bool) !{io, fails} -> ()
+extern "csharp" fn copy_string_string_bool(source_file_name: String, dest_file_name: String, overwrite: Bool) !{io, fails} -> ()
     binds "System.IO.File.Copy"
 
 // skipped System.IO.File.Create: return type 'System.IO.FileStream' is unsupported
@@ -62,10 +62,10 @@ extern "csharp" fn exists(path: String) !{io, fails} -> Result<Bool, IoError>
 // skipped System.IO.File.GetLastWriteTimeUtc: parameter 'fileHandle' has unsupported type 'Microsoft.Win32.SafeHandles.SafeFileHandle'
 // skipped System.IO.File.GetUnixFileMode: return type 'System.IO.UnixFileMode' is unsupported
 // skipped System.IO.File.GetUnixFileMode: parameter 'fileHandle' has unsupported type 'Microsoft.Win32.SafeHandles.SafeFileHandle'
-extern "csharp" fn move_2(source_file_name: String, dest_file_name: String) !{io, fails} -> ()
+extern "csharp" fn move_string_string(source_file_name: String, dest_file_name: String) !{io, fails} -> ()
     binds "System.IO.File.Move"
 
-extern "csharp" fn move_3(source_file_name: String, dest_file_name: String, overwrite: Bool) !{io, fails} -> ()
+extern "csharp" fn move_string_string_bool(source_file_name: String, dest_file_name: String, overwrite: Bool) !{io, fails} -> ()
     binds "System.IO.File.Move"
 
 // skipped System.IO.File.Open: parameter 'options' has unsupported type 'System.IO.FileStreamOptions'
@@ -92,10 +92,10 @@ extern "csharp" fn read_all_text(path: String) !{io, fails} -> Result<String, Io
 // skipped System.IO.File.ReadLines: parameter 'encoding' has unsupported type 'System.Text.Encoding'
 // skipped System.IO.File.ReadLinesAsync: parameter 'cancellationToken' has unsupported type 'System.Threading.CancellationToken'
 // skipped System.IO.File.ReadLinesAsync: parameter 'encoding' has unsupported type 'System.Text.Encoding'
-extern "csharp" fn replace_3(source_file_name: String, destination_file_name: String, destination_backup_file_name: String) !{io, fails} -> ()
+extern "csharp" fn replace_string_string_string(source_file_name: String, destination_file_name: String, destination_backup_file_name: String) !{io, fails} -> ()
     binds "System.IO.File.Replace"
 
-extern "csharp" fn replace_4(source_file_name: String, destination_file_name: String, destination_backup_file_name: String, ignore_metadata_errors: Bool) !{io, fails} -> ()
+extern "csharp" fn replace_string_string_string_bool(source_file_name: String, destination_file_name: String, destination_backup_file_name: String, ignore_metadata_errors: Bool) !{io, fails} -> ()
     binds "System.IO.File.Replace"
 
 // skipped System.IO.File.ResolveLinkTarget: return type 'System.IO.FileSystemInfo' is unsupported

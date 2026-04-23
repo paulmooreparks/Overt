@@ -570,13 +570,51 @@ public sealed class CSharpEmitter
     private static bool IsKnownNarrativeError(string name)
         => name is "IoError" or "HttpError" or "LlmError";
 
-    /// <summary>Heuristic: a binds target resolves to a property (not a method)
-    /// when we'd otherwise emit a zero-arg call and C# has a property of that
-    /// name. We can't check that at emit time without reflection; take the
-    /// conservative route of always emitting <c>target()</c> for zero-param
-    /// externs so static methods work, and let authors explicitly mark
-    /// properties via an extern convention later.</summary>
-    private static bool BindsLooksLikeProperty(string _) => false;
+    /// <summary>Reflect on the binds target and return true if it resolves to
+    /// a public static property or field (accessed bare, without parentheses)
+    /// rather than a method (accessed with parentheses). We consult every
+    /// loaded assembly in the AppDomain — the BCL plus anything the compiler
+    /// has pulled in — and pick the first match. If the type can't be
+    /// resolved (e.g. a reference to user code that hasn't been loaded),
+    /// we fall back to the method-call shape.
+    ///
+    /// Cached so repeated facades don't re-reflect on the same types.</summary>
+    private static readonly Dictionary<string, bool> _bindsIsProperty = new(StringComparer.Ordinal);
+
+    private static bool BindsLooksLikeProperty(string bindsTarget)
+    {
+        if (_bindsIsProperty.TryGetValue(bindsTarget, out var cached)) return cached;
+
+        var lastDot = bindsTarget.LastIndexOf('.');
+        if (lastDot < 1)
+        {
+            _bindsIsProperty[bindsTarget] = false;
+            return false;
+        }
+        var typeName = bindsTarget[..lastDot];
+        var memberName = bindsTarget[(lastDot + 1)..];
+
+        var result = IsStaticPropertyOrField(typeName, memberName);
+        _bindsIsProperty[bindsTarget] = result;
+        return result;
+    }
+
+    private static bool IsStaticPropertyOrField(string typeName, string memberName)
+    {
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            Type? type;
+            try { type = asm.GetType(typeName, throwOnError: false); }
+            catch { continue; }
+            if (type is null) continue;
+            var members = type.GetMember(
+                memberName,
+                System.Reflection.MemberTypes.Property | System.Reflection.MemberTypes.Field,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (members.Length > 0) return true;
+        }
+        return false;
+    }
 
     // ----------------------------------------------------- type expressions
 

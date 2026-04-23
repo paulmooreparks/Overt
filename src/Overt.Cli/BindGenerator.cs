@@ -73,12 +73,41 @@ public static class BindGenerator
         sb.AppendLine("// hand-curated effect annotations on top.");
         sb.AppendLine();
 
+        // Static read-only properties and fields emit as zero-arg externs; the
+        // extern runtime detects them via reflection and emits bare member
+        // access instead of a call. Properties without a public getter and
+        // write-only fields are skipped.
+        var properties = targetType
+            .GetProperties(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(p => p.CanRead && p.GetMethod is { IsPublic: true })
+            .OrderBy(p => p.Name, StringComparer.Ordinal)
+            .ToList();
+        var fields = targetType
+            .GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(f => !f.IsSpecialName)
+            .OrderBy(f => f.Name, StringComparer.Ordinal)
+            .ToList();
+
+        foreach (var prop in properties) EmitProperty(sb, targetType, prop, effects, pure);
+        foreach (var field in fields)   EmitField(sb, targetType, field, effects, pure);
+
+        // Track top-level names that become free functions in the facade.
+        // Parameter names that collide are mangled (suffix `_arg`) so Overt's
+        // no-shadowing rule (§3) doesn't reject the facade. The collision
+        // typically shows up when a type has both a property (e.g.
+        // `Environment.ExitCode`) and a method parameter with the matching
+        // snake_case name (e.g. `Environment.Exit(exitCode)`).
+        var topLevelNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in properties) topLevelNames.Add(ToSnakeCase(p.Name));
+        foreach (var f in fields)     topLevelNames.Add(ToSnakeCase(f.Name));
+
         var methods = targetType
             .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
             .Where(m => !m.IsSpecialName) // skip property accessors, operators
             .OrderBy(m => m.Name, StringComparer.Ordinal)
             .ThenBy(m => m.GetParameters().Length)
             .ToList();
+        foreach (var m in methods) topLevelNames.Add(ToSnakeCase(m.Name));
 
         // Overt doesn't support function overloading — one name per function.
         // First we count how many renderable overloads each Overt name has, so
@@ -94,11 +123,95 @@ public static class BindGenerator
         {
             var overt = ToSnakeCase(method.Name);
             var needsSuffix = renderableByName.GetValueOrDefault(overt) > 1;
-            var name = needsSuffix ? $"{overt}_{method.GetParameters().Length}" : overt;
-            EmitMethod(sb, targetType, method, effects, pure, name);
+            // Disambiguate overloads by parameter types, not arity. Many BCL
+            // types (Math, Convert) have overloads that share arity but
+            // differ in primitive type — `Abs(int)` vs `Abs(double)` both
+            // become `abs_1` under arity-only. Type-suffixing yields
+            // `abs_int` / `abs_double`.
+            var name = needsSuffix ? $"{overt}_{OverloadSuffix(method)}" : overt;
+            EmitMethod(sb, targetType, method, effects, pure, name, topLevelNames);
         }
 
         return sb.ToString();
+    }
+
+    private static void EmitProperty(
+        StringBuilder sb, Type targetType, PropertyInfo prop, string[] effects, bool pure)
+    {
+        var overtType = MapCSharpTypeToOvert(prop.PropertyType);
+        if (overtType is null)
+        {
+            sb.AppendLine($"// skipped {targetType.FullName}.{prop.Name}: "
+                + $"property type '{prop.PropertyType.FullName}' is unsupported");
+            return;
+        }
+
+        var name = ToSnakeCase(prop.Name);
+        sb.Append("extern \"csharp\" fn ");
+        sb.Append(name);
+        sb.Append("()");
+        if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
+        var retText = pure ? overtType : $"Result<{overtType}, IoError>";
+        sb.Append($" -> {retText}");
+        sb.AppendLine();
+        sb.AppendLine($"    binds \"{targetType.FullName}.{prop.Name}\"");
+        sb.AppendLine();
+    }
+
+    private static void EmitField(
+        StringBuilder sb, Type targetType, FieldInfo field, string[] effects, bool pure)
+    {
+        var overtType = MapCSharpTypeToOvert(field.FieldType);
+        if (overtType is null)
+        {
+            sb.AppendLine($"// skipped {targetType.FullName}.{field.Name}: "
+                + $"field type '{field.FieldType.FullName}' is unsupported");
+            return;
+        }
+
+        var name = ToSnakeCase(field.Name);
+        sb.Append("extern \"csharp\" fn ");
+        sb.Append(name);
+        sb.Append("()");
+        if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
+        var retText = pure ? overtType : $"Result<{overtType}, IoError>";
+        sb.Append($" -> {retText}");
+        sb.AppendLine();
+        sb.AppendLine($"    binds \"{targetType.FullName}.{field.Name}\"");
+        sb.AppendLine();
+    }
+
+    /// <summary>Compact signature suffix for overload disambiguation, using
+    /// C# type names so <c>Abs(float)</c> and <c>Abs(double)</c> get distinct
+    /// Overt names (both would map to Overt's <c>Float</c>). Names are the
+    /// C# primitive aliases where known, or the type's Name for others.
+    /// </summary>
+    private static string OverloadSuffix(MethodInfo method)
+    {
+        var parts = method.GetParameters()
+            .Select(p => CSharpTypeSuffix(p.ParameterType))
+            .ToArray();
+        return parts.Length == 0 ? "noargs" : string.Join("_", parts);
+    }
+
+    private static string CSharpTypeSuffix(Type t)
+    {
+        if (t == typeof(string)) return "string";
+        if (t == typeof(int)) return "int";
+        if (t == typeof(long)) return "long";
+        if (t == typeof(short)) return "short";
+        if (t == typeof(byte)) return "byte";
+        if (t == typeof(sbyte)) return "sbyte";
+        if (t == typeof(uint)) return "uint";
+        if (t == typeof(ulong)) return "ulong";
+        if (t == typeof(ushort)) return "ushort";
+        if (t == typeof(float)) return "float";
+        if (t == typeof(double)) return "double";
+        if (t == typeof(decimal)) return "decimal";
+        if (t == typeof(bool)) return "bool";
+        if (t == typeof(char)) return "char";
+        // Fall back to the simple name, snake-cased, for any non-primitive.
+        return ToSnakeCase(t.Name);
     }
 
     /// <summary>Pre-check: would <see cref="EmitMethod"/> succeed on this
@@ -120,7 +233,7 @@ public static class BindGenerator
 
     private static void EmitMethod(
         StringBuilder sb, Type targetType, MethodInfo method, string[] effects, bool pure,
-        string overtName)
+        string overtName, HashSet<string> topLevelNames)
     {
         var paramList = new List<string>();
         var canRender = true;
@@ -142,6 +255,10 @@ public static class BindGenerator
                 break;
             }
             var paramName = ToSnakeCase(p.Name ?? "arg");
+            // Mangle parameter names that would shadow a free function in this
+            // facade (Overt's no-shadowing rule, §3). Appending `_arg` keeps
+            // the name readable while avoiding the collision.
+            if (topLevelNames.Contains(paramName)) paramName = paramName + "_arg";
             paramList.Add($"{paramName}: {overtType}");
         }
 
@@ -203,12 +320,15 @@ public static class BindGenerator
     // ------------------------------------------------------------- mappings
 
     /// <summary>Map a .NET type to its Overt spelling; null for types we don't
-    /// handle in the MVP.</summary>
+    /// handle in the MVP. <c>long</c> is deliberately NOT mapped to Overt's
+    /// <c>Int</c>: Overt's Int lowers to C# <c>int</c> (32-bit), so a BCL
+    /// method returning <c>long</c> would produce a mismatch at emit time.
+    /// An <c>Int64</c> type is future work; until then <c>long</c>-returning
+    /// methods are emitted as <c>// skipped</c>.</summary>
     private static string? MapCSharpTypeToOvert(Type t)
     {
         if (t == typeof(string)) return "String";
         if (t == typeof(int)) return "Int";
-        if (t == typeof(long)) return "Int";
         if (t == typeof(double) || t == typeof(float)) return "Float";
         if (t == typeof(bool)) return "Bool";
         return null;
