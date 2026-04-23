@@ -935,6 +935,41 @@ Practices that keep dual-target honest without doubling implementation work:
 
 The stdlib decision in §19 — per-backend, not portable — cascades through the tooling. Every tool either operates on Overt source/AST alone, or it touches host artifacts. The division is strict and there is no "middle layer":
 
+```mermaid
+flowchart TB
+    src["<b>Overt source</b><br/><code>.ov</code> files"]
+
+    subgraph tier1 ["<b>Tier 1 — backend-independent</b> · <code>Overt.Compiler</code>"]
+        direction TB
+        pipe["Lex · Parse · Resolve · Type-check"]
+        shared["Formatter (<code>overt fmt</code>) · Module graph<br/>OV-code diagnostics · LSP protocol<br/>--emit=tokens / ast / resolved / typed"]
+    end
+
+    ast["<b>AST + type annotations</b>"]
+
+    subgraph tier2 ["<b>Tier 2 — per-backend</b> · <code>Overt.Backend.*</code>"]
+        direction LR
+        subgraph cs ["<code>Overt.Backend.CSharp</code> (today)"]
+            cs1["Emitter (.cs)<br/>Overt.Runtime (.NET)<br/>BindGenerator (Roslyn)<br/>Runner (in-memory Roslyn)<br/>#line + portable PDB<br/>NuGet interop"]
+        end
+        subgraph go ["<code>Overt.Backend.Go</code> (scaffold)"]
+            go1["Emitter (.go)<br/>Runtime (Go pkg)<br/>BindGen (go/ast)<br/>Runner (<code>go run</code>)<br/>//line directives<br/>go mod interop"]
+        end
+        subgraph cpp ["<code>Overt.Backend.Cpp</code> (hypothetical)"]
+            cpp1["Emitter (.cpp)<br/>Runtime (header-only)<br/>BindGen (libclang)<br/>Runner (cl.exe / clang++)<br/>#line + PDB/DWARF<br/>vcpkg / Conan"]
+        end
+    end
+
+    host["<b>Host artifacts</b><br/>.cs / .go / .cpp · binaries · debug info"]
+
+    src --> tier1
+    tier1 --> ast
+    ast --> tier2
+    tier2 --> host
+```
+
+Read the diagram top-to-bottom: source flows through shared frontend machinery into a typed AST; from there each backend owns its full pipeline to host artifacts. Nothing in Tier 1 knows which backend will consume the AST; nothing in a Tier 2 backend touches Tier 1 except by consuming its output. Adding a new backend means adding a new column at the bottom — no changes above.
+
 **Tier 1: backend-independent.** Anything that works on `.ov` source or the AST without producing or consuming host output.
 
 - Lexer, parser, name resolver, type checker (`Overt.Compiler`)

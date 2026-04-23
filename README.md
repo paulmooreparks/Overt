@@ -4,7 +4,7 @@ An **agent-first programming language** — written, read, and maintained primar
 
 The name is the design philosophy: every effect, error, dispatch, mutation, and piece of state is *overt* — visible at the call or declaration site, never concealed from the reader.
 
-> **Status (April 2026):** working end-to-end on C#, with real semantic enforcement, a real stdlib runtime, faithful error propagation, and full imperative control flow. Every program in [`examples/`](examples/) — 13 so far — lexes, parses, name-resolves, type-checks, emits C# source, and compiles cleanly against the runtime via Roslyn. Three of them (`hello.ov`, `arith_eval.ov`, `trace.ov`) run end-to-end via `overt run`. Collection-heavy programs work too: `map`/`filter`/`fold` execute over `ImmutableArray`, `par_map` runs concurrently via TPL and returns the first Err by original index. The `?` and `|>?` operators lower to proper early-return propagation (DESIGN.md §11's errors-as-values, not throw-based). `for each`, `loop`, `break`, `continue`, and literal patterns in `match` are all wired end-to-end. The type checker rejects 13 classes of error: type mismatches, ignored `Result`s, non-exhaustive match (including on stdlib `Option`/`Result`), uncovered effect rows (including through higher-order callbacks), refinement-predicate violations at literal boundary crossings, misplaced loop-control keywords, and `for each` on non-`List` iterables. 322 tests. Release engineering for Compiler Explorer (godbolt.org) is staged and waiting on a version tag. Go backend is scaffolded but not yet emitting. The remaining threshold for "write a real CLI tool" is the conditional-context `?` hoisting gap (`if`/`while` arm bodies still use `.Unwrap()`-that-throws).
+> **Status (April 2026):** working end-to-end on C#. An Overt program can transpile, compile, and *run* — including calling arbitrary BCL static methods / properties / fields via `extern "csharp"` — and the ecosystem scaffolding is in place: cross-file modules with dotted paths and aliasing, a blessed stdlib under `stdlib/csharp/*` auto-discovered by the CLI, a reflection-driven facade generator (`overt bind`), a canonical formatter (`overt fmt`, idempotent and comment-preserving), and an `overt run` that in-memory-compiles and invokes `Module.main()`. The type checker rejects 13 classes of error — type mismatches, ignored `Result`s, non-exhaustive match (incl. stdlib `Option`/`Result`), uncovered effect rows (incl. higher-order callbacks), refinement violations at literal boundaries, misplaced loop-control keywords, `for each` on non-`List`. Faithful `?` / `|>?` propagation lowers to early-returns, including inside `if` / `match` arms used as expression values (via statement-level restructuring). Full imperative control flow (`for each`, `loop`, `break`, `continue`, literal patterns in `match`). Every diagnostic auto-appends a `note: see AGENTS.md §N` pointer. 354 tests, covering lexer goldens, emitter compile-checks, formatter idempotence, multi-module graphs, end-to-end BCL calls, and more. Release engineering for Compiler Explorer is staged and waiting on a version tag. Go backend is scaffolded but not emitting.
 
 ---
 
@@ -59,33 +59,61 @@ A few of the decisions that define the language. Full rationale in [`DESIGN.md`]
 
 ---
 
+## Architecture
+
+Two-tier split: language-level work is shared across all backends; anything that touches host artifacts is per-backend.
+
+```mermaid
+flowchart TB
+    src["<b>Overt source</b> (.ov)"]
+
+    subgraph tier1 ["<b>Backend-independent</b> · <code>Overt.Compiler</code>"]
+        direction TB
+        pipe["Lex · Parse · Resolve · Type-check"]
+        shared["Formatter · Module graph<br/>Diagnostics · LSP protocol<br/>--emit=tokens/ast/resolved/typed"]
+    end
+
+    subgraph tier2 ["<b>Per-backend</b> · <code>Overt.Backend.*</code>"]
+        direction LR
+        cs["<b>C#</b> (today)<br/>Emitter · Runtime<br/>BindGen · Runner<br/>#line + PDB · NuGet"]
+        go["<b>Go</b> (scaffold)"]
+        cpp["<b>C++ / future</b>"]
+    end
+
+    src --> tier1
+    tier1 -->|AST| tier2
+```
+
+See [`DESIGN.md`](DESIGN.md) §19 (stdlib is per-backend, not portable) and §20 (tooling-tier split) for rationale.
+
 ## Repository layout
 
 ```
-DESIGN.md                           Primary design document (source of truth, ~1100 lines)
-CARRYOVER.md                        Session handoff for the next working session
+DESIGN.md                           Primary design document (source of truth)
+AGENTS.md                           Operational reference for agents writing Overt
+CARRYOVER.md                        Session handoff — next-session queue and locked decisions
 docs/
-  grammar/
-    lexical.md                      Authoritative lexical grammar (tokens, mode automaton)
-    precedence.md                   Operator precedence and associativity
-  tooling/
-    godbolt.md                      Compiler Explorer integration plan
-examples/                           Example programs — living test cases for the design
-vscode-extension/                   TextMate grammar + language config for .ov files
+  grammar/                          Authoritative lexical + precedence grammars
+  tooling/                          Compiler Explorer integration plan
+examples/                           Example programs — living test cases
+stdlib/
+  csharp/                           Blessed BCL facades (auto-discovered by CLI)
+    system/                           Mirrors .NET's System.* namespace structure
 tooling/
-  godbolt/                          Scaffolding for the Compiler Explorer submission
+  install.ps1                       Publish-and-install script for the `overt` CLI
+  ov.ps1                            Dev-mode wrapper that targets the Debug build dir
+  godbolt/                          Compiler Explorer submission scaffolding
+vscode-extension/                   TextMate grammar + language config for .ov files
 src/
-  Overt.Compiler/
-    Syntax/                         Lexer, Parser, AST, Tokens
-    Semantics/                      Name resolver, type checker, stdlib declarations
-    Diagnostics/                    Diagnostic and DiagnosticNote model
-  Overt.Backend.CSharp/             Roslyn-facing C# transpiler
-  Overt.Backend.Go/                 Go backend (scaffold; no emission yet)
-  Overt.Cli/                        `overt` command-line driver
-  Overt.Runtime/                    Runtime prelude: Unit, Result, Option, stdlib stubs
+  Overt.Compiler/                   Tier 1: lexer, parser, resolver, type-checker, formatter
+    Modules/                          Module-graph resolution for cross-file `use`
+  Overt.Backend.CSharp/             Tier 2: C# emitter, BindGenerator, extern runtime wiring
+  Overt.Backend.Go/                 Tier 2: Go backend (scaffold; no emission yet)
+  Overt.Cli/                        Thin dispatcher: `run`, `fmt`, `bind`, `--emit=<stage>`
+  Overt.Runtime/                    Runtime prelude for transpiled programs (C# backend)
 tests/
-  Overt.Tests/                      xUnit suite
-  Overt.EndToEnd/                   Harness that runs transpiled hello.ov
+  Overt.Tests/                      xUnit suite (354 tests)
+  Overt.EndToEnd/                   Roslyn compile + exec harness for hello.ov
 ```
 
 ---
@@ -104,10 +132,13 @@ Tests are comprehensive: lexer token-stream goldens, parser AST shape assertions
 ### The compiler CLI
 
 ```
-overt --emit=<stage> <file.ov>
+overt run <file.ov>              transpile, compile in memory, execute
+overt fmt [--write] <file.ov>    format to canonical form (idempotent)
+overt bind --type <FullName>     generate an Overt facade for a .NET type
+overt --emit=<stage> <file.ov>   dump a pipeline stage for inspection
 ```
 
-Stages, each writing to stdout, diagnostics to stderr:
+Emit stages, each writing to stdout with diagnostics on stderr:
 
 - `--emit=tokens` — the lexer's token stream, one per line
 - `--emit=ast` — the parsed AST as a readable tree
@@ -116,17 +147,46 @@ Stages, each writing to stdout, diagnostics to stderr:
 - `--emit=csharp` — transpiled C# source (compiles against [`Overt.Runtime`](src/Overt.Runtime))
 - `--emit=go` — not yet implemented
 
-Diagnostics follow the conventional `path:line:col: severity: CODE: message` format with optional `help:` and `note:` follow-up lines. Codes are stable: `OV00xx` for lexer, `OV01xx` for parser, `OV02xx` for resolver, and so on.
+All emit stages (plus `run`) walk the full module graph, so a file with `use` declarations compiles correctly even in stage-dump mode.
+
+Diagnostics follow the `path:line:col: severity: CODE: message` format with `help:` follow-ups (actionable fix) and `note:` follow-ups (pointer into [`AGENTS.md`](AGENTS.md)). Codes are stable: `OV00xx` lex, `OV01xx` parse, `OV02xx` resolve, `OV03xx` type-check.
 
 ### Running transpiled programs
 
 ```
-overt --emit=csharp examples/hello.ov > tests/Overt.EndToEnd/Generated.cs
-dotnet run --project tests/Overt.EndToEnd
+overt run examples/hello.ov
 # -> Hello, LLM!
 ```
 
-The end-to-end test automates this and asserts the printed output.
+The end-to-end Roslyn compile + exec happens in-process; there is no intermediate file.
+
+### Using blessed stdlib facades
+
+The CLI auto-discovers [`stdlib/csharp/`](stdlib/csharp/) next to the compiler. Overt programs `use` the facades directly:
+
+```overt
+module app
+
+use stdlib.csharp.system.environment as env
+use stdlib.csharp.system.math as math
+
+fn main() !{io} -> Result<(), IoError> {
+    let cpus: Int = env.processor_count()?
+    println("cpus=${cpus} sqrt9=${math.sqrt(d = 9.0)}")?
+    Ok(())
+}
+```
+
+To generate a new facade:
+
+```
+overt bind --type System.DateTime --module stdlib.csharp.system.datetime \
+           --output stdlib/csharp/system/datetime.ov
+```
+
+### Installing on PATH
+
+`tooling/install.ps1` publishes the CLI into `$HOME\bin` (or any `-Bin <path>`) and copies the blessed `stdlib/` alongside it. Re-run whenever you want the on-PATH copy to reflect new changes.
 
 ---
 
@@ -147,13 +207,13 @@ The compiler pipeline, with the test coverage that pins each stage:
 
 From [`DESIGN.md §20`](DESIGN.md):
 
-1. **Semantics spec before either backend exists**, runtime-neutrally.
-2. **Single canonical test suite from day one.**
+1. **Backend-independent frontend.** Lex / parse / resolve / type-check / format / module graph / diagnostics live in `Overt.Compiler` and never learn which backend will consume the AST.
+2. **Per-backend everything else.** Each `Overt.Backend.<Host>` owns its emitter, runtime, binding generator (`overt bind`), runner (`overt run`), debug mapping, and package-ecosystem interop.
 3. **C# emission primary** (Roslyn, emitting C# source text — not IL).
-4. **Go emission as conformance target**, in CI only, not a parallel implementation.
-5. **Frontend is ~80% of the work.** Backends are comparatively cheap once the IR is right.
+4. **Go emission as conformance target** to keep the split honest; CI only, not a parallel implementation effort.
+5. **Portability, if ever needed, is its own backend** — a purpose-designed portable stdlib and emitter, opted into explicitly. See §19.
 
-The compiler host language is **C#**, chosen for iteration speed given the primary author's background and the fact that the C# backend depends on Roslyn APIs anyway. See [`DESIGN.md §20`](DESIGN.md).
+The compiler host language is **C#**, chosen for iteration speed given the primary author's background and the fact that the C# backend depends on Roslyn APIs anyway.
 
 ---
 
