@@ -42,7 +42,7 @@ Grammar specs (authoritative for the parser/lexer):
 
 The frontend works end-to-end on C# with real semantic enforcement. **Every example in [`examples/`](examples/) transpiles into C# that compiles cleanly via Roslyn**, pinned by a test for every example. The transpiled `examples/hello.ov` actually runs and prints "Hello, LLM!" — verified by the [`tests/Overt.EndToEnd`](tests/Overt.EndToEnd) harness.
 
-What exists today, pinned by 298 passing tests:
+What exists today, pinned by 316 passing tests:
 
 - **Lexer** (mode-stack, full interpolation, token-stream goldens for every example).
 - **Parser** (recursive descent, full precedence grammar, all 12 examples parse cleanly).
@@ -55,6 +55,7 @@ What exists today, pinned by 298 passing tests:
   - OV0311: refinement-predicate decidability at literal boundary crossings (DESIGN.md §8)
   - Non-generic type aliases are transparent for type-equality; the refinement check is the only layer that fires on `let a: Age = 42`.
 - **Synthetic stdlib declarations** with real signatures — `Result`, `Option`, `List`, `Ok`/`Err`/`Some`/`None`, `println`, collection operations, `Trace`, `CString`, variant lists for `Option`/`Result`.
+- **Real stdlib runtime implementations** ([`Overt.Runtime.Prelude`](src/Overt.Runtime/Prelude.cs)) — `map`, `filter`, `fold` over `ImmutableArray`; `par_map` runs concurrently via `Parallel.For` and returns first-Err by original index; `Trace.subscribe`/`Trace.emit` dispatch to registered subscribers. Transpiled Overt programs that touch collections now run, not just compile — verified by [`StdlibTranspiledEndToEndTests`](tests/Overt.Tests/StdlibTranspiledEndToEndTests.cs), which compiles a small `.ov` program in-memory and invokes `Module.main()`.
 - **C# emitter** (type-aware, expected-type threading for generic inference, stdlib variant-pattern lowering, `#line` directives for PDB mapping back to `.ov` source).
 - **Runtime prelude** ([`Overt.Runtime`](src/Overt.Runtime)) — `Unit`, `Result<T, E>`, `Option<T>`, `IoError`, `RaceAllFailed<E>`, `List<T>` and friends, target-typed marker structs for `Ok`/`Err`/`Some`.
 - **End-to-end harness** that regenerates `Generated.cs` from `hello.ov` on demand (`OVERT_REGEN_HARNESS=1 dotnet test`) and runs the transpiled program.
@@ -63,7 +64,7 @@ What exists today, pinned by 298 passing tests:
 
 What's notably absent, ordered by impact on "can I write real code in this":
 
-- **Real stdlib implementations.** `map`, `filter`, `par_map`, `fold`, `Trace.subscribe` are prelude stubs that throw `NotImplementedException` at runtime. Programs that don't need collection transforms (hello-world shapes) already run; programs that do hit the stubs and die. Single-session fix — they're trivial wrappers around `ImmutableArray<T>` and friends.
+- **`?` operator faithfully propagates Err.** Current emitter lowers `?` / `|>?` to `.Unwrap()`, which throws on Err rather than early-returning a constructed `Err(...)`. Works in practice because a program that hits an unexpected Err fails loudly, but it violates DESIGN.md §11 — `?` is supposed to be errors-as-values, not exceptions. Proper lowering needs either CPS/continuation rewriting or a synthetic temp + conditional return at each `?` site. Small emitter change; touches every call that uses `?`.
 - **Language gaps vs. real programs.** The parser accepts every construct the 12 examples use, but real programs will hit: `for each` / `loop` / `break` / `continue`, integer and float literal patterns in `match`, block comments. None are hard; each is a small parser + checker + emitter increment.
 - **Runtime-assertion emission for undecidable refinement predicates.** The checker marks `size(self) > 0`-style predicates as "needs runtime check"; the emitter does not yet generate the check. Works around it today by writing the validation in user code, as refinement.ov does.
 - **Formatter.** Not started. Canonical form is enforced by convention in the examples, not mechanically. Blocks the `@review` / `@agent` comment-tooling story.
@@ -79,16 +80,29 @@ What's notably absent, ordered by impact on "can I write real code in this":
 
 Ordered by "how directly this unblocks someone writing real Overt code":
 
-1. **Real stdlib implementations** (1 session). Replace the `NotImplementedException`-throwing stubs in [`Overt.Runtime.Prelude`](src/Overt.Runtime/Prelude.cs) with real implementations over `System.Collections.Immutable`. `map`, `filter`, `fold`, `size`, `concat_three`, `singleton`, `empty`, `par_map` (serial for v0; real Task-parallel later). After this, every current example doesn't just transpile — it runs correctly.
+1. **Faithful `?` propagation in the emitter** (1 session). Currently `?` / `|>?` lower to `.Unwrap()` which throws on Err. Replace with real early-return lowering: at each `?` site, introduce a temp, check `IsErr`, return a constructed `Err(...)` of the enclosing function's return type if so, else continue with `.Unwrap()`. Makes DESIGN.md §11 actually true. Small, mechanical, but touches every `?` call site in emitter output.
 2. **Language gaps: `for each` / `loop` / integer-literal patterns / `break` / `continue`** (1–2 sessions). Parser + checker + emitter work. Each is self-contained. The union covers what a user writing a CLI tool would hit.
 3. **Runtime-assertion emission for undecidable refinement predicates** (1 session). The emitter's implicit-operator generator on wrapper records should evaluate the predicate and throw on violation. Closes the last gap in the refinement-types guarantee.
-4. **Formatter** (2 sessions). Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed for `@review` / `@agent` comment tooling and for asserting "one canonical form" mechanically.
-5. **Tuple-of-enum exhaustiveness** (1 session). Cartesian-product walk over arm patterns in `match (a, b)` against enum types. Additive to OV0308.
-6. **Go backend** (2–3 sessions). Fresh emitter against the same AST + TypeCheckResult. Real forcing function for the IR being runtime-neutral per §20. Once a single example emits identically through both, the conformance suite is real.
-7. **MSBuild integration** (1–2 sessions). Build task that finds `.ov` files in a csproj, invokes the emitter, wires the generated `.cs` into the compilation. Standard `<Target>` with item groups; the complexity is in the incremental-build story.
-8. **LSP server** (multi-session). Reuse the parser and type checker; wire diagnostics to publishDiagnostics, implement hover / go-to-definition via ResolutionResult and TypeCheckResult. Blocks good IDE integration.
-9. **Module system** (multi-session). Real `use` imports, a resolver that spans files, a package-discovery story. The largest remaining architectural lift.
-10. **Full type inference with unification** (multi-session). Solve generic type arguments at call sites; propagate through argument-driven inference. Would eliminate several emitter workarounds.
+4. **`AGENTS.md` — the agent-facing grounding doc** (1 session, best done after #1 so stubs are real). ~400–600 line operational reference: every construct gets one canonical example, effect rows and their meanings, `Result`/`?` idioms, the stdlib surface with real signatures, what each OV diagnostic means and how to fix it. Designed to be loaded verbatim into an agent's context at session start. Not `DESIGN.md` — that's rationale; this is *how to write Overt today*. Paired with a pass over diagnostics to add `note:` pointers into `AGENTS.md` sections so an agent hitting an error learns the rule in situ.
+5. **Formatter** (2 sessions). Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed for `@review` / `@agent` comment tooling and for asserting "one canonical form" mechanically.
+6. **Tuple-of-enum exhaustiveness** (1 session). Cartesian-product walk over arm patterns in `match (a, b)` against enum types. Additive to OV0308.
+7. **Go backend** (2–3 sessions). Fresh emitter against the same AST + TypeCheckResult. Real forcing function for the IR being runtime-neutral per §20. Once a single example emits identically through both, the conformance suite is real.
+8. **MSBuild integration** (1–2 sessions). Build task that finds `.ov` files in a csproj, invokes the emitter, wires the generated `.cs` into the compilation. Standard `<Target>` with item groups; the complexity is in the incremental-build story.
+9. **LSP server** (multi-session). Reuse the parser and type checker; wire diagnostics to publishDiagnostics, implement hover / go-to-definition via ResolutionResult and TypeCheckResult. Blocks good IDE integration.
+10. **Module system** (multi-session). Real `use` imports, a resolver that spans files, a package-discovery story. The largest remaining architectural lift.
+11. **Full type inference with unification** (multi-session). Solve generic type arguments at call sites; propagate through argument-driven inference. Would eliminate several emitter workarounds.
+
+---
+
+## Agent-facing documentation strategy
+
+Three surfaces, each doing a different job. All three matter; none substitutes for the others.
+
+1. **`AGENTS.md` at repo root** — the grounding document. ~400–600 lines, terse, example-driven, one canonical form per construct. Loaded verbatim into agent context at session start. Covers: module shape, effect rows, `Result`/`?`, `match` exhaustiveness, refinement types, record updates with `with`, pipe composition, FFI boundaries, stdlib surface with real signatures, what each `OV0xxx` diagnostic means and the canonical fix. Not `DESIGN.md` — that's ~1100 lines of rationale; wrong artifact for a working agent.
+2. **[`examples/`](examples/) as a reference corpus.** Already plays this role. Agents grep for idioms (`parallel`, `with`, `FFI`) and read the example. Living test cases — if they stop compiling, CI catches it. Rule: *if an agent can't find a pattern in `examples/`, the language doesn't really have it yet.* As new stdlib/control flow lands, add examples that exercise them.
+3. **Compiler diagnostics as in-situ docs.** An agent hitting `OV0310` learns the effect-row rule from the diagnostic itself, in context, at the exact moment it's relevant. Every diagnostic should be self-contained — the primary message, a `help:` with the canonical fix, a `note:` pointing at the relevant `AGENTS.md` section. This is the pedagogically strongest position a doc can occupy and costs almost nothing beyond what we already emit.
+
+The LSP (when it lands) adds hover-for-type and hover-for-effect as a fourth surface, but it's additive, not load-bearing.
 
 ---
 
@@ -135,4 +149,4 @@ The author (paul@smartsam.com) has 26 years of C# experience and concurrent Go e
 
 ---
 
-**Semantic-enforcement arc is operationally complete: 11 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, and refinement predicates. 298/298 tests. Godbolt release engineering staged and waiting on a tag push. Next most-valuable piece: real stdlib implementations so transpiled programs actually run end-to-end, not just compile.**
+**Semantic-enforcement arc is operationally complete: 11 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, and refinement predicates. Real stdlib runtime is now in — collection-heavy transpiled programs actually run, not just compile. 316/316 tests. Godbolt release engineering staged and waiting on a tag push. Next most-valuable piece: faithful `?` lowering so Err propagation is errors-as-values instead of throw-based. After that: language gaps (`for each` / `loop` / literal patterns), then `AGENTS.md` as the grounding doc for agents writing Overt.**

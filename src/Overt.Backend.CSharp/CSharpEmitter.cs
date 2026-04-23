@@ -1158,13 +1158,13 @@ public sealed class CSharpEmitter
         return (nt.Name, name) switch
         {
             ("Result", "Ok") when nt.TypeArguments.Length == 2 =>
-                $"ResultOk<{nt.TypeArguments[0].Display}, {nt.TypeArguments[1].Display}>",
+                $"ResultOk<{CSharpTypeDisplay(nt.TypeArguments[0])}, {CSharpTypeDisplay(nt.TypeArguments[1])}>",
             ("Result", "Err") when nt.TypeArguments.Length == 2 =>
-                $"ResultErr<{nt.TypeArguments[0].Display}, {nt.TypeArguments[1].Display}>",
+                $"ResultErr<{CSharpTypeDisplay(nt.TypeArguments[0])}, {CSharpTypeDisplay(nt.TypeArguments[1])}>",
             ("Option", "Some") when nt.TypeArguments.Length == 1 =>
-                $"OptionSome<{nt.TypeArguments[0].Display}>",
+                $"OptionSome<{CSharpTypeDisplay(nt.TypeArguments[0])}>",
             ("Option", "None") when nt.TypeArguments.Length == 1 =>
-                $"OptionNone<{nt.TypeArguments[0].Display}>",
+                $"OptionNone<{CSharpTypeDisplay(nt.TypeArguments[0])}>",
             _ => null,
         };
     }

@@ -92,10 +92,12 @@ public readonly record struct _NoneMarker;
 // ---------------------------------------------------------------- Error types
 
 /// <summary>Minimal stand-in for Overt's <c>IoError</c>. Will grow to carry the
-/// reason/narrative/causal-chain shape from DESIGN.md §11.</summary>
-public sealed record IoError(string Narrative)
+/// reason/narrative/causal-chain shape from DESIGN.md §11. Field name matches
+/// Overt's lowercase-field convention so <c>IoError { narrative = "..." }</c>
+/// round-trips through the emitter.</summary>
+public sealed record IoError(string narrative)
 {
-    public override string ToString() => $"IoError: {Narrative}";
+    public override string ToString() => $"IoError: {narrative}";
 }
 
 /// <summary>
@@ -186,38 +188,84 @@ public static class Prelude
         }
     }
 
-    // ------------------------------- Collection-operation stubs.
-    //
-    // These exist so transpiled code type-checks. Runtime semantics arrive with the
-    // stdlib milestone; until then each stub throws if invoked. The point of having
-    // them now is to close the compile-check loop for every example program — a test
-    // that the C# emitter produces shape-valid output, not that it produces correct
-    // semantics.
+    // ------------------------------- Collection operations.
 
     public static int size<T>(List<T> list) => list.Items.Length;
     public static int length(string s) => s.Length;
     public static int len<T>(List<T> list) => list.Items.Length;
 
     public static List<U> map<T, U>(List<T> list, Func<T, U> f)
-        => throw new NotImplementedException("stdlib map not wired up");
+    {
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(list.Items.Length);
+        foreach (var item in list.Items) builder.Add(f(item));
+        return new List<U>(builder.MoveToImmutable());
+    }
 
     public static List<T> filter<T>(List<T> list, Func<T, bool> predicate)
-        => throw new NotImplementedException("stdlib filter not wired up");
+    {
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>();
+        foreach (var item in list.Items)
+            if (predicate(item)) builder.Add(item);
+        return new List<T>(builder.ToImmutable());
+    }
 
+    // par_map: runs f concurrently over all items, preserves input order, and
+    // returns the first Err (by original index) if any element fails. On empty
+    // input returns Ok of the empty list. The Overt signature declares
+    // !{io, async, E} — TPL satisfies async; io is over-approximated.
     public static Result<List<U>, E> par_map<T, U, E>(List<T> list, Func<T, Result<U, E>> f)
-        => throw new NotImplementedException("stdlib par_map not wired up");
+    {
+        var items = list.Items;
+        if (items.Length == 0)
+            return Ok(new List<U>(System.Collections.Immutable.ImmutableArray<U>.Empty));
+
+        var results = new Result<U, E>[items.Length];
+        System.Threading.Tasks.Parallel.For(0, items.Length, i => results[i] = f(items[i]));
+
+        var okBuilder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(items.Length);
+        for (int i = 0; i < results.Length; i++)
+        {
+            if (results[i] is ResultErr<U, E> err) return Err<E>(err.Error);
+            okBuilder.Add(((ResultOk<U, E>)results[i]).Value);
+        }
+        return Ok(new List<U>(okBuilder.MoveToImmutable()));
+    }
 
     public static U fold<T, U>(List<T> list, U seed, Func<U, T, U> step)
-        => throw new NotImplementedException("stdlib fold not wired up");
+    {
+        var acc = seed;
+        foreach (var item in list.Items) acc = step(acc, item);
+        return acc;
+    }
 
     // Trace is a stdlib namespace-shaped type so transpiled code can write
-    // `Trace.subscribe(...)` etc.
+    // `Trace.subscribe(...)`. Subscribers live in a process-wide list; emit()
+    // dispatches synchronously in registration order. The richer causal-chain
+    // wiring from DESIGN.md §14 lands with the traces milestone.
     public static class Trace
     {
+        private static readonly System.Collections.Generic.List<Func<TraceEvent, Unit>> _subscribers = new();
+        private static readonly object _lock = new();
+
         // Consumer matches the emitted shape of `fn f(e: TraceEvent) !{io} -> ()` which
         // returns Unit, not void, so Func<TraceEvent, Unit> — not Action<TraceEvent>.
         public static void subscribe(Func<TraceEvent, Unit> consumer)
-            => throw new NotImplementedException("stdlib Trace.subscribe not wired up");
+        {
+            lock (_lock) _subscribers.Add(consumer);
+        }
+
+        public static void emit(TraceEvent evt)
+        {
+            Func<TraceEvent, Unit>[] snapshot;
+            lock (_lock) snapshot = _subscribers.ToArray();
+            foreach (var s in snapshot) s(evt);
+        }
+
+        // For tests: reset the subscriber list to a known state.
+        public static void _reset()
+        {
+            lock (_lock) _subscribers.Clear();
+        }
     }
 }
 
