@@ -51,9 +51,27 @@ public sealed class Parser
     private ModuleDecl ParseModule()
     {
         var startPos = Current.Span.Start;
-        Expect(TokenKind.KeywordModule, "module declaration");
-        var nameToken = Expect(TokenKind.Identifier, "module name");
-        var nameBuilder = new System.Text.StringBuilder(nameToken.Lexeme);
+        // Emit a targeted diagnostic when the first token isn't `module`; the
+        // generic Expect-path phrases this as "expected KeywordModule" which
+        // is opaque to new users. A named fix is much clearer. Suppress the
+        // downstream Expect cascade so OV0169 stands alone.
+        var missingModuleHeader = !Check(TokenKind.KeywordModule) && !Check(TokenKind.EndOfFile);
+        if (missingModuleHeader)
+        {
+            ReportErrorWithHelp("OV0169",
+                "Overt files must start with a `module <name>` declaration",
+                Current.Span,
+                "add a `module " + SuggestModuleNameFromContext() + "` line at the top "
+                    + "before any `use`, `fn`, `record`, `enum`, or `type` declarations");
+        }
+        else
+        {
+            Expect(TokenKind.KeywordModule, "module declaration");
+        }
+        var firstSegment = missingModuleHeader
+            ? "<missing>"
+            : Expect(TokenKind.Identifier, "module name").Lexeme;
+        var nameBuilder = new System.Text.StringBuilder(firstSegment);
         // Dotted module names (module stdlib.http.client). Each segment must
         // match the sibling .ov file's location under stdlib/http/client.ov.
         while (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
@@ -224,6 +242,10 @@ public sealed class Parser
             fromLibrary,
             new SourceSpan(startPos, endPos));
     }
+
+    /// <summary>A reasonable default for the `add module X` hint. The parser
+    /// doesn't know the filename, so suggest a generic placeholder.</summary>
+    private static string SuggestModuleNameFromContext() => "your_module_name";
 
     private ExternTypeDecl ParseExternTypeDeclRest(string platform, SourcePosition startPos)
     {

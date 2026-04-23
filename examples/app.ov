@@ -1,0 +1,12 @@
+module app
+
+use stdlib.csharp.system.text.stringbuilder as sb
+
+fn main() !{io} -> Result<(), IoError> {
+    let b1: StringBuilder = sb.new_()
+    let b2: StringBuilder = sb.append_string(self = b1, value = "hello ")?
+    let b3: StringBuilder = sb.append_string(self = b2, value = "from Overt")?
+    let result: String = sb.to_string(b3)?
+    println(result)?
+    Ok(())
+}
