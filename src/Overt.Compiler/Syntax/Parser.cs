@@ -642,6 +642,23 @@ public sealed class Parser
                 continue;
             }
 
+            // break / continue — always statements, never values. The type checker
+            // rejects them outside a loop body (OV0312).
+            if (Check(TokenKind.KeywordBreak))
+            {
+                var tok = Advance();
+                statements.Add(new BreakStmt(tok.Span));
+                Match(TokenKind.Semicolon);
+                continue;
+            }
+            if (Check(TokenKind.KeywordContinue))
+            {
+                var tok = Advance();
+                statements.Add(new ContinueStmt(tok.Span));
+                Match(TokenKind.Semicolon);
+                continue;
+            }
+
             // `ident = expr` at statement position is rebinding assignment (only valid for
             // `let mut` bindings; the type checker enforces that later). Named-argument
             // syntax `name = expr` never reaches here because it lives inside a call's
@@ -1099,6 +1116,12 @@ public sealed class Parser
             case TokenKind.KeywordWhile:
                 return ParseWhileExpr();
 
+            case TokenKind.KeywordFor:
+                return ParseForEachExpr();
+
+            case TokenKind.KeywordLoop:
+                return ParseLoopExpr();
+
             case TokenKind.KeywordMatch:
                 return ParseMatchExpr();
 
@@ -1239,6 +1262,26 @@ public sealed class Parser
         var condition = ParseExpressionRestricted();
         var body = ParseBlock();
         return new WhileExpr(condition, body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    private ForEachExpr ParseForEachExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordFor, "for each");
+        Expect(TokenKind.KeywordEach, "for each (the `each` keyword is required — Overt has no bare `for` form)");
+        var binder = ParsePattern();
+        Expect(TokenKind.KeywordIn, "for each");
+        var iterable = ParseExpressionRestricted();
+        var body = ParseBlock();
+        return new ForEachExpr(binder, iterable, body, new SourceSpan(startPos, body.Span.End));
+    }
+
+    private LoopExpr ParseLoopExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordLoop, "loop");
+        var body = ParseBlock();
+        return new LoopExpr(body, new SourceSpan(startPos, body.Span.End));
     }
 
     private UnsafeExpr ParseUnsafeExpr()

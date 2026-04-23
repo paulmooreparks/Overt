@@ -296,6 +296,32 @@ public sealed record WithExpr(
 /// if any, is discarded each iteration. Per DESIGN.md §4, distinct from <c>loop</c> and
 /// <c>for each</c>.
 /// </summary>
+/// <summary>
+/// <c>for each binder in iterable { body }</c>. Evaluates to <c>()</c>; the body's
+/// trailing expression, if any, is discarded each iteration. The iterable must
+/// be a <c>List&lt;T&gt;</c>; the binder gets <c>T</c> in the body scope.
+/// </summary>
+public sealed record ForEachExpr(
+    Pattern Binder,
+    Expression Iterable,
+    BlockExpr Body,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// <c>loop { body }</c> — infinite loop. Exits only via <c>break</c> (or an
+/// uncaught effect further out). Evaluates to <c>()</c>.
+/// </summary>
+public sealed record LoopExpr(
+    BlockExpr Body,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>A <c>break</c> statement — exits the nearest enclosing loop body.</summary>
+public sealed record BreakStmt(SourceSpan Span) : Statement(Span);
+
+/// <summary>A <c>continue</c> statement — skips to the next iteration of the
+/// nearest enclosing loop body.</summary>
+public sealed record ContinueStmt(SourceSpan Span) : Statement(Span);
+
 public sealed record WhileExpr(
     Expression Condition,
     BlockExpr Body,

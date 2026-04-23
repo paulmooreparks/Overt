@@ -142,6 +142,58 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ForEachLoopBreakContinue_WorkEndToEnd()
+    {
+        // Exercises `for each`, `loop` + `break`, `while` + `continue` in one program.
+        const string src = """
+            module loops_e2e
+
+            fn main() !{io} -> Result<(), IoError> {
+                let xs: List<Int> = List.concat_three(
+                    first  = List.singleton(10),
+                    middle = List.singleton(20),
+                    last   = List.singleton(30))
+
+                for each x in xs {
+                    println("got ${x}")?
+                }
+
+                let mut n = 0
+                loop {
+                    if n == 3 {
+                        break
+                    }
+                    println("loop ${n}")?
+                    n = n + 1
+                }
+
+                let mut m = 0
+                while m < 5 {
+                    if m == 2 {
+                        m = m + 1
+                        continue
+                    }
+                    println("while ${m}")?
+                    m = m + 1
+                }
+
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "loops_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("got 10", stdout);
+        Assert.Contains("got 30", stdout);
+        Assert.Contains("loop 2", stdout);
+        Assert.DoesNotContain("loop 3", stdout); // break fired
+        Assert.Contains("while 1", stdout);
+        Assert.DoesNotContain("while 2", stdout); // continue skipped
+        Assert.Contains("while 3", stdout);
+    }
+
+    [Fact]
     public void Transpiled_LiteralPatterns_MatchIntegerAndBool()
     {
         // Literal patterns on Int (including negative), with a `_` catch-all.

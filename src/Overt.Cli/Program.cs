@@ -746,6 +746,32 @@ static class AstPrinter
                 }
                 break;
 
+            case ForEachExpr fxe:
+                w.Line("ForEach");
+                using (w.Indent())
+                {
+                    w.Line("Binder");
+                    using (w.Indent()) Visit(fxe.Binder, w);
+                    w.Line("Iterable");
+                    using (w.Indent()) Visit(fxe.Iterable, w);
+                    w.Line("Body");
+                    using (w.Indent()) Visit(fxe.Body, w);
+                }
+                break;
+
+            case LoopExpr lpe:
+                w.Line("Loop");
+                using (w.Indent()) Visit(lpe.Body, w);
+                break;
+
+            case BreakStmt:
+                w.Line("Break");
+                break;
+
+            case ContinueStmt:
+                w.Line("Continue");
+                break;
+
             case TupleExpr te:
                 w.Line($"Tuple[{te.Elements.Length}]");
                 using (w.Indent())

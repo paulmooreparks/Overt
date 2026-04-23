@@ -578,6 +578,14 @@ public sealed class CSharpEmitter
             case ExpressionStmt es:
                 EmitExpressionAsStatement(es.Expression);
                 break;
+
+            case BreakStmt:
+                _w.WriteLine("break;");
+                break;
+
+            case ContinueStmt:
+                _w.WriteLine("continue;");
+                break;
         }
     }
 
@@ -681,6 +689,8 @@ public sealed class CSharpEmitter
             case IfExpr:
             case MatchExpr:
             case WhileExpr:
+            case ForEachExpr:
+            case LoopExpr:
             case BlockExpr:
             case ParallelExpr:
             case RaceExpr:
@@ -816,6 +826,21 @@ public sealed class CSharpEmitter
                 EmitExpression(we.Condition);
                 _w.WriteLine(")");
                 EmitBlockAsStatement(we.Body);
+                break;
+
+            case ForEachExpr fe:
+                // Overt's List<T> wraps ImmutableArray<T> in .Items, so iterate that.
+                _w.Write("foreach (var ");
+                EmitPatternForBinding(fe.Binder);
+                _w.Write(" in (");
+                EmitExpression(fe.Iterable);
+                _w.WriteLine(").Items)");
+                EmitBlockAsStatement(fe.Body);
+                break;
+
+            case LoopExpr lp:
+                _w.WriteLine("while (true)");
+                EmitBlockAsStatement(lp.Body);
                 break;
 
             case MatchExpr me:
@@ -1006,6 +1031,22 @@ public sealed class CSharpEmitter
                 EmitExpression(we.Condition);
                 _w.Write(") ");
                 EmitBlockAsStatement(we.Body);
+                _w.Write(" return Unit.Value; }))()");
+                break;
+
+            case ForEachExpr fe:
+                _w.Write("((Func<Unit>)(() => { foreach (var ");
+                EmitPatternForBinding(fe.Binder);
+                _w.Write(" in (");
+                EmitExpression(fe.Iterable);
+                _w.Write(").Items) ");
+                EmitBlockAsStatement(fe.Body);
+                _w.Write(" return Unit.Value; }))()");
+                break;
+
+            case LoopExpr lp:
+                _w.Write("((Func<Unit>)(() => { while (true) ");
+                EmitBlockAsStatement(lp.Body);
                 _w.Write(" return Unit.Value; }))()");
                 break;
 

@@ -41,6 +41,11 @@ public sealed class TypeChecker
     /// </summary>
     private readonly HashSet<SourceSpan> _pipeSplicedCalls = new();
 
+    /// <summary>Nested-loop depth, incremented on entry to a while/for-each/loop
+    /// body. <see cref="CheckLoopControl"/> reads this to reject <c>break</c> and
+    /// <c>continue</c> outside a loop (OV0312).</summary>
+    private int _loopDepth;
+
     // Per-declaration bag of generic parameter names that TypeRefLowering consults to
     // distinguish NamedType("T") as a type variable vs. a named-type reference.
     private HashSet<string> _currentTypeParams = new();
@@ -289,6 +294,8 @@ public sealed class TypeChecker
         IfExpr ie => InferIf(ie),
         MatchExpr me => InferMatch(me),
         WhileExpr we => InferWhile(we),
+        ForEachExpr fe => InferForEach(fe),
+        LoopExpr lp => InferLoop(lp),
         BlockExpr b => InferBlock(b),
 
         TupleExpr te => InferTuple(te),
@@ -748,7 +755,39 @@ public sealed class TypeChecker
     {
         var condType = AnnotateExpression(we.Condition);
         CheckConditionIsBool(we.Condition.Span, condType, "`while`");
-        AnnotateExpression(we.Body);
+        _loopDepth++;
+        try { AnnotateExpression(we.Body); }
+        finally { _loopDepth--; }
+        return PrimitiveType.Unit;
+    }
+
+    private TypeRef InferForEach(ForEachExpr fe)
+    {
+        var iterType = AnnotateExpression(fe.Iterable);
+        TypeRef elemType = UnknownType.Instance;
+        if (iterType is NamedTypeRef { Name: "List", TypeArguments: { Length: 1 } elemArgs })
+        {
+            elemType = elemArgs[0];
+        }
+        else if (IsConcrete(iterType))
+        {
+            ReportErrorWithHelp("OV0313",
+                $"`for each` requires a `List<T>`, got `{iterType.Display}`",
+                fe.Iterable.Span,
+                "`for each x in xs { ... }` iterates a `List<T>`; convert other collection shapes first");
+        }
+        BindPatternSymbols(fe.Binder, elemType, SymbolKind.PatternBinding);
+        _loopDepth++;
+        try { AnnotateExpression(fe.Body); }
+        finally { _loopDepth--; }
+        return PrimitiveType.Unit;
+    }
+
+    private TypeRef InferLoop(LoopExpr lp)
+    {
+        _loopDepth++;
+        try { AnnotateExpression(lp.Body); }
+        finally { _loopDepth--; }
         return PrimitiveType.Unit;
     }
 
@@ -785,11 +824,27 @@ public sealed class TypeChecker
                     var stmtType = AnnotateExpression(es.Expression);
                     CheckIgnoredResult(es.Expression, stmtType);
                     break;
+                case BreakStmt brk:
+                    CheckLoopControl("break", brk.Span);
+                    break;
+                case ContinueStmt cont:
+                    CheckLoopControl("continue", cont.Span);
+                    break;
             }
         }
         return b.TrailingExpression is { } tail
             ? AnnotateExpression(tail)
             : PrimitiveType.Unit;
+    }
+
+    /// <summary>Reject <c>break</c>/<c>continue</c> outside a loop body.</summary>
+    private void CheckLoopControl(string keyword, SourceSpan span)
+    {
+        if (_loopDepth > 0) return;
+        ReportErrorWithHelp("OV0312",
+            $"`{keyword}` outside of a loop body",
+            span,
+            $"`{keyword}` is only valid inside `while`, `for each`, or `loop`");
     }
 
     /// <summary>
@@ -1125,6 +1180,15 @@ public sealed class TypeChecker
             case WhileExpr we:
                 CollectBodyEffects(we.Condition, acc);
                 CollectBodyEffects(we.Body, acc);
+                break;
+
+            case ForEachExpr fe:
+                CollectBodyEffects(fe.Iterable, acc);
+                CollectBodyEffects(fe.Body, acc);
+                break;
+
+            case LoopExpr lp:
+                CollectBodyEffects(lp.Body, acc);
                 break;
 
             case BinaryExpr be:

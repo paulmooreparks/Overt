@@ -294,6 +294,17 @@ public sealed class NameResolver
                 ResolveExpression(we.Body, scope);
                 break;
 
+            case ForEachExpr fe:
+                ResolveExpression(fe.Iterable, scope);
+                var forScope = new Scope(scope);
+                DefineFromPattern(fe.Binder, forScope, SymbolKind.PatternBinding);
+                ResolveExpression(fe.Body, forScope);
+                break;
+
+            case LoopExpr lp:
+                ResolveExpression(lp.Body, scope);
+                break;
+
             case MatchExpr me:
                 ResolveExpression(me.Scrutinee, scope);
                 foreach (var arm in me.Arms)
@@ -391,6 +402,11 @@ public sealed class NameResolver
 
                 case ExpressionStmt es:
                     ResolveExpression(es.Expression, scope);
+                    break;
+
+                case BreakStmt:
+                case ContinueStmt:
+                    // Nothing to resolve; the type checker verifies they're inside a loop.
                     break;
             }
         }
