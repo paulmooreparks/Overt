@@ -212,11 +212,11 @@ static class Cli
             return 1;
         }
 
-        // sourcePath=null: skip #line directives for the in-memory compile. They're
-        // for PDB generation and can land mid-line when the emitter wraps match-arm
-        // bodies in IIFE lambdas (a known emitter gap — tracked for a follow-up);
-        // omitting them here lets `run` work while the fix is pending.
-        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath: null);
+        // Pass the source path through so runtime errors map to the .ov file via
+        // portable PDBs. The in-memory compile below emits PDBs by default (Roslyn's
+        // Emit writes them into the MemoryStream when the compilation has #line info).
+        var sourcePath = Path.GetFullPath(inputFile);
+        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath);
 
         // Compile in-memory. Reference the Overt runtime + whatever's loaded in
         // the current AppDomain (BCL + System.*).

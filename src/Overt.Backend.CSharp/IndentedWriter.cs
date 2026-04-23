@@ -14,6 +14,14 @@ public sealed class IndentedWriter
 
     public IndentedWriter(StringBuilder sb) { _sb = sb; }
 
+    /// <summary>
+    /// True when the next write will land at column 0 (after any indentation).
+    /// Used by callers that need to emit line-start-only constructs (e.g. C#
+    /// preprocessor directives like <c>#line</c>, which the spec requires to
+    /// appear as the first non-whitespace character on a line).
+    /// </summary>
+    public bool AtLineStart => _atLineStart;
+
     public IDisposable Indent()
     {
         _depth++;

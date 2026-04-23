@@ -112,6 +112,13 @@ public sealed class CSharpEmitter
     private void EmitLineDirective(SourceSpan span)
     {
         if (_sourcePath is null) return;
+        // `#line` directives must begin at column 0. If we're mid-line (inside
+        // an IIFE wrapping for block-as-expression, say), break to a new line
+        // first so the directive doesn't end up after other tokens — C# rejects
+        // CS1040 "Preprocessor directives must appear as the first non-whitespace
+        // character on a line" otherwise.
+        if (!_w.AtLineStart) _w.WriteLine();
+
         // C# allows column info via `#line (startLine, startCol) - (endLine, endCol) "path"`.
         // Portable PDBs honor the columns; older tooling ignores extras gracefully.
         _w.WriteLine(
