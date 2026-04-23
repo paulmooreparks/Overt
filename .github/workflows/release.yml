@@ -1,0 +1,93 @@
+name: release
+
+# Builds a Linux x64 self-contained `overt` binary and attaches it to a GitHub
+# Release whenever a `v*` tag is pushed. The produced tarball is what Compiler
+# Explorer's infra recipe (tooling/godbolt/infra/overt.yaml) downloads.
+#
+# How to cut a release:
+#   1. Bump whatever version metadata is stored in-repo (none today; see docs
+#      for when that changes).
+#   2. git tag v0.1.0 && git push origin v0.1.0
+#   3. Watch this workflow run; verify the GitHub Release lands with the
+#      overt-<version>-linux-x64.tar.xz asset.
+#   4. If anything fails, delete the tag and the draft release, fix, retag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write     # needed to create GitHub Releases + upload artifacts
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Compute version
+        id: ver
+        run: |
+          # Strip the `v` prefix: refs/tags/v0.1.0-preview -> 0.1.0-preview
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore Overt.sln
+
+      - name: Test
+        run: dotnet test Overt.sln --configuration Release --nologo
+
+      - name: Publish overt (linux-x64, self-contained)
+        run: |
+          dotnet publish src/Overt.Cli/Overt.Cli.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            --output publish/bin
+
+      - name: Publish Overt.Runtime (linux-x64 DLL for consumers who compile the emitted C#)
+        run: |
+          dotnet publish src/Overt.Runtime/Overt.Runtime.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained false \
+            --output publish/runtime
+
+      - name: Stage release tree
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          DIR="overt-${VERSION}"
+          mkdir -p "${DIR}/bin" "${DIR}/runtime"
+          cp publish/bin/overt "${DIR}/bin/overt"
+          chmod +x "${DIR}/bin/overt"
+          cp publish/runtime/Overt.Runtime.dll "${DIR}/runtime/"
+          cp LICENSE "${DIR}/"
+          cp README.md "${DIR}/"
+          echo "${VERSION}" > "${DIR}/VERSION"
+          # Quick smoke test on the actual binary we're about to ship.
+          "./${DIR}/bin/overt" --version
+          ls -la "${DIR}"
+
+      - name: Create tarball
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          tar -cJf "overt-${VERSION}-linux-x64.tar.xz" "overt-${VERSION}"
+          ls -la overt-*.tar.xz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: overt-*-linux-x64.tar.xz
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}

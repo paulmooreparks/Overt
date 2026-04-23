@@ -11,6 +11,11 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Produced binary is `overt` (or `overt.exe` on Windows), not `Overt.Cli`. The
+         name shows up in stack traces, Compiler Explorer's install path, and the
+         `overt version` command line. -->
+    <AssemblyName>overt</AssemblyName>
+    <RootNamespace>Overt.Cli</RootNamespace>
   </PropertyGroup>
 
 </Project>

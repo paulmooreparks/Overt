@@ -6,21 +6,27 @@
 # This file tells CE's build farm where to download each released Overt
 # version and how to lay it out under /opt/compiler-explorer/overt-<version>/.
 #
-# TODO(release): fill in real versions once GitHub Releases exist.
-# TODO(release): confirm the archive URL pattern matches what `dotnet publish`
-#                uploads to the release (likely overt-<version>-linux-x64.tar.xz).
+# The release tarball produced by .github/workflows/release.yml has shape:
+#     overt-<version>/
+#       bin/overt              <- single-file self-contained binary
+#       runtime/Overt.Runtime.dll
+#       LICENSE
+#       README.md
+#       VERSION
+#
+# strip_components: 0 keeps the overt-<version>/ prefix so the install path
+# ends up at /opt/compiler-explorer/overt-<version>/bin/overt — matching
+# compiler.overt010.exe in ../config/overt.defaults.properties.
 
 installers:
   overt:
     type: tarballs
     compression: xz
     url_pattern: https://github.com/paulmooreparks/Overt/releases/download/v{0}/overt-{0}-linux-x64.tar.xz
-    dir_pattern: overt-{0}-linux-x64
-    strip_components: 1
+    dir_pattern: overt-{0}
+    strip_components: 0
+    check_exe: bin/overt --version
     targets:
-      # Uncomment as releases ship.
-      # - 0.1.0
-      - name: trunk
-        # For the rolling nightly build, if/when we set one up.
-        # url_pattern: https://github.com/paulmooreparks/Overt/releases/download/nightly/overt-nightly-linux-x64.tar.xz
-        check_exe: overt --version
+      # Add each tagged release here as it ships. CE's install farm re-runs
+      # this recipe whenever the list changes.
+      - 0.1.0-preview
