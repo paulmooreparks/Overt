@@ -113,6 +113,79 @@ public class EffectRowTests
         Assert.Contains(dirty.Diagnostics, d => d.Code == "OV0310");
     }
 
+    // --------------------------------------------- effect-row variable propagation
+
+    [Fact]
+    public void OV0310_PassingEffectfulFnToPureHigherOrderFn_SurfacesEffects()
+    {
+        // `apply` is a pure higher-order function by its signature
+        // (`!{E} -> T`). Passing a function with concrete io effect should surface
+        // io at the call site — even though it reaches the caller "through" the
+        // effect-row type variable E. Conservative approximation: any function-typed
+        // argument's effects flow into the caller's effect set.
+        var r = Check(
+            "module t\n"
+            + "fn apply<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T { f(x) }\n"
+            + "fn log(n: Int) !{io} -> Int { n }\n"
+            + "fn caller(n: Int) -> Int { apply(f = log, x = n) }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0310");
+        Assert.Contains("`io`", d.Message);
+        Assert.Contains("caller", d.Message);
+    }
+
+    [Fact]
+    public void OV0310_PassingEffectfulFnFromIoFn_NoDiagnostic()
+    {
+        // Same setup but caller declares io — effect set is covered.
+        var r = Check(
+            "module t\n"
+            + "fn apply<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T { f(x) }\n"
+            + "fn log(n: Int) !{io} -> Int { n }\n"
+            + "fn caller(n: Int) !{io} -> Int { apply(f = log, x = n) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0310");
+    }
+
+    [Fact]
+    public void OV0310_PassingPureFn_NoEffectsPropagated()
+    {
+        // Passing a pure function: no effects propagate. Caller stays pure.
+        var r = Check(
+            "module t\n"
+            + "fn apply<T, E>(f: fn(T) !{E} -> T, x: T) !{E} -> T { f(x) }\n"
+            + "fn id(n: Int) -> Int { n }\n"
+            + "fn caller(n: Int) -> Int { apply(f = id, x = n) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0310");
+    }
+
+    [Fact]
+    public void OV0310_InferenceEffectPropagatesThroughParMap()
+    {
+        // The canonical inference.ov pattern. classify carries io/async/inference;
+        // par_map preserves those via its `!{io, async, E}` row. Caller declares
+        // all three — no diagnostic.
+        var r = Check(
+            "module t\n"
+            + "fn classify(s: String) !{io, async, inference} -> Int { 0 }\n"
+            + "fn batch(xs: List<String>) !{io, async, inference} -> List<Int> "
+            + "{ par_map(list = xs, f = classify) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0310");
+    }
+
+    [Fact]
+    public void OV0310_InferenceEffectHiddenThroughParMap_FiresIfUndeclared()
+    {
+        // Same setup but caller omits `inference`. Should fire — the effect is
+        // hidden behind the parameter's effect-row variable but still reaches
+        // the caller at runtime.
+        var r = Check(
+            "module t\n"
+            + "fn classify(s: String) !{io, async, inference} -> Int { 0 }\n"
+            + "fn batch(xs: List<String>) !{io, async} -> List<Int> "
+            + "{ par_map(list = xs, f = classify) }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0310");
+        Assert.Contains("`inference`", d.Message);
+    }
+
     // --------------------------------------------- smoke: examples stay clean
 
     [Theory]

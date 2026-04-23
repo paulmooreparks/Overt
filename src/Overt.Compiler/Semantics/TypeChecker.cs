@@ -994,7 +994,24 @@ public sealed class TypeChecker
                     foreach (var eff in ft.Effects) acc.Add(eff);
                 }
                 CollectBodyEffects(c.Callee, acc);
-                foreach (var a in c.Arguments) CollectBodyEffects(a.Value, acc);
+                foreach (var a in c.Arguments)
+                {
+                    CollectBodyEffects(a.Value, acc);
+                    // Effect-row variable approximation: a function-typed argument's
+                    // effect row flows into the caller's effect set. Solves the common
+                    // higher-order case without a full unification engine — if a
+                    // callee's effect row declares a variable `E` that would be
+                    // solved from this argument, those effects manifest at this
+                    // call site. Conservative: also fires when the callee stores
+                    // rather than invokes the passed function, which in practice is
+                    // dominated by callees that DO invoke.
+                    var argType = _expressionTypes.TryGetValue(a.Value.Span, out var t)
+                        ? t : UnknownType.Instance;
+                    if (argType is FunctionTypeRef argFn)
+                    {
+                        foreach (var eff in argFn.Effects) acc.Add(eff);
+                    }
+                }
                 break;
 
             case ParallelExpr pe:
