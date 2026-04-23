@@ -560,8 +560,95 @@ public sealed class TypeChecker
                 joined = JoinTypes(joined, armType);
             }
         }
+
+        CheckMatchExhaustiveness(me, scrutineeType);
         return joined ?? UnknownType.Instance;
     }
+
+    /// <summary>
+    /// DESIGN.md §8: exhaustive pattern matching is "the single most valuable check
+    /// in the system." When a match scrutinee is a user-declared enum, verify every
+    /// variant appears in some arm (or the match has a wildcard catch-all). Missing
+    /// variants fire OV0308 with the list of uncovered names — so agents adding a
+    /// variant get every existing match pinpointed as a todo.
+    ///
+    /// v0 limitations: only single-enum scrutinees (not tuples of enums, not
+    /// stdlib types like Result / Option until we model their variants here).
+    /// Bare-identifier patterns are treated as catch-all bindings; only dotted
+    /// paths (<c>Enum.Variant</c>) count as variant references.
+    /// </summary>
+    private void CheckMatchExhaustiveness(MatchExpr me, TypeRef scrutineeType)
+    {
+        if (scrutineeType is not NamedTypeRef nt) return;
+
+        var enumDecl = _module.Declarations
+            .OfType<EnumDecl>()
+            .FirstOrDefault(e => e.Name == nt.Name);
+        if (enumDecl is null) return;
+
+        var allVariants = new HashSet<string>(
+            enumDecl.Variants.Select(v => v.Name),
+            StringComparer.Ordinal);
+        var covered = new HashSet<string>(StringComparer.Ordinal);
+        var hasCatchAll = false;
+
+        foreach (var arm in me.Arms)
+        {
+            if (IsCatchAllPattern(arm.Pattern))
+            {
+                hasCatchAll = true;
+                continue;
+            }
+            if (TryGetVariantName(arm.Pattern, nt.Name) is { } variant)
+            {
+                covered.Add(variant);
+            }
+        }
+
+        if (hasCatchAll) return;
+
+        var missing = allVariants.Except(covered).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        if (missing.Count == 0) return;
+
+        var list = string.Join(", ", missing.Select(v => $"`{nt.Name}.{v}`"));
+        var plural = missing.Count == 1 ? "variant" : "variants";
+        _diagnostics.Add(
+            new Diagnostic(
+                DiagnosticSeverity.Error,
+                "OV0308",
+                $"non-exhaustive match on `{nt.Name}`: missing {plural} {list}",
+                me.Span)
+                .WithHelp(
+                    "add an arm for each missing variant, or add a wildcard arm "
+                    + "`_ => ...` to cover the remainder"));
+    }
+
+    /// <summary>
+    /// Catch-all patterns match any scrutinee value: <c>_</c>, a bare identifier
+    /// (binds the whole value), or a tuple pattern containing only catch-alls.
+    /// For the exhaustiveness check, any of these means "this arm covers all
+    /// remaining variants."
+    /// </summary>
+    private static bool IsCatchAllPattern(Pattern p) => p switch
+    {
+        WildcardPattern => true,
+        IdentifierPattern => true,
+        TuplePattern tp => tp.Elements.All(IsCatchAllPattern),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Extract the variant name if the pattern is a dotted reference to a variant
+    /// of <paramref name="enumName"/>. Returns null for unrelated paths or non-
+    /// qualified patterns.
+    /// </summary>
+    private static string? TryGetVariantName(Pattern p, string enumName) => p switch
+    {
+        PathPattern pp when pp.Path.Length == 2 && pp.Path[0] == enumName => pp.Path[1],
+        ConstructorPattern cp when cp.Path.Length == 2 && cp.Path[0] == enumName => cp.Path[1],
+        RecordPattern rp when rp.Path.Length == 2 && rp.Path[0] == enumName => rp.Path[1],
+        _ => null,
+    };
 
     private TypeRef InferWhile(WhileExpr we)
     {

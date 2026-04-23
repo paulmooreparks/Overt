@@ -231,6 +231,85 @@ public class TypeDiagnosticTests
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0307");
     }
 
+    // ---------------------------------------------- OV0308 exhaustiveness
+
+    [Fact]
+    public void OV0308_MissingSingleVariant_Fires()
+    {
+        var r = Check(
+            "module t\nenum Color { Red, Green, Blue }\n"
+            + "fn f(c: Color) -> Int { match c { Color.Red => 1, Color.Green => 2 } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`Color.Blue`", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_MissingMultipleVariants_ListsAll()
+    {
+        var r = Check(
+            "module t\nenum Color { Red, Green, Blue, Yellow }\n"
+            + "fn f(c: Color) -> Int { match c { Color.Red => 1 } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        // Missing list is alphabetical.
+        Assert.Contains("`Color.Blue`", d.Message);
+        Assert.Contains("`Color.Green`", d.Message);
+        Assert.Contains("`Color.Yellow`", d.Message);
+        Assert.Contains("variants", d.Message); // plural
+    }
+
+    [Fact]
+    public void OV0308_Wildcard_SuppressesDiagnostic()
+    {
+        var r = Check(
+            "module t\nenum Color { Red, Green, Blue }\n"
+            + "fn f(c: Color) -> Int { match c { Color.Red => 1, _ => 99 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_IdentifierArm_CountsAsCatchAll()
+    {
+        // Bare identifier in arm position is a binding that matches anything —
+        // treated as catch-all for exhaustiveness purposes.
+        var r = Check(
+            "module t\nenum Color { Red, Green, Blue }\n"
+            + "fn f(c: Color) -> Int { match c { Color.Red => 1, anything => 99 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_AllVariantsCovered_NoDiagnostic()
+    {
+        var r = Check(
+            "module t\nenum Color { Red, Green, Blue }\n"
+            + "fn f(c: Color) -> Int "
+            + "{ match c { Color.Red => 1, Color.Green => 2, Color.Blue => 3 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_DataVariantsSupported_InMatch()
+    {
+        // Enum with struct-like variant; record-pattern covers it.
+        var r = Check(
+            "module t\nenum Tree { Leaf, Node { value: Int } }\n"
+            + "fn f(t: Tree) -> Int "
+            + "{ match t { Tree.Leaf => 0, Tree.Node { value = v } => v } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_TupleScrutinee_NotChecked()
+    {
+        // Tuple-of-enum exhaustiveness is deferred; v0 only handles single-enum
+        // scrutinees. Should produce no diagnostic even when incomplete.
+        var r = Check(
+            "module t\nenum A { X, Y }\nenum B { P, Q }\n"
+            + "fn f(a: A, b: B) -> Int "
+            + "{ match (a, b) { (A.X, B.P) => 1, _ => 0 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
     // ---------------------------------------------- smoke: examples stay clean
 
     [Theory]
