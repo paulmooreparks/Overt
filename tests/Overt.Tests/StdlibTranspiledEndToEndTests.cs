@@ -142,6 +142,40 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_LiteralPatterns_MatchIntegerAndBool()
+    {
+        // Literal patterns on Int (including negative), with a `_` catch-all.
+        const string src = """
+            module litpat_e2e
+
+            fn describe(n: Int) -> String {
+                match n {
+                    0  => "zero",
+                    1  => "one",
+                    -1 => "neg",
+                    _  => "other",
+                }
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                println(describe(0))?
+                println(describe(1))?
+                println(describe(-1))?
+                println(describe(99))?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "litpat_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("zero", stdout);
+        Assert.Contains("one", stdout);
+        Assert.Contains("neg", stdout);
+        Assert.Contains("other", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ArithEvalDemo_RunsAndPrints()
     {
         // The arithmetic evaluator demo — an interpreter in ~50 lines of Overt.

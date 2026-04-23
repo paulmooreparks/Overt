@@ -427,6 +427,7 @@ public sealed class NameResolver
 
             case WildcardPattern:
             case PathPattern:
+            case LiteralPattern:
                 break;
 
             case ConstructorPattern cp:

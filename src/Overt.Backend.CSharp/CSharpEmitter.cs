@@ -1416,6 +1416,13 @@ public sealed class CSharpEmitter
                 }
                 _w.Write(")");
                 break;
+            case LiteralPattern lp:
+                // C# switch-pattern matching accepts literal constants directly
+                // as patterns (since C# 7.0). Emit the underlying expression —
+                // EmitExpression handles int / float / bool / string / negated
+                // literals with the right syntax.
+                EmitExpression(lp.Value);
+                break;
         }
     }
 

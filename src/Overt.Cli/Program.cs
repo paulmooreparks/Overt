@@ -816,6 +816,11 @@ static class AstPrinter
                 }
                 break;
 
+            case LiteralPattern lp:
+                w.Line("LiteralPat");
+                using (w.Indent()) Visit(lp.Value, w);
+                break;
+
             case ParallelExpr pe:
                 w.Line($"Parallel[{pe.Tasks.Length}]");
                 using (w.Indent())

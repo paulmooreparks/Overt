@@ -1360,10 +1360,40 @@ public sealed class Parser
             return ParseIdentifierOrConstructorPattern();
         }
 
+        // Literal patterns: integer (possibly negated), float, string, bool.
+        // These are equality-matches; they never contribute to exhaustiveness
+        // over an infinite domain, so a match using them still needs `_`.
+        if (Check(TokenKind.IntegerLiteral) || Check(TokenKind.FloatLiteral)
+            || Check(TokenKind.StringLiteral)
+            || Check(TokenKind.KeywordTrue) || Check(TokenKind.KeywordFalse))
+        {
+            var start = Current.Span.Start;
+            var literalTok = Advance();
+            Expression literal = literalTok.Kind switch
+            {
+                TokenKind.IntegerLiteral => new IntegerLiteralExpr(literalTok.Lexeme, literalTok.Span),
+                TokenKind.FloatLiteral => new FloatLiteralExpr(literalTok.Lexeme, literalTok.Span),
+                TokenKind.StringLiteral => new StringLiteralExpr(literalTok.Lexeme, literalTok.Span),
+                TokenKind.KeywordTrue => new BooleanLiteralExpr(true, literalTok.Span),
+                TokenKind.KeywordFalse => new BooleanLiteralExpr(false, literalTok.Span),
+                _ => throw new InvalidOperationException("unreachable"),
+            };
+            return new LiteralPattern(literal, new SourceSpan(start, literalTok.Span.End));
+        }
+        if (Check(TokenKind.Minus) && Peek(1).Kind == TokenKind.IntegerLiteral)
+        {
+            var start = Current.Span.Start;
+            Advance(); // -
+            var intTok = Advance();
+            var inner = new IntegerLiteralExpr(intTok.Lexeme, intTok.Span);
+            var span = new SourceSpan(start, intTok.Span.End);
+            return new LiteralPattern(new UnaryExpr(UnaryOp.Negate, inner, span), span);
+        }
+
         ReportErrorWithHelp("OV0158",
             $"expected pattern, got {TokenDisplay(Current)}",
             Current.Span,
-            "patterns are `_`, an identifier, a dotted path, a constructor call `Name(pat, ...)`, a record destructure `Name { field = pat, ... }`, or a tuple `(pat, ...)`");
+            "patterns are `_`, an identifier, a dotted path, a constructor call `Name(pat, ...)`, a record destructure `Name { field = pat, ... }`, a tuple `(pat, ...)`, or a literal (`0`, `true`, `\"exit\"`)");
         var skipped = Advance();
         return new WildcardPattern(skipped.Span);
     }

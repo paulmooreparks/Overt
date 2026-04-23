@@ -407,6 +407,17 @@ public sealed record TuplePattern(
     ImmutableArray<Pattern> Elements,
     SourceSpan Span) : Pattern(Span);
 
+/// <summary>
+/// A literal pattern: integer (<c>0</c>, <c>-1</c>), boolean (<c>true</c>),
+/// or string (<c>"exit"</c>). Matches when the scrutinee equals the literal.
+/// Because the matched domain is infinite for numeric types, literal patterns
+/// never contribute to exhaustiveness — a match that uses them still needs a
+/// wildcard arm (OV0308).
+/// </summary>
+public sealed record LiteralPattern(
+    Expression Value,
+    SourceSpan Span) : Pattern(Span);
+
 public sealed record CallExpr(
     Expression Callee,
     ImmutableArray<Argument> Arguments,
