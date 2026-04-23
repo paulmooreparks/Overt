@@ -434,8 +434,11 @@ When Go and TypeScript backends arrive, `stdlib/go/*` and `stdlib/ts/*`
 sit beside it — each with its own facades bound to that backend's native
 ecosystem. There is no portable-across-backends stdlib. Agents
 retargeting a program to another backend rewrite it; humans shouldn't
-be trying to write cross-backend Overt by hand. See DESIGN.md §19 for
-the rationale.
+be trying to write cross-backend Overt by hand. The same split applies
+to tooling: `overt bind`, `overt run`, debug mapping, and host-source
+inspection are all per-backend. `overt fmt` and the Overt-level emit
+stages (`tokens`, `ast`, `resolved`, `typed`) are shared. See
+DESIGN.md §19 and §20 for the rationale.
 
 Currently shipped (all under `stdlib.csharp.system.*`, mirroring .NET's
 own `System.*` namespaces):

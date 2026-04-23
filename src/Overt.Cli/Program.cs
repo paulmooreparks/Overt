@@ -1,6 +1,9 @@
 using System.Collections.Immutable;
 using System.Reflection;
 using Overt.Backend.CSharp;
+// BindGenerator from Overt.Backend.CSharp — the C#-specific binding tool.
+// A future Go or C++ backend would ship its own binding generator, dispatched
+// on the `--platform` (or equivalent) flag in the `bind` subcommand.
 using Overt.Compiler.Diagnostics;
 using Overt.Compiler.Modules;
 using Overt.Compiler.Semantics;

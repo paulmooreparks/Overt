@@ -142,6 +142,7 @@ These are settled by explicit discussion with recorded rationale in `DESIGN.md`.
 - **One canonical form** enforced by formatter. Rules in §21; no per-project or per-developer configuration.
 - **Host language for the compiler:** C# on .NET 9 (§20).
 - **Per-backend stdlib is primary; portability is a separate backend, not a language feature** (§19). `stdlib/csharp/*` binds to .NET idioms; future `stdlib/go/*` would bind to Go idioms. No platform-neutral abstraction layer in the core. Programs that need portability use a future *portable backend* with its own stdlib engineered for that purpose — users opt in explicitly. Rationale: agent-driven retargeting is cheap; portable abstractions are expensive forever. (Locked 2026-04.)
+- **Tooling is tiered: backend-independent vs. per-backend** (§20). Lex / parse / resolve / type-check / format / module graph / OV diagnostics / LSP protocol live in `Overt.Compiler` (one implementation, shared). Emission, runtime library, binding generator (`overt bind`), runner (`overt run`), debug mapping, host-source inspection, and package-system interop live in each `Overt.Backend.<Host>` project. The CLI is a thin dispatcher. `BindGenerator` moved from `Overt.Cli` into `Overt.Backend.CSharp` to make the split real. (Locked 2026-04.)
 - **License:** Apache-2.0.
 
 ---

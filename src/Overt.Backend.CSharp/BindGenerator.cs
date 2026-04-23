@@ -1,15 +1,18 @@
 using System.Reflection;
 using System.Text;
 
-// BindGenerator lives in the global namespace alongside the `Cli` static
-// class from Program.cs — Program.cs is a top-level file and doesn't
-// introduce a namespace, so staying namespace-less keeps the references
-// simple.
+namespace Overt.Backend.CSharp;
 
 /// <summary>
 /// Reflection-driven facade generator for the <c>overt bind</c> subcommand.
 /// Given a .NET type's full name, walks its public static methods and emits
 /// an Overt module of <c>extern "csharp" fn ...</c> declarations.
+///
+/// This is <b>C#-backend-specific tooling</b> (Tier 2 per DESIGN.md §20). It
+/// lives in <c>Overt.Backend.CSharp</c> because it inherently uses .NET
+/// reflection and produces <c>extern "csharp"</c> declarations. Sibling
+/// backends (Go, C++, TypeScript) will ship their own binding generators
+/// tied to their own host ecosystems.
 ///
 /// MVP scope — by design — covers the subset that's safe to auto-generate
 /// without guesswork:

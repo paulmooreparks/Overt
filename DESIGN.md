@@ -931,6 +931,45 @@ Practices that keep dual-target honest without doubling implementation work:
 4. **Go in CI as conformance only**, not a parallel implementation effort.
 5. **Frontend is ~80% of the work.** Parser, type checker, IR, diagnostics. Backends are comparatively cheap once the IR is right.
 
+### Tooling tiers: backend-independent vs. per-backend
+
+The stdlib decision in §19 — per-backend, not portable — cascades through the tooling. Every tool either operates on Overt source/AST alone, or it touches host artifacts. The division is strict and there is no "middle layer":
+
+**Tier 1: backend-independent.** Anything that works on `.ov` source or the AST without producing or consuming host output.
+
+- Lexer, parser, name resolver, type checker (`Overt.Compiler`)
+- Formatter (`overt fmt`)
+- Module-graph resolution, `use` semantics
+- OV-code diagnostics and their `help:`/`note:` pointers
+- `overt --emit=tokens` / `--emit=ast` / `--emit=resolved` / `--emit=typed`
+- LSP protocol and hover/go-to-def *within Overt source*
+
+One implementation, shared across all backends.
+
+**Tier 2: per-backend.** Anything that touches or produces host artifacts. Every backend ships its own implementation of each of these:
+
+- Emitter (source text for its target language)
+- Runtime library (the small prelude shipped alongside compiled programs)
+- Binding generator (`overt bind` for .NET uses Roslyn/reflection; Go would use `go/ast` or `go doc`; C/C++ would use libclang; TypeScript would parse `.d.ts`)
+- Runner (`overt run` — .NET uses in-process Roslyn; Go would `go run`; C/C++ would invoke the compiler and exec)
+- Debug mapping (.NET portable PDB + `#line`; Go `//line`; native DWARF/PDB; TS source maps)
+- Host-source inspection (`--emit=csharp`, `--emit=go`, `--emit=cpp`, etc.)
+- Package-system interop (NuGet for .NET; Go modules; vcpkg or Conan for C/C++; npm for TS)
+- LSP features that need host-side information (jumping into a Roslyn symbol for a C# extern; into a Go package doc; into a Win32 header)
+
+Each backend lives in its own project: `Overt.Backend.CSharp`, `Overt.Backend.Go`, a hypothetical `Overt.Backend.Cpp`. Cross-cutting code does not sit in `Overt.Cli` — the CLI is a thin dispatcher that routes to the right backend based on what the user is compiling. A consequence: `overt bind` will eventually grow a `--platform` selector (today it defaults to C# because that's the only backend). The backend owns its binding-generation strategy end-to-end; the CLI just hands it the arguments.
+
+**A concrete test case: a hypothetical classic-Win32 C/C++ backend.** This is a clean worked example because Win32 is as far from .NET as any target we'd plausibly add.
+
+- **Emitter.** `Overt.Backend.Cpp` emits C++ source. Handles calling conventions (`__stdcall` for WinAPI), COM interfaces, HRESULT-as-Result conversion.
+- **Runtime.** A header-only C++ library defining `Unit`, `Result<T, E>`, `Option<T>`, `List<T>` with C++ concepts and move semantics. Or alternatively, emit these inline as generated types. Runtime decision lives with the backend.
+- **Binding generator.** libclang-based. Parses Windows SDK headers, emits Overt facades for WinAPI functions. Handles preprocessor macros, `HRESULT`, `LPCSTR` vs `LPCWSTR`. Stdlib subtree becomes `stdlib/cpp/winapi/*` with facades for specific subsystems (user32, kernel32, shell32).
+- **Runner.** Invokes `cl.exe` (MSVC) or `clang++`; links against the runtime; runs the resulting binary. Captures stdout/stderr for test harnesses.
+- **Debug mapping.** `#line` directives in emitted `.cpp` (same syntax as C#, different tooling); PDB for MSVC, split DWARF for clang. The Overt compiler emits the directives; the host toolchain produces the debug format.
+- **Package system.** vcpkg or Conan interop — the manifest declares C++ dependencies, the build resolves them before invoking the compiler.
+
+What's *shared* in this exercise? Lex, parse, resolve, type-check, format, OV-code diagnostics, module resolution, LSP protocol. The same implementation as C# and Go. The frontend never learned that Win32 exists; it produces an AST and hands it to the backend. This is the payoff of keeping Tier 1 pure.
+
 ### Compiler host language
 
 The Overt compiler itself is written in **C# on .NET 9**. Committed on 2026-04-22.
