@@ -513,7 +513,7 @@ public sealed class NameResolver
         }
     }
 
-    private static int Levenshtein(string a, string b)
+    internal static int Levenshtein(string a, string b)
     {
         if (a == b) return 0;
         if (a.Length == 0) return b.Length;

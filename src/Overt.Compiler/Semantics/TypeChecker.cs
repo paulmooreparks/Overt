@@ -32,6 +32,15 @@ public sealed class TypeChecker
     private readonly Dictionary<SourceSpan, TypeRef> _expressionTypes = new();
     private readonly List<Diagnostic> _diagnostics = new();
 
+    /// <summary>
+    /// Call spans whose arity and argument types should NOT be checked — the call
+    /// appears as the right-hand side of a pipe (<c>x |&gt; f(a)</c>) or pipe-propagate
+    /// (<c>x |&gt;? f(a)</c>), where the piped value is spliced in as a first positional
+    /// argument at lowering time. Checking the syntactic arity would falsely report
+    /// an off-by-one.
+    /// </summary>
+    private readonly HashSet<SourceSpan> _pipeSplicedCalls = new();
+
     // Per-declaration bag of generic parameter names that TypeRefLowering consults to
     // distinguish NamedType("T") as a type variable vs. a named-type reference.
     private HashSet<string> _currentTypeParams = new();
@@ -273,7 +282,6 @@ public sealed class TypeChecker
     private TypeRef InferFieldAccess(FieldAccessExpr fa)
     {
         var targetType = AnnotateExpression(fa.Target);
-        // Resolve against the target's record declaration if we have one.
         if (targetType is NamedTypeRef nt)
         {
             var decl = _module.Declarations
@@ -286,9 +294,51 @@ public sealed class TypeChecker
                 {
                     return LowerType(field.Type);
                 }
+                ReportUnknownField(fa, nt.Name, decl);
             }
+            // If decl is null, the target might be a stdlib type with no user-declared
+            // field list — fall through without a diagnostic. Once stdlib types carry
+            // real field info, this arm can also validate.
         }
         return UnknownType.Instance;
+    }
+
+    private void ReportUnknownField(FieldAccessExpr fa, string recordName, RecordDecl decl)
+    {
+        var d = new Diagnostic(
+            DiagnosticSeverity.Error,
+            "OV0302",
+            $"record `{recordName}` has no field `{fa.FieldName}`",
+            fa.Span);
+
+        var suggestion = FindFieldSuggestion(fa.FieldName, decl.Fields);
+        if (suggestion is not null)
+        {
+            d = d.WithHelp($"did you mean `{suggestion}`?");
+        }
+        else if (decl.Fields.Length > 0)
+        {
+            var names = string.Join(", ", decl.Fields.Select(f => $"`{f.Name}`"));
+            d = d.WithHelp($"`{recordName}` has fields: {names}");
+        }
+        _diagnostics.Add(d);
+    }
+
+    private static string? FindFieldSuggestion(string target, ImmutableArray<RecordField> fields)
+    {
+        string? best = null;
+        var bestDistance = int.MaxValue;
+        var budget = Math.Max(1, target.Length / 3);
+        foreach (var field in fields)
+        {
+            var d = NameResolver.Levenshtein(target, field.Name);
+            if (d <= budget && d < bestDistance)
+            {
+                best = field.Name;
+                bestDistance = d;
+            }
+        }
+        return best;
     }
 
     private TypeRef InferCall(CallExpr c)
@@ -298,7 +348,46 @@ public sealed class TypeChecker
         {
             AnnotateExpression(arg.Value);
         }
-        return calleeType is FunctionTypeRef ft ? ft.Return : UnknownType.Instance;
+
+        if (calleeType is FunctionTypeRef ft)
+        {
+            if (!_pipeSplicedCalls.Contains(c.Span))
+            {
+                CheckCallArity(c, ft);
+                CheckCallArgumentTypes(c, ft);
+            }
+            return ft.Return;
+        }
+        return UnknownType.Instance;
+    }
+
+    private void CheckCallArity(CallExpr c, FunctionTypeRef ft)
+    {
+        if (c.Arguments.Length == ft.Parameters.Length) return;
+        var plural = ft.Parameters.Length == 1 ? "" : "s";
+        ReportError("OV0306",
+            $"call expects {ft.Parameters.Length} argument{plural}, got {c.Arguments.Length}",
+            c.Span);
+    }
+
+    private void CheckCallArgumentTypes(CallExpr c, FunctionTypeRef ft)
+    {
+        var count = Math.Min(c.Arguments.Length, ft.Parameters.Length);
+        for (var i = 0; i < count; i++)
+        {
+            var expected = ft.Parameters[i];
+            var actual = _expressionTypes.TryGetValue(c.Arguments[i].Value.Span, out var t)
+                ? t
+                : UnknownType.Instance;
+
+            if (!IsConcrete(expected) || !IsConcrete(actual)) continue;
+            if (TypesEqual(expected, actual)) continue;
+
+            ReportErrorWithHelp("OV0300",
+                $"argument {i + 1}: expected `{expected.Display}`, got `{actual.Display}`",
+                c.Arguments[i].Value.Span,
+                "argument type does not match the declared parameter type");
+        }
     }
 
     private TypeRef InferPropagate(PropagateExpr pr)
@@ -319,6 +408,15 @@ public sealed class TypeChecker
 
     private TypeRef InferBinary(BinaryExpr be)
     {
+        // Register pipe RHS calls before descending so the call's arity check knows to
+        // skip. `x |> f(a, b)` desugars to `f(x, a, b)`; checking `f(a, b)` against f's
+        // signature without the splice would emit a false OV0306.
+        if (be.Op is BinaryOp.PipeCompose or BinaryOp.PipePropagate
+            && be.Right is CallExpr pipeCall)
+        {
+            _pipeSplicedCalls.Add(pipeCall.Span);
+        }
+
         var left = AnnotateExpression(be.Left);
         var right = AnnotateExpression(be.Right);
         return be.Op switch
@@ -364,12 +462,29 @@ public sealed class TypeChecker
 
     private TypeRef InferIf(IfExpr ie)
     {
-        AnnotateExpression(ie.Condition);
+        var condType = AnnotateExpression(ie.Condition);
+        CheckConditionIsBool(ie.Condition.Span, condType, "`if`");
+
         var thenType = AnnotateExpression(ie.Then);
         if (ie.Else is { } elseBlock)
         {
             var elseType = AnnotateExpression(elseBlock);
+            if (IsConcrete(thenType) && IsConcrete(elseType) && !TypesEqual(thenType, elseType))
+            {
+                ReportErrorWithHelp("OV0303",
+                    $"`if` arms have different types: `{thenType.Display}` and `{elseType.Display}`",
+                    ie.Span,
+                    "both arms must produce the same type, or one must be coerced to match");
+            }
             return JoinTypes(thenType, elseType);
+        }
+        // Else is absent; per §4 the then block must evaluate to `()`.
+        if (IsConcrete(thenType) && !TypesEqual(thenType, PrimitiveType.Unit))
+        {
+            ReportErrorWithHelp("OV0303",
+                $"`if` without `else` requires its body to produce `()`, got `{thenType.Display}`",
+                ie.Then.Span,
+                "add an `else` arm that yields the same type, or make the body evaluate to `()`");
         }
         return PrimitiveType.Unit;
     }
@@ -378,20 +493,58 @@ public sealed class TypeChecker
     {
         var scrutineeType = AnnotateExpression(me.Scrutinee);
         TypeRef? joined = null;
+        SourceSpan? firstArmSpan = null;
+
         foreach (var arm in me.Arms)
         {
             BindPatternSymbols(arm.Pattern, scrutineeType, SymbolKind.PatternBinding);
             var armType = AnnotateExpression(arm.Body);
-            joined = joined is null ? armType : JoinTypes(joined, armType);
+
+            if (joined is null)
+            {
+                joined = armType;
+                firstArmSpan = arm.Body.Span;
+            }
+            else if (IsConcrete(joined) && IsConcrete(armType) && !TypesEqual(joined, armType))
+            {
+                var d = new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "OV0303",
+                    $"match arm has type `{armType.Display}` "
+                        + $"but earlier arm produced `{joined.Display}`",
+                    arm.Body.Span);
+                if (firstArmSpan is { } fs)
+                {
+                    d = d.WithNoteAt(fs, "earlier arm established this type");
+                }
+                d = d.WithHelp("every arm must yield the same type, or wrap mismatched arms to coerce");
+                _diagnostics.Add(d);
+                // Keep `joined` as the first type so downstream reports are consistent.
+            }
+            else
+            {
+                joined = JoinTypes(joined, armType);
+            }
         }
         return joined ?? UnknownType.Instance;
     }
 
     private TypeRef InferWhile(WhileExpr we)
     {
-        AnnotateExpression(we.Condition);
+        var condType = AnnotateExpression(we.Condition);
+        CheckConditionIsBool(we.Condition.Span, condType, "`while`");
         AnnotateExpression(we.Body);
         return PrimitiveType.Unit;
+    }
+
+    private void CheckConditionIsBool(SourceSpan span, TypeRef actual, string form)
+    {
+        if (!IsConcrete(actual)) return;
+        if (TypesEqual(actual, PrimitiveType.Bool)) return;
+        ReportErrorWithHelp("OV0304",
+            $"{form} condition must be `Bool`, got `{actual.Display}`",
+            span,
+            $"wrap the condition in a comparison or boolean-returning call — {form} requires a boolean value to branch on");
     }
 
     private TypeRef InferBlock(BlockExpr b)
@@ -517,7 +670,7 @@ public sealed class TypeChecker
     // ------------------------------------------------ type join (loose)
 
     /// <summary>
-    /// Loose join: if the two types are equal, return one. Otherwise return
+    /// Loose join: if the two types are structurally equal, return one. Otherwise return
     /// <see cref="UnknownType"/> — the type checker's subtype and unification rules
     /// land later, not here.
     /// </summary>
@@ -525,8 +678,78 @@ public sealed class TypeChecker
     {
         if (a is UnknownType) return b;
         if (b is UnknownType) return a;
-        return a == b ? a : UnknownType.Instance;
+        return TypesEqual(a, b) ? a : UnknownType.Instance;
     }
+
+    // ------------------------------------------------ type comparison
+
+    /// <summary>
+    /// Structural equality for type refs. Required because <see cref="ImmutableArray{T}"/>
+    /// members on records don't participate in the compiler-generated <c>==</c>; a
+    /// pure <c>record.Equals</c> call would compare by reference and report false for
+    /// equally-shaped <see cref="NamedTypeRef"/>s built from different ImmutableArrays.
+    /// </summary>
+    private static bool TypesEqual(TypeRef a, TypeRef b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a.GetType() != b.GetType()) return false;
+        return (a, b) switch
+        {
+            (UnknownType, UnknownType) => true,
+            (PrimitiveType pa, PrimitiveType pb) => pa.Name == pb.Name,
+            (NamedTypeRef na, NamedTypeRef nb) =>
+                na.Name == nb.Name && AllEqual(na.TypeArguments, nb.TypeArguments),
+            (TupleTypeRef ta, TupleTypeRef tb) =>
+                AllEqual(ta.Elements, tb.Elements),
+            (FunctionTypeRef fa, FunctionTypeRef fb) =>
+                AllEqual(fa.Parameters, fb.Parameters)
+                && TypesEqual(fa.Return, fb.Return)
+                && fa.Effects.SequenceEqual(fb.Effects, StringComparer.Ordinal),
+            (TypeVarRef va, TypeVarRef vb) => va.Name == vb.Name,
+            _ => false,
+        };
+    }
+
+    private static bool AllEqual(ImmutableArray<TypeRef> a, ImmutableArray<TypeRef> b)
+    {
+        if (a.Length != b.Length) return false;
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (!TypesEqual(a[i], b[i])) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// True when a type contains no free <see cref="TypeVarRef"/>s and is not itself
+    /// <see cref="UnknownType"/>. Type-error diagnostics only fire when BOTH the
+    /// expected and actual types are concrete — unification across type vars belongs
+    /// to a later pass, and flagging `Ok(x)`'s <c>Result&lt;T, E&gt;</c> against
+    /// <c>Result&lt;Unit, IoError&gt;</c> would be a pure false positive without it.
+    /// </summary>
+    private static bool IsConcrete(TypeRef t)
+    {
+        if (t is UnknownType) return false;
+        return !ContainsTypeVar(t);
+    }
+
+    private static bool ContainsTypeVar(TypeRef t) => t switch
+    {
+        TypeVarRef => true,
+        NamedTypeRef n => n.TypeArguments.Any(ContainsTypeVar),
+        TupleTypeRef tt => tt.Elements.Any(ContainsTypeVar),
+        FunctionTypeRef ft => ft.Parameters.Any(ContainsTypeVar) || ContainsTypeVar(ft.Return),
+        _ => false,
+    };
+
+    // ----------------------------------------------- diagnostic reporting
+
+    private void ReportError(string code, string message, SourceSpan span) =>
+        _diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, code, message, span));
+
+    private void ReportErrorWithHelp(string code, string message, SourceSpan span, string help)
+        => _diagnostics.Add(
+            new Diagnostic(DiagnosticSeverity.Error, code, message, span).WithHelp(help));
 }
 
 public sealed record TypeCheckResult(
