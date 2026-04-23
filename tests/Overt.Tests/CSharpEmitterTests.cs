@@ -25,7 +25,10 @@ public class CSharpEmitterTests
         Assert.Contains("public static class Module", csharp);
         Assert.Contains("public static Result<Unit, IoError> main()", csharp);
         Assert.Contains(".Unwrap()", csharp); // ? propagation
-        Assert.Contains("Ok(Unit.Value)", csharp);
+        // With the function-return type known, the emitter pins Ok's type parameter and
+        // casts the argument so generic-return helpers target-type correctly in nested
+        // positions. Either form is valid Ok; the explicit-T form is what we expect now.
+        Assert.Contains("Ok<Unit>((Unit)Unit.Value)", csharp);
     }
 
     [Fact]

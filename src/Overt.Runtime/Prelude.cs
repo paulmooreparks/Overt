@@ -98,6 +98,13 @@ public sealed record IoError(string Narrative)
     public override string ToString() => $"IoError: {Narrative}";
 }
 
+/// <summary>
+/// Error variant returned by <c>race { ... }</c> when every branch fails. Carries the
+/// per-branch errors in source order (DESIGN.md §12). Placeholder — proper causal-chain
+/// wiring lands with the error-model milestone.
+/// </summary>
+public sealed record RaceAllFailed<E>(System.Collections.Immutable.ImmutableArray<E> Errors);
+
 // ------------------------------------------------------- Collection stubs
 
 /// <summary>Minimal ordered collection placeholder. Real implementation lands with the
@@ -207,7 +214,9 @@ public static class Prelude
     // `Trace.subscribe(...)` etc.
     public static class Trace
     {
-        public static void subscribe(Action<TraceEvent> consumer)
+        // Consumer matches the emitted shape of `fn f(e: TraceEvent) !{io} -> ()` which
+        // returns Unit, not void, so Func<TraceEvent, Unit> — not Action<TraceEvent>.
+        public static void subscribe(Func<TraceEvent, Unit> consumer)
             => throw new NotImplementedException("stdlib Trace.subscribe not wired up");
     }
 }

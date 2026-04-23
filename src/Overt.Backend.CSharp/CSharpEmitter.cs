@@ -32,6 +32,15 @@ public sealed class CSharpEmitter
     private readonly IndentedWriter _w;
     private readonly TypeCheckResult? _types;
 
+    /// <summary>
+    /// The expected type of the expression currently being emitted, propagated from
+    /// parent context (function return, call argument, if/match arm). Used by
+    /// generic-call emission to fill in type arguments that C# can't infer on its own
+    /// — chiefly no-arg methods like <c>List.empty()</c> and <c>None()</c>.
+    /// Null when the expected type is not known.
+    /// </summary>
+    private TypeRef? _expectedType;
+
     private CSharpEmitter(IndentedWriter w, TypeCheckResult? types)
     {
         _w = w;
@@ -54,6 +63,19 @@ public sealed class CSharpEmitter
         => _types?.ExpressionTypes.TryGetValue(e.Span, out var t) == true
             ? t
             : UnknownType.Instance;
+
+    /// <summary>
+    /// Run <paramref name="action"/> with <see cref="_expectedType"/> temporarily set,
+    /// then restore the prior value. This is the basic plumbing for expected-type
+    /// propagation through nested expressions.
+    /// </summary>
+    private void WithExpected(TypeRef? expected, Action action)
+    {
+        var saved = _expectedType;
+        _expectedType = expected;
+        try { action(); }
+        finally { _expectedType = saved; }
+    }
 
     // ------------------------------------------------------------- module
 
@@ -185,9 +207,19 @@ public sealed class CSharpEmitter
         if (t.TypeParameters.Length > 0)
         {
             var typeParams = string.Join(", ", t.TypeParameters);
-            _w.Write($"public sealed record {t.Name}<{typeParams}>(");
-            EmitType(t.Target);
-            _w.WriteLine(" Inner);");
+            var innerType = CSharpTypeDisplay(LowerType(t.Target));
+
+            _w.WriteLine($"public sealed record {t.Name}<{typeParams}>({innerType} Inner)");
+            _w.WriteLine("{");
+            using (_w.Indent())
+            {
+                // Implicit conversion from the inner type into the wrapper so refinement
+                // aliases accept a bare value wherever they're required. The predicate
+                // would be enforced here once the type checker emits runtime assertions.
+                _w.WriteLine(
+                    $"public static implicit operator {t.Name}<{typeParams}>({innerType} inner) => new(inner);");
+            }
+            _w.WriteLine("}");
             return;
         }
 
@@ -209,10 +241,20 @@ public sealed class CSharpEmitter
             _w.Write("Unit");
         }
         _w.Write($" {EscapeId(fn.Name)}");
-        if (fn.TypeParameters.Length > 0)
+
+        // Drop type parameters that appear only in effect rows — C# has no analog for
+        // effect-row phantoms, and their presence as unconstrained type parameters
+        // breaks generic inference on callers. `fn apply<T, E>(f: fn(T) !{E} -> T, x: T)`
+        // emits as `apply<T>(...)`; E is inferred-out because it never reaches a value
+        // position.
+        var usedTypeParams = CollectUsedTypeParamNames(fn);
+        var emittedTypeParams = fn.TypeParameters
+            .Where(p => usedTypeParams.Contains(p))
+            .ToArray();
+        if (emittedTypeParams.Length > 0)
         {
             _w.Write("<");
-            _w.Write(string.Join(", ", fn.TypeParameters));
+            _w.Write(string.Join(", ", emittedTypeParams));
             _w.Write(">");
         }
         _w.Write("(");
@@ -225,6 +267,39 @@ public sealed class CSharpEmitter
         }
         _w.WriteLine(")");
         EmitBlockAsMethodBody(fn.Body, fn.ReturnType);
+    }
+
+    /// <summary>Type-parameter names that appear in the function's value-positions
+    /// (parameter types, return type) rather than only in effect rows.</summary>
+    private static HashSet<string> CollectUsedTypeParamNames(FunctionDecl fn)
+    {
+        var used = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in fn.Parameters)
+        {
+            CollectNamedTypes(p.Type, used);
+        }
+        if (fn.ReturnType is { } rt)
+        {
+            CollectNamedTypes(rt, used);
+        }
+        return used;
+    }
+
+    private static void CollectNamedTypes(TypeExpr type, HashSet<string> names)
+    {
+        switch (type)
+        {
+            case NamedType nt:
+                names.Add(nt.Name);
+                foreach (var arg in nt.TypeArguments) CollectNamedTypes(arg, names);
+                break;
+            case FunctionType ft:
+                foreach (var p in ft.Parameters) CollectNamedTypes(p, names);
+                CollectNamedTypes(ft.ReturnType, names);
+                // Deliberately does not descend into ft.Effects — effect names are
+                // tracked separately and don't count as value-position type uses.
+                break;
+        }
     }
 
     private void EmitExtern(ExternDecl x)
@@ -329,6 +404,7 @@ public sealed class CSharpEmitter
 
     private void EmitBlockAsMethodBody(BlockExpr block, TypeExpr? returnType)
     {
+        var declaredReturn = returnType is null ? null : LowerType(returnType);
         _w.WriteLine("{");
         using (_w.Indent())
         {
@@ -339,7 +415,7 @@ public sealed class CSharpEmitter
             if (block.TrailingExpression is { } tail)
             {
                 _w.Write("return ");
-                EmitExpression(tail);
+                WithExpected(declaredReturn, () => EmitExpression(tail));
                 _w.WriteLine(";");
             }
             else if (returnType is UnitType)
@@ -349,6 +425,31 @@ public sealed class CSharpEmitter
         }
         _w.WriteLine("}");
     }
+
+    /// <summary>
+    /// Best-effort syntactic type lowering for use in expected-type propagation. Full
+    /// lowering with generic-param scoping lives in <see cref="TypeChecker"/>; here we
+    /// only need to produce a <see cref="TypeRef"/> so calls can pick up the context's
+    /// concrete type. Treats every <c>NamedType</c> as a named type ref unless it's a
+    /// known primitive; doesn't distinguish type-variables from nominal types.
+    /// </summary>
+    private static TypeRef LowerType(TypeExpr type) => type switch
+    {
+        NamedType nt => nt.Name switch
+        {
+            "Int" => PrimitiveType.Int,
+            "Float" => PrimitiveType.Float,
+            "Bool" => PrimitiveType.Bool,
+            "String" => PrimitiveType.String,
+            _ => new NamedTypeRef(nt.Name, nt.TypeArguments.Select(LowerType).ToImmutableArray()),
+        },
+        UnitType => PrimitiveType.Unit,
+        FunctionType ft => new FunctionTypeRef(
+            ft.Parameters.Select(LowerType).ToImmutableArray(),
+            LowerType(ft.ReturnType),
+            ft.Effects is null ? ImmutableArray<string>.Empty : ft.Effects.Effects),
+        _ => UnknownType.Instance,
+    };
 
     private void EmitStatement(Statement stmt)
     {
@@ -540,8 +641,16 @@ public sealed class CSharpEmitter
                 break;
 
             case PropagateExpr pr:
+                // `expr?` expects `expr` to be a Result<T, E>. Its T is the current
+                // expected type; E is open. Thread a Result<currentExpected, _> into
+                // the operand so parallel/race placeholders and Ok/Err constructors
+                // inside see the right target shape.
+                var innerExpected = _expectedType is not null and not UnknownType
+                    ? new NamedTypeRef("Result",
+                        ImmutableArray.Create<TypeRef>(_expectedType, UnknownType.Instance))
+                    : (TypeRef?)null;
                 _w.Write("(");
-                EmitExpression(pr.Operand);
+                WithExpected(innerExpected, () => EmitExpression(pr.Operand));
                 _w.Write(").Unwrap()");
                 break;
 
@@ -608,24 +717,15 @@ public sealed class CSharpEmitter
                 break;
 
             case ParallelExpr pe:
-                // Emit a typed placeholder tuple so `let (a, b) = parallel { ... }`
-                // can destructure. Each task's type comes from the type checker; when
-                // unknown, fall back to `object?`.
-                _w.Write("/* TODO: parallel {...} */ (");
-                for (var i = 0; i < pe.Tasks.Length; i++)
-                {
-                    if (i > 0) _w.Write(", ");
-                    var taskType = TypeOf(pe.Tasks[i]);
-                    var cs = CSharpTypeDisplay(taskType);
-                    _w.Write($"default({cs})!");
-                }
-                _w.Write(")");
+                // parallel returns `Result<(T1, ..., Tn), E>` where each Ti is the
+                // Ok-type of the corresponding task and E is the shared error type
+                // (DESIGN.md §12). When the tasks type-check as Results, we can derive
+                // the exact Result shape; otherwise we fall back to object.
+                EmitParallelPlaceholder(pe);
                 break;
 
             case RaceExpr re:
-                _w.Write("/* TODO: race {...} */ default(");
-                _w.Write(re.Tasks.Length > 0 ? CSharpTypeDisplay(TypeOf(re.Tasks[0])) : "object");
-                _w.Write(")!");
+                EmitRacePlaceholder(re);
                 break;
 
             case UnsafeExpr ux:
@@ -646,20 +746,121 @@ public sealed class CSharpEmitter
 
     private void EmitCall(CallExpr c)
     {
+        // Special-case generic stdlib constructors that C# can't infer without args
+        // but whose type is decidable from the expected context: `List.empty()` →
+        // `List.empty<T>()`, `None()` → `None<T>()`.
+        if (TryEmitInferenceHelper(c)) return;
+
+        // For stdlib constructors like `Ok(x)` / `Err(e)` / `Some(x)`, the argument
+        // expected type comes from the expected Result / Option type.
+        var argExpectedTypes = ArgumentExpectedTypes(c);
+
         EmitExpression(c.Callee);
         _w.Write("(");
         for (var i = 0; i < c.Arguments.Length; i++)
         {
             if (i > 0) _w.Write(", ");
-            // Named-argument calls pass through to C# named-argument syntax.
             if (c.Arguments[i].Name is { } name)
             {
                 _w.Write(EscapeId(name));
                 _w.Write(": ");
             }
-            EmitExpression(c.Arguments[i].Value);
+            var expected = i < argExpectedTypes.Length ? argExpectedTypes[i] : null;
+            WithExpected(expected, () => EmitExpression(c.Arguments[i].Value));
         }
         _w.Write(")");
+    }
+
+    /// <summary>
+    /// Emit one of the small number of stdlib no-arg generic factories whose type
+    /// parameter comes purely from the expected-type context (not from any argument).
+    /// Returns true if emitted, false to fall through to the default call path.
+    /// </summary>
+    private bool TryEmitInferenceHelper(CallExpr c)
+    {
+        if (_expectedType is null) return false;
+
+        // `List.empty()` — callee shape is FieldAccess(Ident("List"), "empty").
+        if (c.Arguments.Length == 0
+            && c.Callee is FieldAccessExpr { FieldName: "empty" } faEmpty
+            && faEmpty.Target is IdentifierExpr { Name: "List" }
+            && _expectedType is NamedTypeRef { Name: "List", TypeArguments: { Length: 1 } emptyArgs })
+        {
+            _w.Write($"List.empty<{CSharpTypeDisplay(emptyArgs[0])}>()");
+            return true;
+        }
+
+        // `None()` — bare identifier, used as a call. Expected is `Option<T>`.
+        if (c.Arguments.Length == 0
+            && c.Callee is IdentifierExpr { Name: "None" }
+            && _expectedType is NamedTypeRef { Name: "Option", TypeArguments: { Length: 1 } noneArgs })
+        {
+            _w.Write($"None<{CSharpTypeDisplay(noneArgs[0])}>()");
+            return true;
+        }
+
+        // `Ok(x)` / `Err(e)` / `Some(x)` with a known expected Result / Option type.
+        // Emit with an explicit type parameter and cast the argument so the marker
+        // carries the exact inner type the caller wants — this both pins the generic
+        // inference and triggers any implicit conversions declared on the target type
+        // (e.g. the List<T> → NonEmpty<T> lift on wrapper records). The inner type
+        // is also threaded into the argument as its expected type so nested helpers
+        // like `List.empty()` still receive a concrete type parameter.
+        if (c.Arguments.Length == 1
+            && c.Callee is IdentifierExpr id
+            && _expectedType is NamedTypeRef nt)
+        {
+            var (ctor, argIndex) = (id.Name, nt.Name) switch
+            {
+                ("Ok", "Result") => ("Ok", 0),
+                ("Err", "Result") => ("Err", 1),
+                ("Some", "Option") => ("Some", 0),
+                _ => (null, -1),
+            };
+            if (ctor is not null && argIndex < nt.TypeArguments.Length)
+            {
+                var innerType = nt.TypeArguments[argIndex];
+                var innerCs = CSharpTypeDisplay(innerType);
+                _w.Write($"{ctor}<{innerCs}>(({innerCs})");
+                WithExpected(innerType, () => EmitExpression(c.Arguments[0].Value));
+                _w.Write(")");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compute the expected types for a call's arguments based on the callee. Only
+    /// stdlib constructors (Ok / Err / Some) get this treatment today; a richer
+    /// lookup using the callee's resolved FunctionTypeRef would generalize this.
+    /// </summary>
+    private ImmutableArray<TypeRef?> ArgumentExpectedTypes(CallExpr c)
+    {
+        // For `Ok(x)` / `Err(e)` / `Some(x)` whose expected type is the outer Result /
+        // Option, fill in the specific T from the expected's type arguments.
+        if (c.Callee is IdentifierExpr id
+            && _expectedType is NamedTypeRef nt)
+        {
+            (string callee, string nameMatch, int argIndex)[] mappings =
+            {
+                ("Ok", "Result", 0),
+                ("Err", "Result", 1),
+                ("Some", "Option", 0),
+            };
+            foreach (var (callee, name, argIndex) in mappings)
+            {
+                if (id.Name == callee && nt.Name == name
+                    && c.Arguments.Length == 1 && argIndex < nt.TypeArguments.Length)
+                {
+                    return ImmutableArray.Create<TypeRef?>(nt.TypeArguments[argIndex]);
+                }
+            }
+        }
+
+        // Default: no expected types — let child expressions propagate naturally.
+        return c.Arguments.Select(_ => (TypeRef?)null).ToImmutableArray();
     }
 
     private void EmitBinary(BinaryExpr be)
@@ -771,14 +972,16 @@ public sealed class CSharpEmitter
     {
         // C# has a ternary operator; we lower Overt's if-expression to a ternary when
         // both arms are expressions. If the else is absent, the else-value is Unit.Value.
+        // The ternary arms inherit the expected type of the enclosing expression.
+        var expected = _expectedType;
         _w.Write("((");
         EmitExpression(ie.Condition);
         _w.Write(") ? ");
-        EmitBlockAsExpression(ie.Then);
+        WithExpected(expected, () => EmitBlockAsExpression(ie.Then));
         _w.Write(" : ");
         if (ie.Else is { } elseBlock)
         {
-            EmitBlockAsExpression(elseBlock);
+            WithExpected(expected, () => EmitBlockAsExpression(elseBlock));
         }
         else
         {
@@ -790,6 +993,7 @@ public sealed class CSharpEmitter
     private void EmitMatch(MatchExpr me)
     {
         var scrutineeType = TypeOf(me.Scrutinee);
+        var expected = _expectedType;
         _w.Write("(");
         EmitExpression(me.Scrutinee);
         _w.WriteLine(" switch");
@@ -800,7 +1004,7 @@ public sealed class CSharpEmitter
             {
                 EmitPatternForMatch(arm.Pattern, scrutineeType);
                 _w.Write(" => ");
-                EmitExpression(arm.Body);
+                WithExpected(expected, () => EmitExpression(arm.Body));
                 _w.WriteLine(",");
             }
         }
@@ -927,8 +1131,10 @@ public sealed class CSharpEmitter
     }
 
     /// <summary>
-    /// Emit a block as an expression. Pure trailing-expression blocks inline directly.
-    /// Blocks with statements become immediately-invoked lambdas so the full body runs.
+    /// Emit a block as an expression. Pure trailing-expression blocks inline directly
+    /// and inherit the outer expected type; blocks with statements become
+    /// immediately-invoked lambdas so the full body runs. The lambda is typed to the
+    /// current <see cref="_expectedType"/> so the IIFE's result matches the consumer.
     /// </summary>
     private void EmitBlockAsExpression(BlockExpr block)
     {
@@ -938,7 +1144,11 @@ public sealed class CSharpEmitter
             return;
         }
 
-        _w.Write("((Func<object?>)(() => { ");
+        var expected = _expectedType;
+        var resultCSharp = expected is not null and not UnknownType
+            ? CSharpTypeDisplay(expected)
+            : "object?";
+        _w.Write($"((Func<{resultCSharp}>)(() => {{ ");
         foreach (var stmt in block.Statements)
         {
             EmitStatement(stmt);
@@ -946,7 +1156,7 @@ public sealed class CSharpEmitter
         if (block.TrailingExpression is { } tail)
         {
             _w.Write("return ");
-            EmitExpression(tail);
+            WithExpected(expected, () => EmitExpression(tail));
             _w.Write(";");
         }
         else
@@ -1024,6 +1234,70 @@ public sealed class CSharpEmitter
 
     private static bool IsPascalCase(string s)
         => s.Length > 0 && char.IsUpper(s[0]) && !s.Contains('_');
+
+    private void EmitParallelPlaceholder(ParallelExpr pe)
+    {
+        var (tupleCs, errorCs) = DeriveTaskGroupResultShape(pe.Tasks);
+        _w.Write($"/* TODO: parallel */ default(Result<{tupleCs}, {errorCs}>)!");
+    }
+
+    private void EmitRacePlaceholder(RaceExpr re)
+    {
+        // race's true return shape per DESIGN.md §12 is Result<T, RaceAllFailed<E>>,
+        // but the examples expect it to flow into a plain Result<T, E> context, which
+        // implies a built-in coercion the runtime hasn't modeled. For the
+        // untyped-compile-check pass, honor the expected context when we have one and
+        // fall back to the first task's type. The type checker will formalize race's
+        // real shape once error-chaining lands.
+        if (_expectedType is not null and not UnknownType)
+        {
+            _w.Write($"/* TODO: race */ default({CSharpTypeDisplay(_expectedType)})!");
+            return;
+        }
+        if (re.Tasks.Length > 0)
+        {
+            _w.Write($"/* TODO: race */ default({CSharpTypeDisplay(TypeOf(re.Tasks[0]))})!");
+            return;
+        }
+        _w.Write("/* TODO: race */ default(object?)!");
+    }
+
+    /// <summary>
+    /// Derive the Result&lt;tuple, E&gt; shape for a task-group block. Each task is
+    /// expected to be a Result; unpack its Ok-type to populate the tuple, and take the
+    /// error type from the first Result-typed task. Unknowns fall back to object.
+    /// </summary>
+    private (string TupleCs, string ErrorCs) DeriveTaskGroupResultShape(
+        ImmutableArray<Expression> tasks)
+    {
+        var okCSharp = new List<string>();
+        string errorCs = "object";
+        var sawError = false;
+        foreach (var task in tasks)
+        {
+            var taskType = TypeOf(task);
+            if (taskType is NamedTypeRef { Name: "Result", TypeArguments: { Length: 2 } args })
+            {
+                okCSharp.Add(CSharpTypeDisplay(args[0]));
+                if (!sawError)
+                {
+                    errorCs = CSharpTypeDisplay(args[1]);
+                    sawError = true;
+                }
+            }
+            else
+            {
+                okCSharp.Add(CSharpTypeDisplay(taskType));
+            }
+        }
+        var tupleCs = okCSharp.Count switch
+        {
+            0 => "()",
+            1 => okCSharp[0],
+            _ => $"({string.Join(", ", okCSharp)})",
+        };
+        return (tupleCs, errorCs);
+    }
 
     /// <summary>
     /// Render a <see cref="TypeRef"/> as C# source text. Parallels the compiler's

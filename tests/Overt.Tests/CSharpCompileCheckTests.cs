@@ -102,6 +102,11 @@ public class CSharpCompileCheckTests
     [InlineData("race.ov")]
     [InlineData("inference.ov")]
     [InlineData("ffi.ov")]
+    [InlineData("bst.ov")]
+    [InlineData("dashboard.ov")]
+    [InlineData("effects.ov")]
+    [InlineData("refinement.ov")]
+    [InlineData("trace.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);

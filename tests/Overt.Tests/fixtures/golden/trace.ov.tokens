@@ -259,12 +259,15 @@ Arrow(->) @ 51:41..51:43
 LeftParen(() @ 51:44..51:45
 RightParen()) @ 51:45..51:46
 LeftBrace({) @ 51:47..51:48
-Identifier(println) @ 52:5..52:12
-LeftParen(() @ 52:12..52:13
-StringHead("[trace] ) @ 52:13..52:22
-Dollar($) @ 52:22..52:23
-Identifier(event) @ 52:23..52:28
-StringTail(") @ 52:28..52:29
-RightParen()) @ 52:29..52:30
-RightBrace(}) @ 53:1..53:2
-EndOfFile() @ 54:1..54:1
+KeywordLet(let) @ 53:5..53:8
+Identifier(_) @ 53:9..53:10
+Equals(=) @ 53:11..53:12
+Identifier(println) @ 53:13..53:20
+LeftParen(() @ 53:20..53:21
+StringHead("[trace] ) @ 53:21..53:30
+Dollar($) @ 53:30..53:31
+Identifier(event) @ 53:31..53:36
+StringTail(") @ 53:36..53:37
+RightParen()) @ 53:37..53:38
+RightBrace(}) @ 54:1..54:2
+EndOfFile() @ 55:1..55:1

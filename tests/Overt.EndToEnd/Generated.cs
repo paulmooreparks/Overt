@@ -17,7 +17,7 @@ public static class Module
     public static Result<Unit, IoError> main()
     {
         (println("Hello, LLM!")).Unwrap();
-        return Ok(Unit.Value);
+        return Ok<Unit>((Unit)Unit.Value);
     }
 
 }
