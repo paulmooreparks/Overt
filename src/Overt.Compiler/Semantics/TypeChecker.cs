@@ -567,41 +567,38 @@ public sealed class TypeChecker
 
     /// <summary>
     /// DESIGN.md §8: exhaustive pattern matching is "the single most valuable check
-    /// in the system." When a match scrutinee is a user-declared enum, verify every
-    /// variant appears in some arm (or the match has a wildcard catch-all). Missing
-    /// variants fire OV0308 with the list of uncovered names — so agents adding a
-    /// variant get every existing match pinpointed as a todo.
+    /// in the system." When a match scrutinee is an enum-shaped type — user-declared
+    /// or a stdlib enum (<c>Option</c>, <c>Result</c>) — verify every variant appears
+    /// in some arm (or the match has a catch-all). Missing variants fire OV0308 with
+    /// the list of uncovered names so agents adding a variant get every existing
+    /// match pinpointed as a todo.
     ///
-    /// v0 limitations: only single-enum scrutinees (not tuples of enums, not
-    /// stdlib types like Result / Option until we model their variants here).
-    /// Bare-identifier patterns are treated as catch-all bindings; only dotted
-    /// paths (<c>Enum.Variant</c>) count as variant references.
+    /// v0 limitations: only single-enum scrutinees (tuples of enums would be a
+    /// cartesian-product walk, deferred). Arity on variant patterns is not checked
+    /// here — <c>Some(x, y)</c> still counts as covering <c>Some</c> even though Some
+    /// takes one arg.
     /// </summary>
     private void CheckMatchExhaustiveness(MatchExpr me, TypeRef scrutineeType)
     {
         if (scrutineeType is not NamedTypeRef nt) return;
 
-        var enumDecl = _module.Declarations
-            .OfType<EnumDecl>()
-            .FirstOrDefault(e => e.Name == nt.Name);
-        if (enumDecl is null) return;
+        var allVariants = GetEnumVariants(nt.Name);
+        if (allVariants is null) return;
 
-        var allVariants = new HashSet<string>(
-            enumDecl.Variants.Select(v => v.Name),
-            StringComparer.Ordinal);
         var covered = new HashSet<string>(StringComparer.Ordinal);
         var hasCatchAll = false;
 
         foreach (var arm in me.Arms)
         {
-            if (IsCatchAllPattern(arm.Pattern))
-            {
-                hasCatchAll = true;
-                continue;
-            }
-            if (TryGetVariantName(arm.Pattern, nt.Name) is { } variant)
+            var variant = TryGetVariantName(arm.Pattern, nt.Name, allVariants);
+            if (variant is not null)
             {
                 covered.Add(variant);
+                continue;
+            }
+            if (IsCatchAllPattern(arm.Pattern, allVariants))
+            {
+                hasCatchAll = true;
             }
         }
 
@@ -624,31 +621,79 @@ public sealed class TypeChecker
     }
 
     /// <summary>
-    /// Catch-all patterns match any scrutinee value: <c>_</c>, a bare identifier
-    /// (binds the whole value), or a tuple pattern containing only catch-alls.
-    /// For the exhaustiveness check, any of these means "this arm covers all
-    /// remaining variants."
+    /// Unified variant lookup. User-declared enums come from the module's AST;
+    /// stdlib enums (<c>Result</c>, <c>Option</c>) come from
+    /// <see cref="Stdlib.EnumVariants"/>. Returns null when <paramref name="enumName"/>
+    /// is not an enum-shaped type.
     /// </summary>
-    private static bool IsCatchAllPattern(Pattern p) => p switch
+    private HashSet<string>? GetEnumVariants(string enumName)
+    {
+        var userEnum = _module.Declarations
+            .OfType<EnumDecl>()
+            .FirstOrDefault(e => e.Name == enumName);
+        if (userEnum is not null)
+        {
+            return new HashSet<string>(
+                userEnum.Variants.Select(v => v.Name),
+                StringComparer.Ordinal);
+        }
+        if (Stdlib.EnumVariants.TryGetValue(enumName, out var stdlibVariants))
+        {
+            return new HashSet<string>(stdlibVariants, StringComparer.Ordinal);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Catch-all patterns match any scrutinee value: <c>_</c>, a bare identifier
+    /// that doesn't match a variant of this enum (plain binding), or a tuple of
+    /// catch-alls. A bare identifier that DOES match a variant name (e.g. <c>None</c>
+    /// on an Option scrutinee) is a variant reference, not a catch-all.
+    /// </summary>
+    private static bool IsCatchAllPattern(Pattern p, HashSet<string> variants) => p switch
     {
         WildcardPattern => true,
-        IdentifierPattern => true,
-        TuplePattern tp => tp.Elements.All(IsCatchAllPattern),
+        IdentifierPattern ip => !variants.Contains(ip.Name),
+        TuplePattern tp => tp.Elements.All(e => IsCatchAllPattern(e, variants)),
         _ => false,
     };
 
     /// <summary>
-    /// Extract the variant name if the pattern is a dotted reference to a variant
-    /// of <paramref name="enumName"/>. Returns null for unrelated paths or non-
-    /// qualified patterns.
+    /// Extract the variant name if the pattern references one of <paramref name="variants"/>.
+    /// Accepts both qualified paths (<c>Enum.Variant</c> for user enums) and bare
+    /// names (<c>Some</c>, <c>None</c>, <c>Ok</c>, <c>Err</c> for stdlib enums). The
+    /// qualified form is matched only against the specific enum name; the bare form
+    /// matches if the identifier is any variant of the scrutinee's enum.
     /// </summary>
-    private static string? TryGetVariantName(Pattern p, string enumName) => p switch
+    private static string? TryGetVariantName(Pattern p, string enumName, HashSet<string> variants)
     {
-        PathPattern pp when pp.Path.Length == 2 && pp.Path[0] == enumName => pp.Path[1],
-        ConstructorPattern cp when cp.Path.Length == 2 && cp.Path[0] == enumName => cp.Path[1],
-        RecordPattern rp when rp.Path.Length == 2 && rp.Path[0] == enumName => rp.Path[1],
-        _ => null,
-    };
+        switch (p)
+        {
+            // Two-segment qualified paths: Enum.Variant / Enum.Variant(...) / Enum.Variant { ... }
+            case PathPattern pp when pp.Path.Length == 2
+                && pp.Path[0] == enumName && variants.Contains(pp.Path[1]):
+                return pp.Path[1];
+            case ConstructorPattern cp when cp.Path.Length == 2
+                && cp.Path[0] == enumName && variants.Contains(cp.Path[1]):
+                return cp.Path[1];
+            case RecordPattern rp when rp.Path.Length == 2
+                && rp.Path[0] == enumName && variants.Contains(rp.Path[1]):
+                return rp.Path[1];
+
+            // Single-segment bare variant references: Some(x) / None / Ok(x) / Err(e).
+            case IdentifierPattern ip when variants.Contains(ip.Name):
+                return ip.Name;
+            case PathPattern pp when pp.Path.Length == 1 && variants.Contains(pp.Path[0]):
+                return pp.Path[0];
+            case ConstructorPattern cp when cp.Path.Length == 1 && variants.Contains(cp.Path[0]):
+                return cp.Path[0];
+            case RecordPattern rp when rp.Path.Length == 1 && variants.Contains(rp.Path[0]):
+                return rp.Path[0];
+
+            default:
+                return null;
+        }
+    }
 
     private TypeRef InferWhile(WhileExpr we)
     {

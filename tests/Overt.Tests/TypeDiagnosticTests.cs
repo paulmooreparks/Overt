@@ -310,6 +310,77 @@ public class TypeDiagnosticTests
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
     }
 
+    // ------------------------------- OV0308 on stdlib enums (Option, Result)
+
+    [Fact]
+    public void OV0308_Option_MissingNone_Fires()
+    {
+        var r = Check(
+            "module t\nfn f(o: Option<Int>) -> Int { match o { Some(x) => x } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`Option.None`", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_Option_MissingSome_Fires()
+    {
+        var r = Check(
+            "module t\nfn f(o: Option<Int>) -> Int { match o { None => 0 } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`Option.Some`", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_Option_BothArms_NoDiagnostic()
+    {
+        var r = Check(
+            "module t\nfn f(o: Option<Int>) -> Int "
+            + "{ match o { Some(x) => x, None => 0 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_Result_MissingErr_Fires()
+    {
+        var r = Check(
+            "module t\nfn f(r: Result<Int, String>) -> Int { match r { Ok(x) => x } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`Result.Err`", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_Result_BothArms_NoDiagnostic()
+    {
+        var r = Check(
+            "module t\nfn f(r: Result<Int, String>) -> Int "
+            + "{ match r { Ok(x) => x, Err(e) => 0 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_Result_WildcardArm_SuppressesDiagnostic()
+    {
+        var r = Check(
+            "module t\nfn f(r: Result<Int, String>) -> Int "
+            + "{ match r { Ok(x) => x, _ => 99 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_Option_NoneIsVariantNotBinding()
+    {
+        // Critical: `None` as a match arm pattern is a VARIANT REFERENCE on an
+        // Option scrutinee, not a catch-all binding. If we got this wrong, adding
+        // `None => ...` to an incomplete Option match would spuriously silence
+        // the diagnostic for missing Some.
+        var r = Check(
+            "module t\nfn f(o: Option<Int>) -> Int { match o { None => 0 } }");
+        // Should fire because Some is missing — proving None didn't act as a
+        // catch-all.
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`Option.Some`", d.Message);
+    }
+
     // ---------------------------------------------- smoke: examples stay clean
 
     [Theory]

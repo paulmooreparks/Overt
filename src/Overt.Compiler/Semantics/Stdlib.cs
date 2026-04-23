@@ -35,6 +35,24 @@ public static class Stdlib
     public static ImmutableDictionary<Symbol, TypeRef> Types { get; } =
         Entries.ToImmutableDictionary(e => e.Symbol, e => e.Type);
 
+    /// <summary>
+    /// Variant names for stdlib enum-shaped types. Consumed by the match-exhaustiveness
+    /// check so <c>match opt { Some(x) =&gt; ..., None =&gt; ... }</c> and
+    /// <c>match r { Ok(x) =&gt; ..., Err(e) =&gt; ... }</c> get the same treatment as
+    /// user-declared enums — the compiler flags any missing arm.
+    ///
+    /// Each entry's variants are listed in declaration order; the exhaustiveness
+    /// reporter sorts alphabetically at diagnostic time for deterministic output.
+    /// Arities are not recorded here — a future arity/pattern-shape check can consume
+    /// them from the factory signatures in <see cref="Symbols"/> if needed.
+    /// </summary>
+    public static ImmutableDictionary<string, ImmutableArray<string>> EnumVariants { get; }
+        = new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal)
+        {
+            ["Result"] = ImmutableArray.Create("Ok", "Err"),
+            ["Option"] = ImmutableArray.Create("Some", "None"),
+        }.ToImmutableDictionary();
+
     private static List<(Symbol, TypeRef)> BuildEntries()
     {
         var e = new List<(Symbol, TypeRef)>();
