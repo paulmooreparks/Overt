@@ -481,9 +481,9 @@ fn strlen(s: String) -> Int {
 
 **If you try these, you will get an error or a runtime failure. Don't.**
 
-- **`--emit=<stage>` on a file with `use` declarations.** Those one-off
-  emit modes only resolve the single file. Imports won't bind and you'll
-  see OV0200 / OV0168. Use `overt run` for multi-module programs.
+- **`overt fmt` is still single-file.** It will format a file that has
+  `use` declarations locally but won't touch the imported modules. For
+  multi-file work, run `overt fmt` per file.
 - **FFI calls at runtime.** `extern` compiles; invocation throws.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
 - **`?` nested deep inside a call argument within an if/match arm used as a value.**

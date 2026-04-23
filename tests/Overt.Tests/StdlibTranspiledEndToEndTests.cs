@@ -99,6 +99,153 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_MultiModule_AliasedImportCallsThroughAlias()
+    {
+        // Verifies the aliased form: `use helper as h; h.triple(7)`. End-to-end
+        // run must produce `h=21` via the C# `using Alias = ...Module;` shape.
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-alias-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "helper.ov"), """
+                module helper
+
+                fn triple(x: Int) -> Int { x * 3 }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use helper as h
+
+                fn main() !{io} -> Result<(), IoError> {
+                    let n: Int = h.triple(7)
+                    println("h=${n}")?
+                    Ok(())
+                }
+                """);
+            var (result, stdout) = CompileAndRunGraph(Path.Combine(tmp, "entry.ov"));
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Contains("h=21", stdout);
+        }
+        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public void Transpiled_MultiModule_DottedPathWalksDirectories()
+    {
+        // stdlib/http/client.ov declares `module stdlib.http.client`;
+        // app.ov does `use stdlib.http.client.{greet}`.
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-dotted-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(Path.Combine(tmp, "stdlib", "http"));
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "stdlib", "http", "client.ov"), """
+                module stdlib.http.client
+
+                fn greet(name: String) -> String { name }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use stdlib.http.client.{greet}
+
+                fn main() !{io} -> Result<(), IoError> {
+                    let g: String = greet("ada")
+                    println(g)?
+                    Ok(())
+                }
+                """);
+            var (result, stdout) = CompileAndRunGraph(Path.Combine(tmp, "entry.ov"));
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Contains("ada", stdout);
+        }
+        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+    }
+
+    /// <summary>Compile-and-run a multi-module program rooted at
+    /// <paramref name="entryPath"/>. Mirrors the CLI's `overt run` pipeline:
+    /// ModuleGraph → per-module resolve/check with imports threaded → all
+    /// trees into one Roslyn compilation → invoke entry's Module.main.</summary>
+    private static (object? Result, string Stdout) CompileAndRunGraph(string entryPath)
+    {
+        var graph = Overt.Compiler.Modules.ModuleGraph.Resolve(
+            entryPath, ImmutableArray<string>.Empty);
+        Assert.Empty(graph.Diagnostics);
+
+        var exportedSymbols = new Dictionary<string, ImmutableDictionary<string, Overt.Compiler.Semantics.Symbol>>(
+            StringComparer.Ordinal);
+        var symbolTypesByModule = new Dictionary<string, ImmutableDictionary<Overt.Compiler.Semantics.Symbol, Overt.Compiler.Semantics.TypeRef>>(
+            StringComparer.Ordinal);
+        var trees = new List<SyntaxTree>();
+        string? entryModuleName = null;
+
+        foreach (var mod in graph.Modules)
+        {
+            var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
+            var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(mod.Ast, importable);
+            Assert.Empty(resolved.Diagnostics);
+            var importedTypes = CollectImportedTypes(mod.Ast, exportedSymbols, symbolTypesByModule);
+            var typed = Overt.Compiler.Semantics.TypeChecker.Check(mod.Ast, resolved, importedTypes);
+            Assert.Empty(typed.Diagnostics);
+
+            var cs = CSharpEmitter.Emit(mod.Ast, typed, mod.SourcePath);
+            trees.Add(CSharpSyntaxTree.ParseText(cs,
+                new CSharpParseOptions(LanguageVersion.Latest)));
+
+            var exports = ImmutableDictionary.CreateBuilder<string, Overt.Compiler.Semantics.Symbol>(
+                StringComparer.Ordinal);
+            foreach (var fn in mod.Ast.Declarations.OfType<FunctionDecl>())
+                exports[fn.Name] = new Overt.Compiler.Semantics.Symbol(
+                    Overt.Compiler.Semantics.SymbolKind.Function, fn.Name, fn.Span, fn);
+            exportedSymbols[mod.Name] = exports.ToImmutable();
+            symbolTypesByModule[mod.Name] = typed.SymbolTypes;
+            entryModuleName = mod.Name; // last in topological order
+        }
+
+        var compilation = CSharpCompilation.Create(
+            "graph_e2e",
+            syntaxTrees: trees,
+            references: References,
+            options: new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+        using var ms = new MemoryStream();
+        var emit = compilation.Emit(ms);
+        if (!emit.Success)
+        {
+            var errs = string.Join("\n", emit.Diagnostics
+                .Where(d => d.Severity == DiagnosticSeverity.Error)
+                .Select(d => "  " + d.GetMessage()));
+            throw new Xunit.Sdk.XunitException("Emitted C# failed to compile:\n" + errs);
+        }
+        ms.Position = 0;
+        var loaded = Assembly.Load(ms.ToArray());
+
+        var entryNamespace = "Overt.Generated."
+            + string.Join(".", entryModuleName!.Split('.')
+                .Select(s => char.ToUpperInvariant(s[0]) + s[1..]));
+        var moduleType = loaded.GetTypes()
+            .First(t => t.Name == "Module" && t.Namespace == entryNamespace);
+        var main = moduleType.GetMethod("main", BindingFlags.Public | BindingFlags.Static)!;
+
+        using var sw = new StringWriter();
+        var prev = Console.Out;
+        Console.SetOut(sw);
+        try
+        {
+            var result = main.Invoke(null, null);
+            return (result, sw.ToString());
+        }
+        finally { Console.SetOut(prev); }
+    }
+
+    [Fact]
     public void Transpiled_MultiModule_UsesImportedFunction()
     {
         // Two-file program: main.ov imports a function from helper.ov.

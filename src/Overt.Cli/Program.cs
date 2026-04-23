@@ -148,10 +148,13 @@ static class Cli
 
     static int EmitTyped(string source, string inputFile)
     {
-        var lex = Lexer.Lex(source);
-        var parse = Parser.Parse(lex.Tokens);
-        var resolved = NameResolver.Resolve(parse.Module);
-        var typed = TypeChecker.Check(parse.Module, resolved);
+        // Multi-module-aware: resolve the graph so imports type-check, then
+        // emit the entry module's type annotations. Other modules' types are
+        // available via the shared pipeline but aren't printed here — users
+        // running `--emit=typed` want to inspect the file they named.
+        var compiled = CompileGraph(inputFile);
+        var entry = compiled.Modules[^1];
+        var typed = compiled.TypeChecks[entry.Name];
 
         foreach (var (sym, type) in typed.SymbolTypes
             .OrderBy(kv => kv.Key.DeclarationSpan.Start.Line)
@@ -167,11 +170,7 @@ static class Cli
             Console.Out.WriteLine($"{span.Start} expr : {type.Display}");
         }
 
-        var combined = lex.Diagnostics
-            .AddRange(parse.Diagnostics)
-            .AddRange(resolved.Diagnostics)
-            .AddRange(typed.Diagnostics);
-        return WriteDiagnostics(inputFile, combined);
+        return WriteDiagnostics(inputFile, compiled.Diagnostics);
     }
 
     // `overt run <file.ov>` — transpile, compile the resulting C# in-memory
@@ -357,6 +356,50 @@ static class Cli
         var err = errProp?.GetValue(result);
         Console.Error.WriteLine($"overt run: main returned Err: {err}");
         return 1;
+    }
+
+    // -------------------------------------------- compile-through-graph
+
+    public sealed record CompiledGraph(
+        ImmutableArray<ModuleGraph.LoadedModule> Modules,
+        Dictionary<string, ResolutionResult> Resolutions,
+        Dictionary<string, TypeCheckResult> TypeChecks,
+        ImmutableArray<Diagnostic> Diagnostics);
+
+    /// <summary>Shared compilation pipeline that both `run` and the stage-emit
+    /// modes (`--emit=csharp` / `--emit=typed` / etc.) call into. Resolves the
+    /// module graph, topologically resolves + type-checks each module, and
+    /// returns everything needed to emit any stage of output.
+    /// </summary>
+    public static CompiledGraph CompileGraph(string entryFile)
+    {
+        var graph = ModuleGraph.Resolve(entryFile, ImmutableArray<string>.Empty);
+        var allDiagnostics = graph.Diagnostics;
+
+        var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
+        var moduleTypes = new Dictionary<string, TypeCheckResult>(StringComparer.Ordinal);
+        var exportedSymbols = new Dictionary<string, ImmutableDictionary<string, Symbol>>(
+            StringComparer.Ordinal);
+        var symbolTypesByModule = new Dictionary<string, ImmutableDictionary<Symbol, TypeRef>>(
+            StringComparer.Ordinal);
+
+        foreach (var mod in graph.Modules)
+        {
+            var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
+            var resolved = NameResolver.Resolve(mod.Ast, importable);
+            allDiagnostics = allDiagnostics.AddRange(resolved.Diagnostics);
+            moduleResolutions[mod.Name] = resolved;
+
+            var importedTypes = CollectImportedSymbolTypes(mod.Ast, exportedSymbols, symbolTypesByModule);
+            var typed = TypeChecker.Check(mod.Ast, resolved, importedTypes);
+            allDiagnostics = allDiagnostics.AddRange(typed.Diagnostics);
+            moduleTypes[mod.Name] = typed;
+
+            exportedSymbols[mod.Name] = CollectTopLevelExports(mod.Ast);
+            symbolTypesByModule[mod.Name] = typed.SymbolTypes;
+        }
+
+        return new CompiledGraph(graph.Modules, moduleResolutions, moduleTypes, allDiagnostics);
     }
 
     // ------------------------------------------- multi-module helpers (run)
@@ -551,22 +594,20 @@ static class Cli
 
     static int EmitCSharp(string source, string inputFile)
     {
-        var lex = Lexer.Lex(source);
-        var parse = Parser.Parse(lex.Tokens);
-        var resolved = NameResolver.Resolve(parse.Module);
-        var typed = TypeChecker.Check(parse.Module, resolved);
+        // Use the shared multi-module pipeline so that if this file has `use`
+        // declarations, its imports are resolved and type-checked before
+        // emitting. Only the entry module's C# is printed — the consumer of
+        // `--emit=csharp` wants to inspect the main file, and downstream
+        // modules live in parallel files anyway.
+        var compiled = CompileGraph(inputFile);
+        var entry = compiled.Modules[^1]; // topologically last = the entry file
+        var typed = compiled.TypeChecks[entry.Name];
 
-        // Source path flows into #line directives so PDBs map runtime errors back to
-        // the .ov file, not the generated .cs. The absolute path is resolved so PDB
-        // entries survive the build being invoked from anywhere.
         var sourcePath = Path.GetFullPath(inputFile);
-        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath);
+        var csharp = CSharpEmitter.Emit(entry.Ast, typed, sourcePath);
         Console.Out.Write(csharp);
 
-        var combined = lex.Diagnostics
-            .AddRange(parse.Diagnostics)
-            .AddRange(resolved.Diagnostics)
-            .AddRange(typed.Diagnostics);
+        var combined = compiled.Diagnostics;
         return WriteDiagnostics(inputFile, combined);
     }
 
@@ -593,12 +634,12 @@ static class Cli
 
     static int EmitResolved(string source, string inputFile)
     {
-        var lex = Lexer.Lex(source);
-        var parse = Parser.Parse(lex.Tokens);
-        var resolved = NameResolver.Resolve(parse.Module);
+        // Multi-module-aware: the resolver gets its imports threaded through
+        // so cross-module references resolve in the printout.
+        var compiled = CompileGraph(inputFile);
+        var entry = compiled.Modules[^1];
+        var resolved = compiled.Resolutions[entry.Name];
 
-        // Print a flat summary of resolutions: one line per resolved reference, in
-        // source order. Deterministic and diff-friendly.
         foreach (var (span, sym) in resolved.Resolutions
             .OrderBy(kv => kv.Key.Start.Line)
             .ThenBy(kv => kv.Key.Start.Column))
@@ -606,10 +647,7 @@ static class Cli
             Console.Out.WriteLine($"{span.Start} -> {sym.Kind} {sym.Name} @ {sym.DeclarationSpan.Start}");
         }
 
-        var combined = lex.Diagnostics
-            .AddRange(parse.Diagnostics)
-            .AddRange(resolved.Diagnostics);
-        return WriteDiagnostics(inputFile, combined);
+        return WriteDiagnostics(inputFile, compiled.Diagnostics);
     }
 
     static int NotYetImplemented(string stage)

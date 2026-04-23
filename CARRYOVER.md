@@ -43,7 +43,7 @@ Grammar specs (authoritative for the parser/lexer):
 
 The frontend works end-to-end on C# with real semantic enforcement. **Every example in [`examples/`](examples/) transpiles into C# that compiles cleanly via Roslyn**, pinned by a test for every example. The transpiled `examples/hello.ov` actually runs and prints "Hello, LLM!" — verified by the [`tests/Overt.EndToEnd`](tests/Overt.EndToEnd) harness.
 
-What exists today, pinned by 349 passing tests:
+What exists today, pinned by 351 passing tests:
 
 - **Lexer** (mode-stack, full interpolation, token-stream goldens for every example).
 - **Parser** (recursive descent, full precedence grammar, all 12 examples parse cleanly).
@@ -88,8 +88,7 @@ What's notably absent, ordered by impact on "can I write real code in this":
 
 Ordered by "how directly this unblocks someone writing real Overt code":
 
-1. **Single-file emit paths pick up imports** (½ session). `--emit=csharp`, `fmt`, `--emit=typed`, etc. still single-file. Wire ModuleGraph through the emit path so they work on multi-module programs too.
-2. **`use` in ambient stdlib / blessed facades** (1 session). With dotted paths working, create a `stdlib/` directory in the repo with pre-generated facades for commonly-used BCL types (`stdlib/system_io/file.ov`, `stdlib/system_io/path.ov`, etc.). A `--facade-dir` CLI flag (or auto-discovery next to the compiler binary) points at it so `use stdlib.system_io.file.{read_all_text}` just works.
+1. **`use` in ambient stdlib / blessed facades** (1 session). Create a `stdlib/` directory in the repo with pre-generated facades for commonly-used BCL types (`stdlib/system_io/file.ov`, `stdlib/system_io/path.ov`, etc.). A `--facade-dir` CLI flag (or auto-discovery next to the compiler binary) points at it so `use stdlib.system_io.file.{read_all_text}` just works out of the box.
 3. **Extern grammar extensions** (1 session). Today extern handles static methods. For BCL we also need: instance methods (with a `self` parameter convention), constructors (binds to `..ctor`), properties (zero-arg binds to a static or instance property getter). The binding runtime already handles static-method-shaped bindings — the changes are in the parser and emitter.
 4. **MSBuild integration** (1–2 sessions). Lets a `.csproj` with `<OvertCompile Include="*.ov"/>` transpile, reference Overt.Runtime, and link against NuGet.
 5. **Conditional-context `?` — remaining deep-nesting case** (½ session). Stmt-level lowering is now in for `let x: T = if cond { foo()? } else { bar }` and match equivalents. Still falls back to `.Unwrap()` when `?` is buried deep inside a call argument within an if/match arm (e.g., `foo(if cond { bar()? } else { baz })`). Fix: extend `NeedsStmtLowering` detection to walk into call arguments, or transform such cases to lift the `?` into a prior let. Low practical urgency — the common shape now works.
