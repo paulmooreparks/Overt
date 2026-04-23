@@ -1,0 +1,102 @@
+module arith_eval
+
+// A tiny arithmetic-expression evaluator — the canonical demo for why Overt's
+// shape pays off. An interpreter is where bugs usually hide in invisible
+// control flow: unchecked nulls, thrown exceptions, partially-handled cases.
+// In Overt every one of those is overt at the call site:
+//
+//   - the AST is a closed enum — every variant must be handled or `match` fails
+//     to compile (OV0308);
+//   - every fallible step returns `Result<Int, EvalError>` and uses `?` — no
+//     exception unwinding anywhere in the evaluator;
+//   - the evaluator is a pure function (no effect row); only `main` carries
+//     `!{io}` for the print at the end.
+
+// ----------------------------------------------------------- AST
+
+enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+enum Expr {
+    Lit { value: Int },
+    Bin { op: BinOp, left: Expr, right: Expr },
+    Neg { operand: Expr },
+}
+
+// ----------------------------------------------------------- errors
+
+@derive(Debug)
+enum EvalError {
+    DivByZero,
+}
+
+// ----------------------------------------------------------- evaluator
+
+// Pure — no effect row. Every failure is a Result variant; exhaustiveness on
+// `Expr` is enforced at compile time.
+fn eval(expr: Expr) -> Result<Int, EvalError> {
+    match expr {
+        Expr.Lit { value = v } => Ok(v),
+        Expr.Neg { operand = inner } => {
+            let v: Int = eval(inner)?
+            Ok(-v)
+        }
+        Expr.Bin { op = op, left = l, right = r } => {
+            let lv: Int = eval(l)?
+            let rv: Int = eval(r)?
+            apply(op = op, left = lv, right = rv)
+        }
+    }
+}
+
+// Op dispatch. Exhaustive match on `BinOp` so adding a variant forces every
+// dispatcher to acknowledge it.
+fn apply(op: BinOp, left: Int, right: Int) -> Result<Int, EvalError> {
+    match op {
+        BinOp.Add => Ok(left + right),
+        BinOp.Sub => Ok(left - right),
+        BinOp.Mul => Ok(left * right),
+        BinOp.Div => {
+            if right == 0 {
+                Err(EvalError.DivByZero)
+            } else {
+                Ok(left / right)
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------- driver
+
+// Builds `(3 + 4) * -(2 - 5)` — evaluates to 21 — and prints the result, or the
+// evaluator's error if something went wrong. Hard-coded because the source-
+// level parser isn't part of the demo (yet); the point here is the semantics,
+// not the lexing.
+fn main() !{io} -> Result<(), IoError> {
+    let program: Expr =
+        Expr.Bin {
+            op    = BinOp.Mul,
+            left  = Expr.Bin {
+                op    = BinOp.Add,
+                left  = Expr.Lit { value = 3 },
+                right = Expr.Lit { value = 4 },
+            },
+            right = Expr.Neg {
+                operand = Expr.Bin {
+                    op    = BinOp.Sub,
+                    left  = Expr.Lit { value = 2 },
+                    right = Expr.Lit { value = 5 },
+                },
+            },
+        }
+
+    match eval(program) {
+        Ok(n)  => println("= ${n}")?,
+        Err(_) => println("evaluation failed")?,
+    }
+    Ok(())
+}

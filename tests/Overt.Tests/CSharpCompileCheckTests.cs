@@ -107,6 +107,7 @@ public class CSharpCompileCheckTests
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
     [InlineData("trace.ov")]
+    [InlineData("arith_eval.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);

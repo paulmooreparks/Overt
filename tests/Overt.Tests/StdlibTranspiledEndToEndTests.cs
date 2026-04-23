@@ -142,6 +142,20 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ArithEvalDemo_RunsAndPrints()
+    {
+        // The arithmetic evaluator demo — an interpreter in ~50 lines of Overt.
+        // Hardcoded program evaluates to 21; success path must print "= 21".
+        var ovSource = File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "examples", "arith_eval.ov"));
+        var (result, stdout) = CompileAndRun(ovSource, "arith_eval_demo");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("= 21", stdout);
+    }
+
+    [Fact]
     public void Transpiled_QuestionMark_PropagatesErrAsValue()
     {
         // Direct `?` on a Result-returning function: if the callee returns Err,
