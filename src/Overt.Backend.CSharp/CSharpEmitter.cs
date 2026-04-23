@@ -176,18 +176,27 @@ public sealed class CSharpEmitter
         _w.WriteLine("using Overt.Runtime;");
         _w.WriteLine("using static Overt.Runtime.Prelude;");
 
-        // For each imported module, add a `using static` so the imported
-        // functions/externs are reachable unqualified — the resolver has
-        // already put the symbols in scope at the Overt level; the emitter
-        // just needs the C# side of that to work out.
+        // For each imported module, emit the appropriate C# `using`:
+        //   - Selective: `using static Overt.Generated.Path.Module;`
+        //     brings the module's static methods into scope unqualified.
+        //   - Aliased: `using Alias = Overt.Generated.Path.Module;`
+        //     so that Overt-side `alias.fn(...)` lowers to C# `Alias.fn(...)`
+        //     without any special-casing in the expression emitter.
         foreach (var use in module.Declarations.OfType<UseDecl>())
         {
-            _w.WriteLine(
-                $"using static Overt.Generated.{PascalCase(use.ModuleName)}.Module;");
+            var csharpPath = ModulePathToCSharp(use.ModulePath);
+            if (use.Alias is { } alias)
+            {
+                _w.WriteLine($"using {alias} = Overt.Generated.{csharpPath}.Module;");
+            }
+            else
+            {
+                _w.WriteLine($"using static Overt.Generated.{csharpPath}.Module;");
+            }
         }
 
         _w.WriteLine();
-        _w.WriteLine($"namespace Overt.Generated.{PascalCase(module.Name)};");
+        _w.WriteLine($"namespace Overt.Generated.{ModuleNameToCSharp(module.Name)};");
         _w.WriteLine();
 
         // Type aliases emit as file-scoped using-directives at the top. C# requires them
@@ -1962,6 +1971,18 @@ public sealed class CSharpEmitter
         return string.Concat(parts.Select(p =>
             p.Length == 0 ? p : char.ToUpperInvariant(p[0]) + p[1..]));
     }
+
+    /// <summary>Render a dotted Overt module path as a C# dotted namespace —
+    /// <c>["stdlib", "http"]</c> becomes <c>Stdlib.Http</c>, matching the
+    /// <c>namespace Overt.Generated.&lt;path&gt;</c> form each imported module
+    /// emits.</summary>
+    private static string ModulePathToCSharp(ImmutableArray<string> path)
+        => string.Join(".", path.Select(PascalCase));
+
+    /// <summary>Render an Overt module name (dot-joined) as a C# dotted
+    /// namespace. Strings with no dots behave like <see cref="PascalCase"/>.</summary>
+    private static string ModuleNameToCSharp(string name)
+        => string.Join(".", name.Split('.').Select(PascalCase));
 
     private static bool IsLikelyEnumVariantRef(FieldAccessExpr fa)
         => fa.Target is IdentifierExpr id

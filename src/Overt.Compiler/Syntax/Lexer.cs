@@ -32,6 +32,7 @@ public sealed class Lexer
             ["continue"] = TokenKind.KeywordContinue,
             ["return"] = TokenKind.KeywordReturn,
             ["use"] = TokenKind.KeywordUse,
+            ["as"] = TokenKind.KeywordAs,
             ["module"] = TokenKind.KeywordModule,
             ["pub"] = TokenKind.KeywordPub,
             ["parallel"] = TokenKind.KeywordParallel,

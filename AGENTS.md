@@ -44,18 +44,23 @@ overt --emit=csharp hello.ov    # dumps the transpiled C# to stdout
 
 ## 2. Modules and declarations
 
-A module is one `.ov` file. Cross-file imports work via `use`:
+A module is one `.ov` file. Cross-file imports come in two shapes:
 
 ```overt
+// Selective — imported names are in scope unqualified.
 use pathutil.{path_combine}
+
+// Aliased — module's symbols accessed via `alias.name`.
+use stdlib.http.client as http
 ```
 
-- Modules are looked up by filename in the entry file's directory (and any
-  `--facade-dir` on the command line — future work).
-- Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want.
-- `use x.{a}` brings `a` into the current module's scope, unqualified.
-- Dotted paths (`use stdlib.http.client`) and aliases (`use x as y`) are
-  future work; v1 is single-segment selective imports only.
+- Module names can be dotted; segments map to directories. `use stdlib.http.client`
+  resolves to `stdlib/http/client.ov` relative to the entry file's directory.
+- The `.ov` file's own `module` declaration must match the import name:
+  `stdlib/http/client.ov` declares `module stdlib.http.client`.
+- Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want
+  (selective form) or alias the module (`as`).
+- Selective + alias together isn't supported — pick one.
 - `overt run` resolves the full module graph. Other emit modes
   (`--emit=csharp`, etc.) operate on a single file only and will fail on
   files with `use` declarations.
@@ -476,9 +481,6 @@ fn strlen(s: String) -> Int {
 
 **If you try these, you will get an error or a runtime failure. Don't.**
 
-- **Dotted module paths and aliasing.** `use stdlib.http.client` (directory-walking)
-  and `use stdlib.http as http` (aliasing) are future work. v1 accepts only
-  single-segment selective imports: `use mymodule.{fn1, fn2}`.
 - **`--emit=<stage>` on a file with `use` declarations.** Those one-off
   emit modes only resolve the single file. Imports won't bind and you'll
   see OV0200 / OV0168. Use `overt run` for multi-module programs.

@@ -99,7 +99,7 @@ public static class ModuleGraph
             // so our dependencies sit earlier in the topological order.
             foreach (var decl in parse.Module.Declarations.OfType<UseDecl>())
             {
-                var resolvedPath = ResolveModulePath(decl.ModuleName, effectiveDirs);
+                var resolvedPath = ResolveModulePath(decl.ModulePath, effectiveDirs);
                 if (resolvedPath is null)
                 {
                     diagnostics.Add(new Diagnostic(
@@ -109,8 +109,8 @@ public static class ModuleGraph
                         decl.Span,
                         ImmutableArray.Create(new DiagnosticNote(
                             DiagnosticNoteKind.Help,
-                            "place " + decl.ModuleName + ".ov beside the importing file "
-                                + "or add its directory to the search path",
+                            "expected " + ModulePathToFile(decl.ModulePath)
+                                + " beside the importing file or in a search-path directory",
                             null))));
                     continue;
                 }
@@ -130,14 +130,28 @@ public static class ModuleGraph
         }
     }
 
-    private static string? ResolveModulePath(string moduleName, ImmutableArray<string> searchDirs)
+    /// <summary>Locate the .ov file that corresponds to the dotted path. A
+    /// path <c>a.b.c</c> searches for <c>a/b/c.ov</c>; single-segment paths
+    /// search for <c>c.ov</c>. First match in <paramref name="searchDirs"/>
+    /// wins.</summary>
+    private static string? ResolveModulePath(
+        ImmutableArray<string> modulePath, ImmutableArray<string> searchDirs)
     {
-        var fileName = moduleName + ".ov";
+        var relativePath = ModulePathToFile(modulePath);
         foreach (var dir in searchDirs)
         {
-            var candidate = Path.Combine(dir, fileName);
+            var candidate = Path.Combine(dir, relativePath);
             if (File.Exists(candidate)) return candidate;
         }
         return null;
+    }
+
+    private static string ModulePathToFile(ImmutableArray<string> modulePath)
+    {
+        if (modulePath.Length == 0) return ".ov";
+        if (modulePath.Length == 1) return modulePath[0] + ".ov";
+        var dirs = modulePath.Take(modulePath.Length - 1);
+        var fileBase = modulePath[^1];
+        return Path.Combine(Path.Combine(dirs.ToArray()), fileBase + ".ov");
     }
 }

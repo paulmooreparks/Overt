@@ -23,6 +23,14 @@ public sealed class NameResolver
     private readonly Dictionary<SourceSpan, Symbol> _resolutions = new();
     private readonly Dictionary<string, Symbol> _importedSymbols = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Alias -> (symbolName -> Symbol). Populated by <c>use m as alias</c>
+    /// declarations. FieldAccess on an identifier whose name is an alias key
+    /// looks up the field in this table rather than in scope.
+    /// </summary>
+    private readonly Dictionary<string, ImmutableDictionary<string, Symbol>> _aliasedModules =
+        new(StringComparer.Ordinal);
+
     private NameResolver(
         ModuleDecl module,
         ImmutableDictionary<string, ImmutableDictionary<string, Symbol>> importableModules)
@@ -102,9 +110,10 @@ public sealed class NameResolver
         }
     }
 
-    /// <summary>Pull the named symbols from the imported module into the
-    /// current module's scope. Missing symbols (name not exported) and missing
-    /// modules are diagnosed separately.</summary>
+    /// <summary>Process a <c>use</c> declaration. Selective form adds the
+    /// named symbols to <paramref name="moduleScope"/>; aliased form adds a
+    /// <see cref="SymbolKind.ModuleAlias"/> entry and records the alias's
+    /// exports for <c>FieldAccess</c> resolution.</summary>
     private void ResolveUseDecl(UseDecl use, Scope moduleScope)
     {
         if (!_importableModules.TryGetValue(use.ModuleName, out var exports))
@@ -116,6 +125,25 @@ public sealed class NameResolver
             // graph resolver.
             return;
         }
+
+        if (use.Alias is { } alias)
+        {
+            // Aliased module: define the alias in scope so `alias.fn(...)`'s
+            // head identifier resolves, and stash the exports so FieldAccess
+            // can look up `alias.fn` -> the module's fn symbol.
+            var aliasSymbol = new Symbol(SymbolKind.ModuleAlias, alias, use.Span);
+            moduleScope.Define(aliasSymbol);
+            _aliasedModules[alias] = exports;
+            foreach (var (name, sym) in exports)
+            {
+                // Track imported symbols so downstream callers (TypeChecker)
+                // can seed their types. Key by alias-qualified name to avoid
+                // collisions with selective imports of the same bare name.
+                _importedSymbols[$"{alias}.{name}"] = sym;
+            }
+            return;
+        }
+
         foreach (var sym in use.ImportedSymbols)
         {
             if (!exports.TryGetValue(sym, out var imported))
@@ -318,15 +346,22 @@ public sealed class NameResolver
                 // Resolve the target first; field lookup against record types happens
                 // later in the type checker.
                 ResolveExpression(fa.Target, scope);
-                // If the target is a bare identifier that names a stdlib namespace
-                // (List, Trace, CString), try a module-qualified lookup `X.Y` in the
-                // stdlib table. This lets references like `List.empty` / `Trace.subscribe`
-                // carry real function types through to the type checker and effect walker.
-                if (fa.Target is IdentifierExpr moduleIdent
-                    && Stdlib.Symbols.TryGetValue(
-                        $"{moduleIdent.Name}.{fa.FieldName}", out var qualified))
+                if (fa.Target is IdentifierExpr moduleIdent)
                 {
-                    _resolutions[fa.Span] = qualified;
+                    // Stdlib module (List, Trace, CString) — lookup "X.Y" in the
+                    // stdlib's module-qualified symbol table.
+                    if (Stdlib.Symbols.TryGetValue(
+                            $"{moduleIdent.Name}.{fa.FieldName}", out var stdlibSym))
+                    {
+                        _resolutions[fa.Span] = stdlibSym;
+                    }
+                    // User-aliased module — `alias.symbol` resolves to that module's
+                    // exported symbol.
+                    else if (_aliasedModules.TryGetValue(moduleIdent.Name, out var aliasExports)
+                        && aliasExports.TryGetValue(fa.FieldName, out var aliasedSym))
+                    {
+                        _resolutions[fa.Span] = aliasedSym;
+                    }
                 }
                 break;
 

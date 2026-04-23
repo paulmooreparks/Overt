@@ -18,6 +18,9 @@ public enum SymbolKind
 
     // Generic / effect parameters — per-function-signature
     TypeParameter,
+
+    // Cross-file import aliases — per `use module as alias`
+    ModuleAlias,
 }
 
 /// <summary>

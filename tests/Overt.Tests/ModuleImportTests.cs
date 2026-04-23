@@ -129,6 +129,67 @@ public class ModuleImportTests
     }
 
     [Fact]
+    public void Graph_DottedPathWalksDirectories()
+    {
+        using var tmp = new TempDir();
+        Directory.CreateDirectory(Path.Combine(tmp.Path, "stdlib", "http"));
+        tmp.Write(Path.Combine("stdlib", "http", "client.ov"), """
+            module stdlib.http.client
+
+            fn get(url: String) -> String { url }
+            """);
+        tmp.Write("main.ov", """
+            module app
+
+            use stdlib.http.client.{get}
+
+            fn main() -> Int { 0 }
+            """);
+
+        var graph = ModuleGraph.Resolve(
+            Path.Combine(tmp.Path, "main.ov"),
+            ImmutableArray<string>.Empty);
+        Assert.Empty(graph.Diagnostics);
+        Assert.Equal(2, graph.Modules.Length);
+        // Dotted module name survives the parse + the file's directory walk.
+        Assert.Contains(graph.Modules, m => m.Name == "stdlib.http.client");
+    }
+
+    [Fact]
+    public void Parser_AliasedUseProducesAlias()
+    {
+        const string src = """
+            module app
+
+            use stdlib.http.client as http
+
+            fn main() -> Int { 0 }
+            """;
+        var lex = Lexer.Lex(src);
+        var parse = Parser.Parse(lex.Tokens);
+        Assert.Empty(parse.Diagnostics);
+        var use = parse.Module.Declarations.OfType<UseDecl>().Single();
+        Assert.Equal("stdlib.http.client", use.ModuleName);
+        Assert.Equal("http", use.Alias);
+        Assert.Empty(use.ImportedSymbols);
+    }
+
+    [Fact]
+    public void Parser_WildcardImportReportsOV0163()
+    {
+        const string src = """
+            module app
+
+            use foo
+
+            fn main() -> Int { 0 }
+            """;
+        var lex = Lexer.Lex(src);
+        var parse = Parser.Parse(lex.Tokens);
+        Assert.Contains(parse.Diagnostics, d => d.Code == "OV0163");
+    }
+
+    [Fact]
     public void Resolver_UnknownImportReportsOV0168()
     {
         using var tmp = new TempDir();

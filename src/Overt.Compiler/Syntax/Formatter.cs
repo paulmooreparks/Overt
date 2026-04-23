@@ -223,13 +223,21 @@ public static class Formatter
     private static void FormatUse(UseDecl u, FormatContext ctx)
     {
         ctx.WriteIndent();
-        ctx.Write($"use {u.ModuleName}.{{");
-        for (var i = 0; i < u.ImportedSymbols.Length; i++)
+        ctx.Write($"use {u.ModuleName}");
+        if (u.Alias is { } alias)
         {
-            if (i > 0) ctx.Write(", ");
-            ctx.Write(u.ImportedSymbols[i]);
+            ctx.Write($" as {alias}");
         }
-        ctx.Write("}");
+        else
+        {
+            ctx.Write(".{");
+            for (var i = 0; i < u.ImportedSymbols.Length; i++)
+            {
+                if (i > 0) ctx.Write(", ");
+                ctx.Write(u.ImportedSymbols[i]);
+            }
+            ctx.Write("}");
+        }
         ctx.Newline();
     }
 

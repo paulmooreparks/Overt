@@ -53,18 +53,26 @@ public sealed record TypeAliasDecl(
 /// Only C FFI requires <c>unsafe</c> and the <c>from</c> clause.
 /// </summary>
 /// <summary>
-/// A selective import of symbols from another module. MVP shape:
+/// A cross-file import. Per DESIGN.md §19 the two shapes are:
 /// <code>
-///   use module_name.{symbol1, symbol2}
+///   use a.b.{sym1, sym2}      // selective — sym1/sym2 in scope unqualified
+///   use a.b as name           // aliased — name.sym usage
 /// </code>
-/// Per DESIGN.md §19, wildcard imports are disallowed — callers must name
-/// the symbols they want. Aliasing (<c>use m as alias</c>) and dotted paths
-/// (<c>use stdlib.http.client</c>) are future work.
+/// Wildcard imports (<c>use a.b</c> with no selector) are disallowed.
+/// <para>
+/// <see cref="ModulePath"/> is the dotted path, one element per segment.
+/// <see cref="ModuleName"/> is the dot-joined form used for lookup in module
+/// tables (kept as a convenience; equal to <c>string.Join(".", ModulePath)</c>).
+/// </para>
 /// </summary>
 public sealed record UseDecl(
-    string ModuleName,
+    ImmutableArray<string> ModulePath,
     ImmutableArray<string> ImportedSymbols,
-    SourceSpan Span) : Declaration(Span);
+    string? Alias,
+    SourceSpan Span) : Declaration(Span)
+{
+    public string ModuleName => string.Join(".", ModulePath);
+}
 
 public sealed record ExternDecl(
     string Platform,

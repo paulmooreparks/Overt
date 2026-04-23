@@ -53,6 +53,16 @@ public sealed class Parser
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordModule, "module declaration");
         var nameToken = Expect(TokenKind.Identifier, "module name");
+        var nameBuilder = new System.Text.StringBuilder(nameToken.Lexeme);
+        // Dotted module names (module stdlib.http.client). Each segment must
+        // match the sibling .ov file's location under stdlib/http/client.ov.
+        while (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
+        {
+            Advance(); // .
+            nameBuilder.Append('.');
+            nameBuilder.Append(Advance().Lexeme);
+        }
+        var moduleName = nameBuilder.ToString();
 
         var declarations = ImmutableArray.CreateBuilder<Declaration>();
         while (!Check(TokenKind.EndOfFile))
@@ -73,7 +83,7 @@ public sealed class Parser
 
         var endPos = Current.Span.End;
         return new ModuleDecl(
-            nameToken.Lexeme,
+            moduleName,
             declarations.ToImmutable(),
             new SourceSpan(startPos, endPos));
     }
@@ -719,45 +729,76 @@ public sealed class Parser
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordUse, "use declaration");
 
-        // Module name: single identifier for v1 (dotted paths are future work
-        // per DESIGN.md §19).
-        var nameToken = Expect(TokenKind.Identifier, "use declaration (module name)");
-        var moduleName = nameToken.Lexeme;
-
-        // Required selector: .{sym1, sym2, ...}. DESIGN.md §19 forbids wildcard
-        // imports — so bare `use foo` is not a valid form.
-        if (!Match(TokenKind.Dot))
+        // Module path: one or more dot-separated identifiers. Selective/alias
+        // forms use a following token to mark the end: `.{` starts a selector,
+        // bare `.` followed by `{` means selector on the multi-segment path.
+        // We disambiguate by peeking: if after the identifier we see `.` then
+        // an identifier, treat it as another path segment. If we see `.` then
+        // `{`, stop and let the selector parse below.
+        var pathBuilder = ImmutableArray.CreateBuilder<string>();
+        var firstTok = Expect(TokenKind.Identifier, "use declaration (module path)");
+        pathBuilder.Add(firstTok.Lexeme);
+        var endPos = firstTok.Span.End;
+        while (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
         {
-            ReportErrorWithHelp("OV0163",
-                "use declaration requires selective imports",
-                new SourceSpan(startPos, nameToken.Span.End),
-                "spell out the symbols you want: `use " + moduleName + ".{name1, name2}`. "
-                    + "Wildcard imports are disallowed (DESIGN.md §19).");
-            return new UseDecl(moduleName, ImmutableArray<string>.Empty,
-                new SourceSpan(startPos, nameToken.Span.End));
+            Advance(); // .
+            var next = Advance();
+            pathBuilder.Add(next.Lexeme);
+            endPos = next.Span.End;
         }
-        Expect(TokenKind.LeftBrace, "use selector");
 
-        var symbols = ImmutableArray.CreateBuilder<string>();
-        if (!Check(TokenKind.RightBrace))
+        var path = pathBuilder.ToImmutable();
+
+        // After the path, we expect either:
+        //   .{ ... }   — selective import
+        //   as Ident   — aliased import
+        // Anything else is a wildcard, which DESIGN.md §19 forbids.
+        if (Match(TokenKind.KeywordAs))
         {
-            var first = Expect(TokenKind.Identifier, "use selector symbol");
-            symbols.Add(first.Lexeme);
-            while (Match(TokenKind.Comma))
+            var aliasTok = Expect(TokenKind.Identifier, "use ... as <alias>");
+            Match(TokenKind.Semicolon);
+            return new UseDecl(
+                path,
+                ImmutableArray<string>.Empty,
+                aliasTok.Lexeme,
+                new SourceSpan(startPos, aliasTok.Span.End));
+        }
+
+        if (Match(TokenKind.Dot))
+        {
+            Expect(TokenKind.LeftBrace, "use selector");
+            var symbols = ImmutableArray.CreateBuilder<string>();
+            if (!Check(TokenKind.RightBrace))
             {
-                if (Check(TokenKind.RightBrace)) break;
-                var sym = Expect(TokenKind.Identifier, "use selector symbol");
-                symbols.Add(sym.Lexeme);
+                var first = Expect(TokenKind.Identifier, "use selector symbol");
+                symbols.Add(first.Lexeme);
+                while (Match(TokenKind.Comma))
+                {
+                    if (Check(TokenKind.RightBrace)) break;
+                    var sym = Expect(TokenKind.Identifier, "use selector symbol");
+                    symbols.Add(sym.Lexeme);
+                }
             }
+            var closing = Expect(TokenKind.RightBrace, "use selector");
+            Match(TokenKind.Semicolon);
+            return new UseDecl(
+                path,
+                symbols.ToImmutable(),
+                Alias: null,
+                new SourceSpan(startPos, closing.Span.End));
         }
-        var closing = Expect(TokenKind.RightBrace, "use selector");
-        // Optional trailing semicolon.
-        Match(TokenKind.Semicolon);
 
+        ReportErrorWithHelp("OV0163",
+            "use declaration requires either selective imports or an alias",
+            new SourceSpan(startPos, endPos),
+            "spell out the symbols you want (`use " + string.Join(".", path) + ".{name1, name2}`), "
+                + "or alias the module (`use " + string.Join(".", path) + " as name`). "
+                + "Wildcard imports are disallowed (DESIGN.md §19).");
         return new UseDecl(
-            moduleName,
-            symbols.ToImmutable(),
-            new SourceSpan(startPos, closing.Span.End));
+            path,
+            ImmutableArray<string>.Empty,
+            Alias: null,
+            new SourceSpan(startPos, endPos));
     }
 
     private LetStmt ParseLetStmt()

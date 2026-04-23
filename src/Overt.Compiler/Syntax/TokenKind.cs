@@ -27,6 +27,7 @@ public enum TokenKind
     KeywordContinue,
     KeywordReturn,
     KeywordUse,
+    KeywordAs,
     KeywordModule,
     KeywordPub,
     KeywordParallel,
