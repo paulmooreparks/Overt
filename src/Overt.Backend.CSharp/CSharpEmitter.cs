@@ -492,7 +492,7 @@ public sealed class CSharpEmitter
         // Build the C# call expression: <global::><binds target>(arg1, arg2, ...).
         // The `global::` prefix forces resolution against the compilation's root
         // namespace rather than the current file's namespace — critical when a
-        // facade module is declared under something like `stdlib.system.io.path`
+        // facade module is declared under something like `stdlib.csharp.system.io.path`
         // because the emitted C# namespace `Overt.Generated.Stdlib.System.Io.Path`
         // shadows the real `System` namespace for the duration of that file.
         var args = string.Join(", ",

@@ -1,4 +1,4 @@
-module stdlib.system.convert
+module stdlib.csharp.system.convert
 
 // Auto-generated from `System.Convert` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

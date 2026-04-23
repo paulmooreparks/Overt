@@ -60,7 +60,7 @@ What exists today, pinned by 354 passing tests:
 - **Synthetic stdlib declarations** with real signatures — `Result`, `Option`, `List`, `Ok`/`Err`/`Some`/`None`, `println`, collection operations, `Trace`, `CString`, variant lists for `Option`/`Result`.
 - **Real stdlib runtime implementations** ([`Overt.Runtime.Prelude`](src/Overt.Runtime/Prelude.cs)) — `map`, `filter`, `fold` over `ImmutableArray`; `par_map` runs concurrently via `Parallel.For` and returns first-Err by original index; `Trace.subscribe`/`Trace.emit` dispatch to registered subscribers. Transpiled Overt programs that touch collections now run, not just compile — verified by [`StdlibTranspiledEndToEndTests`](tests/Overt.Tests/StdlibTranspiledEndToEndTests.cs), which compiles a small `.ov` program in-memory and invokes `Module.main()`.
 - **Property + field access in externs, type-based overload disambiguation.** The C# emitter now consults reflection at emit time to decide whether a binds target is a property (bare member access) or method (parenthesized call). `System.Environment.MachineName` emits as `System.Environment.MachineName` with no parens; `System.Environment.Exit(code)` keeps its call shape. BindGenerator emits public static properties and fields as zero-arg externs alongside methods; overloaded methods disambiguate by C# parameter type names so `Math.Abs(int)` becomes `abs_int` and `Math.Abs(double)` becomes `abs_double` (both would have been `abs_1` under arity-only). Parameters that would shadow top-level facade names (e.g., `Environment.Exit(exitCode)` + `Environment.ExitCode`) get an `_arg` suffix so Overt's no-shadow rule doesn't reject the generated facade.
-- **Blessed stdlib with auto-discovery.** The repo now ships a `stdlib/` directory containing pre-generated BCL facades — `stdlib.system.io.path`, `stdlib.system.io.file`, `stdlib.system.math`. The CLI's `DiscoverSearchDirs` walks up from `overt.exe` looking for any ancestor containing a `stdlib/` directory, so `use stdlib.system.io.path as path` just works. `$OVERT_STDLIB` override accepted for non-standard installs. `install.ps1` copies `stdlib/` alongside the published binary. Generated facades use `global::<binds-target>` in emitted calls so they don't collide with Overt's own `System.*` namespace under `Overt.Generated.Stdlib.System.*`.
+- **Blessed stdlib with auto-discovery, per-backend structure.** Facades live under `stdlib/<backend>/*`. Today only `stdlib/csharp/system/*` exists (the only backend emitting code): `stdlib.csharp.system.io.path`, `io.file`, `math`, `environment`, `guid`, `convert`, `console`. The CLI's `DiscoverSearchDirs` walks up from `overt.exe` looking for any ancestor containing `stdlib/`, so `use stdlib.csharp.system.io.path as path` just works. `$OVERT_STDLIB` override accepted. `install.ps1` copies `stdlib/` alongside the published binary. Generated facades use `global::<binds-target>` in emitted calls so they don't collide with Overt's own `System.*` namespace under `Overt.Generated.Stdlib.Csharp.System.*`.
 - **Cross-file modules via `use` — both shapes.** Two import forms now work end-to-end: `use a.b.{sym1, sym2}` (selective, symbols in scope unqualified) and `use a.b as alias` (aliased, access via `alias.sym`). Dotted paths walk directories: `use stdlib.http.client` resolves to `stdlib/http/client.ov` in the search-path directories (entry file's dir by default). ModuleGraph discovers sibling and nested `.ov` files, topologically orders imports, detects cycles. NameResolver threads exports through; TypeChecker sees their types via `importedSymbolTypes`. Emitter emits `using static Overt.Generated.<Path>.Module;` for selective and `using Alias = Overt.Generated.<Path>.Module;` for aliased. `overt run main.ov` handles the full graph; other emit modes are still single-file. Wildcard imports forbidden (DESIGN.md §19) — OV0163 if you try.
 - **C# extern runtime + facade generator — the BCL is reachable.** `extern "csharp" fn` declarations now lower to real calls into the bound C# method. A `Result<_, IoError>` return automatically wraps the call in a try/catch that converts exceptions to `Err(IoError { narrative })`. `overt bind --type System.IO.Path` reflects on a .NET type and emits an Overt facade with effect rows inferred from a curated namespace table (pure for `Math`/`String`/`IO.Path`; `io,fails` for most I/O; `io,async,fails` for `Net.*`). Overloads are disambiguated by arity suffix (`combine_2`, `combine_3`). Parameters/returns the generator can't map cleanly emit as `// skipped` comments. An Overt program can now call `System.IO.Path.Combine`, `System.IO.File.ReadAllText`, etc. end-to-end, verified by `Transpiled_ExternCsharp_*` tests.
 - **Formatter.** `overt fmt <file>` emits one canonical form: four-space indent, trailing commas on multi-line lists, one statement per line, match arms one per line, named-arg calls for multi-arg. `--write` updates in place. Comment-preserving — line comments survive a round-trip. Backed by 13 idempotence tests (every example formats to a fixed point and the result re-parses cleanly). Prerequisite: the lexer now emits `LineComment` tokens; the parser filters them out of its token stream on entry; the formatter reads the unfiltered stream to re-interleave comments at their source positions.
@@ -119,29 +119,6 @@ The LSP (when it lands) adds hover-for-type and hover-for-effect as a fourth sur
 
 ---
 
-## Cross-backend stdlib plan (not yet implemented)
-
-Current stdlib is **C#-specific**: facades declare `extern "csharp" fn ... binds "System.IO.File.ReadAllText"`. That string is meaningless in a Go or TypeScript backend. The right extension is option C from the design discussion:
-
-**Each extern carries one signature (contract) and one or more per-backend bindings.**
-
-```overt
-extern fn read_all_text(path: String) !{io, fails} -> Result<String, IoError>
-    @binding "csharp" "System.IO.File.ReadAllText"
-    @binding "go"     "os.ReadFile"
-    @binding "ts"     "fs.readFileSync"
-```
-
-Each backend's emitter picks the binding tagged with its platform. When the Go backend lands, the work is:
-
-1. Extend extern syntax to accept multiple `@binding` lines; keep today's single-platform `extern "csharp" ... binds "..."` as sugar for one-platform externs (explicit escape hatch).
-2. `overt bind` grows per-backend reflection rules. The effect table for `System.IO` maps to C#; for `os` → Go; for `node:fs` → TS. Each type gets regenerated across all supported backends.
-3. Blessed stdlib facades gain `@binding` entries per backend. One facade file, N bindings.
-
-**What's preserved from today's work:** the Overt signatures, effect rows, module hierarchy, naming conventions, `Result` wrapping. None of those are platform-specific. Only the `binds` strings need supplementing.
-
-**Effort estimate:** ~1 session to retrofit the binding model, plus per-backend facade regeneration as each backend matures.
-
 ## Decisions that are locked — do not re-litigate
 
 These are settled by explicit discussion with recorded rationale in `DESIGN.md`. Re-opening them burns tokens and drifts the design. If a new requirement genuinely breaks one, surface it as new data — don't hand-wave it open.
@@ -164,6 +141,7 @@ These are settled by explicit discussion with recorded rationale in `DESIGN.md`.
 - **Comment tags:** `@review:` (agent → human, resolved by deletion) and `@agent:` (human → agent, persistent). No threading, no status flags, no taxonomy (§21).
 - **One canonical form** enforced by formatter. Rules in §21; no per-project or per-developer configuration.
 - **Host language for the compiler:** C# on .NET 9 (§20).
+- **Per-backend stdlib is primary; portability is a separate backend, not a language feature** (§19). `stdlib/csharp/*` binds to .NET idioms; future `stdlib/go/*` would bind to Go idioms. No platform-neutral abstraction layer in the core. Programs that need portability use a future *portable backend* with its own stdlib engineered for that purpose — users opt in explicitly. Rationale: agent-driven retargeting is cheap; portable abstractions are expensive forever. (Locked 2026-04.)
 - **License:** Apache-2.0.
 
 ---

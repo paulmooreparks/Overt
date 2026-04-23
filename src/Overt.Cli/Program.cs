@@ -370,7 +370,7 @@ static class Cli
     /// will walk for <c>use</c> targets.
     ///
     /// The stdlib is a module tree rooted at <c>stdlib.*</c>; a file
-    /// <c>stdlib/system/io/path.ov</c> declares <c>module stdlib.system.io.path</c>.
+    /// <c>stdlib/csharp/system/io/path.ov</c> declares <c>module stdlib.csharp.system.io.path</c>.
     /// Because the first segment of the import path is <c>stdlib</c>, the
     /// search dir must be the PARENT of the <c>stdlib</c> directory, not the
     /// directory itself — otherwise a lookup for <c>stdlib/system/...</c>

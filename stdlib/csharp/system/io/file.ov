@@ -1,4 +1,4 @@
-module stdlib.system.io.file
+module stdlib.csharp.system.io.file
 
 // Auto-generated from `System.IO.File` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

@@ -1,4 +1,4 @@
-module stdlib.system.guid
+module stdlib.csharp.system.guid
 
 // Auto-generated from `System.Guid` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

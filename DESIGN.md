@@ -868,6 +868,17 @@ Source organization inside a project. Most is already committed (§7 — `module
 - **Re-exports.** A module may re-export symbols from another module it imports, exposing them under its own name. Idiomatic pattern for organizing a stdlib façade.
 - **Circular dependencies are forbidden.** The compiler enforces a strict acyclic import graph. Breaking a cycle requires extracting the shared part into a third, separately-imported module.
 
+### Stdlib strategy: per-backend is primary, not portable
+
+The stdlib is organized **per backend**, not as a platform-neutral abstraction.
+
+- **Primary story.** Each backend has its own curated stdlib subtree with facades that bind directly to that backend's host ecosystem. `stdlib.csharp.system.io.path` binds to .NET's `System.IO.Path`; a future `stdlib.go.os` would bind to Go's `os` package; `stdlib.ts.fs` to Node's `fs`. A program that writes `use stdlib.csharp.*` is explicitly a .NET program — not one that happens to run on .NET today and might port tomorrow.
+- **Naming inside each subtree mirrors the host.** .NET facades use .NET's `System.*` structure; Go facades will use Go's package names; TS facades will use Node's module names. Agents writing C# Overt see C# idioms; agents writing Go Overt see Go idioms. No translation layer and no synthetic neutral names for agents to guess at.
+- **No portable stdlib in the language core.** Not as a fallback, not as a convenience. If an Overt program needs to run on two backends, the answer is **agent-driven retargeting**: ask the agent to rewrite the program against the other backend's stdlib. That's cheap for agents in ways it is not cheap for humans, and it preserves our ability to not design a leaky abstraction.
+- **If portability matters, build it as a backend.** A future *portable backend* — a separately-designed stdlib engineered around portable semantics, paired with its own emitter — becomes one of the backend choices. Users who opt into that backend pay the portability tax up front and get the write-once-run-anywhere story; users who don't opt in never pay for it. The choice is explicit, and the portable stdlib is a peer of the per-backend ones, not a layer above them.
+
+This inverts the typical cross-backend design (portable core + per-platform escape hatches). The reason: human-language portability pays for itself because rewriting across runtimes is expensive for humans. That economic assumption is false for agents. Overt doesn't need to pay taxes that exist only because of human costs.
+
 ### Packaging
 
 A package is a shippable unit of Overt code: a directory of source files plus a manifest declaring metadata and dependencies.

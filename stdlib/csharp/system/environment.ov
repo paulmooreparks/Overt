@@ -1,4 +1,4 @@
-module stdlib.system.environment
+module stdlib.csharp.system.environment
 
 // Auto-generated from `System.Environment` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

@@ -177,22 +177,19 @@ public class ModuleImportTests
     [Fact]
     public void Graph_FindsBlessedStdlibViaSearchPath()
     {
-        // Shape test: a program that uses `stdlib.system.io.path` is resolvable
-        // only when the search path includes the repo root (containing
-        // `stdlib/system/io/path.ov`). This verifies the ModuleGraph accepts
-        // explicit search dirs — the CLI's DiscoverSearchDirs is a separate
-        // concern tested via end-to-end run in the CLI tests.
+        // Shape test: a program that uses `stdlib.csharp.system.io.path` is
+        // resolvable only when the search path includes the repo root
+        // (containing `stdlib/csharp/system/io/path.ov`). Verifies the
+        // per-backend subtree lookup works via an explicit search dir.
         using var tmp = new TempDir();
         tmp.Write("app.ov", """
             module app
 
-            use stdlib.system.io.path as p
+            use stdlib.csharp.system.io.path as p
 
             fn main() !{io} -> Result<(), IoError> { Ok(()) }
             """);
 
-        // Find the repo root by walking up from this test assembly's location
-        // until a `stdlib/` directory appears.
         var repoRoot = FindRepoRoot();
         Assert.NotNull(repoRoot);
 
@@ -200,7 +197,7 @@ public class ModuleImportTests
             Path.Combine(tmp.Path, "app.ov"),
             ImmutableArray.Create(repoRoot!));
         Assert.Empty(graph.Diagnostics);
-        Assert.Contains(graph.Modules, m => m.Name == "stdlib.system.io.path");
+        Assert.Contains(graph.Modules, m => m.Name == "stdlib.csharp.system.io.path");
     }
 
     private static string? FindRepoRoot()

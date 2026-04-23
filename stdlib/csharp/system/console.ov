@@ -1,4 +1,4 @@
-module stdlib.system.console
+module stdlib.csharp.system.console
 
 // Auto-generated from `System.Console` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

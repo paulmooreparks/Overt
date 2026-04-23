@@ -1,4 +1,4 @@
-module stdlib.system.math
+module stdlib.csharp.system.math
 
 // Auto-generated from `System.Math` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering

@@ -1,4 +1,4 @@
-module stdlib.system.io.path
+module stdlib.csharp.system.io.path
 
 // Auto-generated from `System.IO.Path` via `overt bind`.
 // Hand-edits may be overwritten; prefer regenerating and layering
