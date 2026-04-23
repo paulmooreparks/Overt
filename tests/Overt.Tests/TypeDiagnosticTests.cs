@@ -182,6 +182,55 @@ public class TypeDiagnosticTests
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0306");
     }
 
+    // ---------------------------------------------- OV0307 ignored Result
+
+    [Fact]
+    public void OV0307_IgnoredResultInStatementPosition_Fires()
+    {
+        var r = Check(
+            "module t\nfn f() !{io} { println(\"hi\") Ok(()) }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0307");
+        Assert.Contains("ignored", d.Message);
+    }
+
+    [Fact]
+    public void OV0307_PropagatedResult_NotIgnored()
+    {
+        var r = Check(
+            "module t\nfn f() !{io} -> Result<(), IoError> { println(\"hi\")? Ok(()) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0307");
+    }
+
+    [Fact]
+    public void OV0307_DiscardLetUnderscore_NotIgnored()
+    {
+        var r = Check(
+            "module t\nfn f() !{io} -> Result<(), IoError> "
+            + "{ let _ = println(\"hi\") Ok(()) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0307");
+    }
+
+    [Fact]
+    public void OV0307_MatchWithResultArms_IgnoredAsStatement_Fires()
+    {
+        // match arms return Result; match as a whole is Result; in statement position
+        // it's ignored.
+        var r = Check(
+            "module t\nfn consumer() !{io} -> Result<(), IoError> "
+            + "{ match true { a => println(\"yes\"), _ => println(\"no\"), } Ok(()) }");
+        Assert.Contains(r.Diagnostics, d => d.Code == "OV0307");
+    }
+
+    [Fact]
+    public void OV0307_NonResultStatement_NotIgnored()
+    {
+        // Pure-Int expression in statement position is fine (it's discarded silently,
+        // no error channel to worry about).
+        var r = Check(
+            "module t\nfn f() -> Int { 1 + 2 42 }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0307");
+    }
+
     // ---------------------------------------------- smoke: examples stay clean
 
     [Theory]

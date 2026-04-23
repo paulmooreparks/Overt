@@ -29,14 +29,14 @@ fn strlen(s: String) -> Int {
 
 fn main() !{io} -> Result<(), IoError> {
     let exists = file_exists("/tmp/hello.txt")
-    println("file exists: $exists")
+    println("file exists: $exists")?
 
     match env_value("HOME") {
         Some(home) => println("HOME=$home"),
         None       => println("HOME is not set"),
-    }
+    }?
 
-    println("length of \"hello\" = ${strlen("hello")}")
+    println("length of \"hello\" = ${strlen("hello")}")?
 
     Ok(())
 }

@@ -44,7 +44,7 @@ fn main() !{io} -> Result<(), IoError> {
     match process_order(order) {
         Ok(updated) => println("shipped: ${updated.id}"),
         Err(e)      => println("failed: $e"),
-    }
+    }?
     Ok(())
 }
 

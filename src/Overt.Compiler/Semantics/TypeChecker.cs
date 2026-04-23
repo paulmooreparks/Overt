@@ -596,13 +596,36 @@ public sealed class TypeChecker
                     AnnotateExpression(asn.Value);
                     break;
                 case ExpressionStmt es:
-                    AnnotateExpression(es.Expression);
+                    var stmtType = AnnotateExpression(es.Expression);
+                    CheckIgnoredResult(es.Expression, stmtType);
                     break;
             }
         }
         return b.TrailingExpression is { } tail
             ? AnnotateExpression(tail)
             : PrimitiveType.Unit;
+    }
+
+    /// <summary>
+    /// DESIGN.md §11: a <c>Result&lt;T, E&gt;</c> that's ignored in statement position
+    /// is a compile error. The `?` operator, `let _ = expr`, and pattern-matching on
+    /// the result are the three ways to handle one; an unhandled Result hides a latent
+    /// error branch. This check fires on every <see cref="ExpressionStmt"/> whose
+    /// expression carries a <c>Result</c> type.
+    /// </summary>
+    private void CheckIgnoredResult(Expression expr, TypeRef exprType)
+    {
+        if (exprType is not NamedTypeRef { Name: "Result" }) return;
+
+        _diagnostics.Add(
+            new Diagnostic(
+                DiagnosticSeverity.Error,
+                "OV0307",
+                $"value of type `{exprType.Display}` is ignored",
+                expr.Span)
+                .WithHelp(
+                    "use `?` to propagate the error, `let _ = expr` to discard "
+                    + "explicitly, or `match` to handle both the Ok and Err cases"));
     }
 
     /// <summary>

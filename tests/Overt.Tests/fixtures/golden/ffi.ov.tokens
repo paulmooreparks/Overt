@@ -113,6 +113,7 @@ Dollar($) @ 32:27..32:28
 Identifier(exists) @ 32:28..32:34
 StringTail(") @ 32:34..32:35
 RightParen()) @ 32:35..32:36
+Question(?) @ 32:36..32:37
 KeywordMatch(match) @ 34:5..34:10
 Identifier(env_value) @ 34:11..34:20
 LeftParen(() @ 34:20..34:21
@@ -140,6 +141,7 @@ StringLiteral("HOME is not set") @ 36:31..36:48
 RightParen()) @ 36:48..36:49
 Comma(,) @ 36:49..36:50
 RightBrace(}) @ 37:5..37:6
+Question(?) @ 37:6..37:7
 Identifier(println) @ 39:5..39:12
 LeftParen(() @ 39:12..39:13
 StringHead("length of \"hello\" = ) @ 39:13..39:36
@@ -151,6 +153,7 @@ RightParen()) @ 39:52..39:53
 InterpolationEnd(}) @ 39:53..39:54
 StringTail(") @ 39:54..39:55
 RightParen()) @ 39:55..39:56
+Question(?) @ 39:56..39:57
 Identifier(Ok) @ 41:5..41:7
 LeftParen(() @ 41:7..41:8
 LeftParen(() @ 41:8..41:9

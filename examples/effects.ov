@@ -5,9 +5,11 @@ fn double(n: Int) -> Int {
     n * 2
 }
 
-// I/O-doing function — !{io} in the signature
+// I/O-doing function — !{io} in the signature.
+// Discard the println Result explicitly since the function's own return type is
+// `Int` (no IoError channel), and we're treating the log as fire-and-forget.
 fn log_and_double(n: Int) !{io} -> Int {
-    println("doubling $n")
+    let _ = println("doubling $n")
     n * 2
 }
 
