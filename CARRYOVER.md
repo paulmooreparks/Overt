@@ -40,43 +40,55 @@ Grammar specs (authoritative for the parser/lexer):
 
 ## Current status
 
-The frontend works end-to-end on C#. **Every example in [`examples/`](examples/) transpiles into C# that compiles cleanly via Roslyn**, pinned by a test for every example. The transpiled `examples/hello.ov` actually runs and prints "Hello, LLM!" — verified by the [`tests/Overt.EndToEnd`](tests/Overt.EndToEnd) harness.
+The frontend works end-to-end on C# with real semantic enforcement. **Every example in [`examples/`](examples/) transpiles into C# that compiles cleanly via Roslyn**, pinned by a test for every example. The transpiled `examples/hello.ov` actually runs and prints "Hello, LLM!" — verified by the [`tests/Overt.EndToEnd`](tests/Overt.EndToEnd) harness.
 
-What exists today, pinned by 212 passing tests:
+What exists today, pinned by 298 passing tests:
 
 - **Lexer** (mode-stack, full interpolation, token-stream goldens for every example).
 - **Parser** (recursive descent, full precedence grammar, all 12 examples parse cleanly).
-- **Name resolver** (symbol table, no-shadowing, ambient prelude scope, did-you-mean).
-- **Type checker v0** (TypeRef IR, declaration types, expression annotations — annotates but does not reject yet).
-- **Synthetic stdlib declarations** (real signatures for `Result`, `Option`, `List`, `Ok`/`Err`/`Some`/`None`, `println`, collection ops, `Trace`, `CString`; feeds both resolver and checker).
+- **Name resolver** (symbol table, no-shadowing, ambient prelude scope, did-you-mean suggestions, module-qualified stdlib resolution for `List.empty` / `Trace.subscribe` / `CString.from`).
+- **Type checker with full semantic enforcement** — 11 diagnostic codes that reject real bugs:
+  - OV0300..0306: type / arity / field / arm / condition mismatches
+  - OV0307: ignored `Result` (DESIGN.md §11 guarantee)
+  - OV0308: non-exhaustive match on user enums, `Option`, and `Result` (DESIGN.md §8's "single most valuable check")
+  - OV0310: uncovered effect rows — direct calls, module-qualified calls, and higher-order propagation through effect-variable argument inference
+  - OV0311: refinement-predicate decidability at literal boundary crossings (DESIGN.md §8)
+  - Non-generic type aliases are transparent for type-equality; the refinement check is the only layer that fires on `let a: Age = 42`.
+- **Synthetic stdlib declarations** with real signatures — `Result`, `Option`, `List`, `Ok`/`Err`/`Some`/`None`, `println`, collection operations, `Trace`, `CString`, variant lists for `Option`/`Result`.
 - **C# emitter** (type-aware, expected-type threading for generic inference, stdlib variant-pattern lowering, `#line` directives for PDB mapping back to `.ov` source).
 - **Runtime prelude** ([`Overt.Runtime`](src/Overt.Runtime)) — `Unit`, `Result<T, E>`, `Option<T>`, `IoError`, `RaceAllFailed<E>`, `List<T>` and friends, target-typed marker structs for `Ok`/`Err`/`Some`.
 - **End-to-end harness** that regenerates `Generated.cs` from `hello.ov` on demand (`OVERT_REGEN_HARNESS=1 dotnet test`) and runs the transpiled program.
 - **Debug mapping** via portable PDB (§18). Runtime errors, debuggers, and stack traces resolve to `.ov` source, not `.cs`.
+- **Compiler Explorer release engineering staged** — [`.github/workflows/release.yml`](.github/workflows/release.yml) builds a Linux x64 self-contained binary on any `v*` tag; the two-PR submission playbook is in [`tooling/godbolt/SUBMISSION.md`](tooling/godbolt/SUBMISSION.md). Waiting on an explicit tag push.
 
-What's notably absent:
+What's notably absent, ordered by impact on "can I write real code in this":
 
-- **Type-error diagnostics.** The checker annotates but never emits `OV030x` mismatch codes. Next session's big target.
-- **Effect-row enforcement.** Declared, annotated, not yet verified.
-- **Refinement predicate checking.** Predicates survive into the AST; the decidable-vs-runtime-assertion split is unimplemented.
-- **Real stdlib.** The prelude stubs throw `NotImplementedException` at runtime for `map`, `filter`, `par_map`, `fold`, etc.
+- **Real stdlib implementations.** `map`, `filter`, `par_map`, `fold`, `Trace.subscribe` are prelude stubs that throw `NotImplementedException` at runtime. Programs that don't need collection transforms (hello-world shapes) already run; programs that do hit the stubs and die. Single-session fix — they're trivial wrappers around `ImmutableArray<T>` and friends.
+- **Language gaps vs. real programs.** The parser accepts every construct the 12 examples use, but real programs will hit: `for each` / `loop` / `break` / `continue`, integer and float literal patterns in `match`, block comments. None are hard; each is a small parser + checker + emitter increment.
+- **Runtime-assertion emission for undecidable refinement predicates.** The checker marks `size(self) > 0`-style predicates as "needs runtime check"; the emitter does not yet generate the check. Works around it today by writing the validation in user code, as refinement.ov does.
+- **Formatter.** Not started. Canonical form is enforced by convention in the examples, not mechanically. Blocks the `@review` / `@agent` comment-tooling story.
+- **Tuple-of-enum exhaustiveness.** `match (state, event) { ... }` skips the check today; state_machine.ov works because it has a wildcard catch-all.
 - **Go backend.** Scaffold only; no emission.
-- **Formatter.** Not started. Canonical form is enforced by convention in the examples, not mechanically.
-- **Module system / packaging.** Spec'd in §19, not implemented.
+- **Module system / packaging.** Spec'd in §19, not implemented. `use` directive parses but doesn't resolve cross-file imports.
+- **MSBuild integration** for consumers. There's no "drop .ov files into a C# project and it compiles" story yet; you have to invoke `overt --emit=csharp` manually.
+- **LSP / IDE integration.** Diagnostics available via CLI only. No hover, go-to-definition, etc.
 
 ---
 
 ## What the next session could reasonably start on
 
-In rough priority order:
+Ordered by "how directly this unblocks someone writing real Overt code":
 
-1. **Type-error diagnostics (`OV030x`).** Use the checker's annotations to reject programs with mismatched argument types, unknown fields, incompatible match arms, and wrong-arity calls. Biggest downstream unlock: every later pass runs on validated input.
-2. **Effect-row checking.** Enforce that a function body's effects are a subset of the declared row. The one mechanism that turns Overt's "effects are visible" claim from annotation into guarantee.
-3. **Refinement predicate decidability.** Decide which `where` predicates the checker can prove statically vs. which emit runtime assertions at construction/boundary points. Needs a small decidable-fragment evaluator — range predicates, ADT shape, size bounds of fixed collections.
-4. **Module-qualified resolution.** Make `List.empty`, `Trace.subscribe`, `CString.from` real module-qualified calls instead of emitter special-cases. Foundation for the `use` import syntax and for any user-authored stdlib.
-5. **Real stdlib implementations.** Start with `map` / `filter` / `fold` backed by `ImmutableArray<T>`; they're called by several examples and currently throw.
-6. **Go backend.** Fresh emitter against the same AST + TypeCheckResult. Good forcing function for the IR being runtime-neutral (§20). Once a single example emits identically through both, the conformance suite is a real thing.
-7. **Formatter.** Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed before `@review` / `@agent` comment tools mature.
+1. **Real stdlib implementations** (1 session). Replace the `NotImplementedException`-throwing stubs in [`Overt.Runtime.Prelude`](src/Overt.Runtime/Prelude.cs) with real implementations over `System.Collections.Immutable`. `map`, `filter`, `fold`, `size`, `concat_three`, `singleton`, `empty`, `par_map` (serial for v0; real Task-parallel later). After this, every current example doesn't just transpile — it runs correctly.
+2. **Language gaps: `for each` / `loop` / integer-literal patterns / `break` / `continue`** (1–2 sessions). Parser + checker + emitter work. Each is self-contained. The union covers what a user writing a CLI tool would hit.
+3. **Runtime-assertion emission for undecidable refinement predicates** (1 session). The emitter's implicit-operator generator on wrapper records should evaluate the predicate and throw on violation. Closes the last gap in the refinement-types guarantee.
+4. **Formatter** (2 sessions). Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed for `@review` / `@agent` comment tooling and for asserting "one canonical form" mechanically.
+5. **Tuple-of-enum exhaustiveness** (1 session). Cartesian-product walk over arm patterns in `match (a, b)` against enum types. Additive to OV0308.
+6. **Go backend** (2–3 sessions). Fresh emitter against the same AST + TypeCheckResult. Real forcing function for the IR being runtime-neutral per §20. Once a single example emits identically through both, the conformance suite is real.
+7. **MSBuild integration** (1–2 sessions). Build task that finds `.ov` files in a csproj, invokes the emitter, wires the generated `.cs` into the compilation. Standard `<Target>` with item groups; the complexity is in the incremental-build story.
+8. **LSP server** (multi-session). Reuse the parser and type checker; wire diagnostics to publishDiagnostics, implement hover / go-to-definition via ResolutionResult and TypeCheckResult. Blocks good IDE integration.
+9. **Module system** (multi-session). Real `use` imports, a resolver that spans files, a package-discovery story. The largest remaining architectural lift.
+10. **Full type inference with unification** (multi-session). Solve generic type arguments at call sites; propagate through argument-driven inference. Would eliminate several emitter workarounds.
 
 ---
 
@@ -84,6 +96,7 @@ In rough priority order:
 
 These are settled by explicit discussion with recorded rationale in `DESIGN.md`. Re-opening them burns tokens and drifts the design. If a new requirement genuinely breaks one, surface it as new data — don't hand-wave it open.
 
+- **Non-generic type aliases are transparent for type-equality.** `type Age = Int where ...` means `Age` and `Int` compare equal structurally; only the refinement predicate distinguishes them. Generic aliases (`type NonEmpty<T> = List<T>`) stay nominal — they emit as wrapper records. (Locked 2026-04-23.)
 - **Language name:** Overt. **Extension:** `.ov`. Registry conflicts were checked.
 - **Surface syntax:** C-family with ML semantics (§6). Not indentation-significant.
 - **Type system:** Static, non-nullable by default, no reflection, no user-defined macros, no full dependent types, no lifetime annotations, no subtyping, invariant generics (§8, §15).
@@ -122,4 +135,4 @@ The author (paul@smartsam.com) has 26 years of C# experience and concurrent Go e
 
 ---
 
-**Last session landed `#line` directives in the emitter so PDBs resolve runtime errors back to Overt source. 12/12 examples compile cleanly via Roslyn; end-to-end hello.ov runs. 212/212 tests. Type-error diagnostics are next.**
+**Semantic-enforcement arc is operationally complete: 11 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, and refinement predicates. 298/298 tests. Godbolt release engineering staged and waiting on a tag push. Next most-valuable piece: real stdlib implementations so transpiled programs actually run end-to-end, not just compile.**
