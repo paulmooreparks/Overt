@@ -94,13 +94,19 @@ public class CSharpCompileCheckTests
     //
     // All of these are tractable; most need expected-type threading from the enclosing
     // return/arg context into child expression emission. Separate session.
+    // Note: inference.ov is NOT in the compile theory. It binds to the
+    // fictional `MyApp.Llm.Complete` symbol, which exists only as an
+    // illustration of how an LLM-service extern would be declared. With the
+    // extern runtime now wired up, the transpiled C# tries to call that
+    // symbol at compile time and fails (CS0103: name 'MyApp' does not exist).
+    // The example still lexes, parses, name-resolves, type-checks, and
+    // formats — it just can't C#-compile without the companion assembly.
     [Theory]
     [InlineData("hello.ov")]
     [InlineData("mutation.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("race.ov")]
-    [InlineData("inference.ov")]
     [InlineData("ffi.ov")]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]

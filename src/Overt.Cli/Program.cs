@@ -38,6 +38,10 @@ if (args.Length >= 1 && args[0] == "fmt")
 {
     return Cli.FormatProgram(args.AsSpan(1).ToArray());
 }
+if (args.Length >= 1 && args[0] == "bind")
+{
+    return Cli.BindProgram(args.AsSpan(1).ToArray());
+}
 
 return Cli.Run(args);
 
@@ -50,12 +54,16 @@ static class Cli
         usage: overt --emit=<stage> <file.ov>
                overt run <file.ov>
                overt fmt [--write] <file.ov>
+               overt bind --type <FullName> [--module <name>] [--output <file>]
 
         commands:
           run              transpile, compile, and execute <file.ov>. Exits 0 on
                            Ok, 1 on compile errors or Err, 2 on usage errors.
           fmt              format <file.ov> to canonical form. Writes to stdout
                            unless --write is passed, which updates in place.
+          bind             reflect on a .NET type and emit an Overt facade
+                           (extern declarations) for its public static methods.
+                           Writes to stdout unless --output is given.
 
         options:
           --emit=<stage>   required for emit mode. one of:
@@ -372,6 +380,83 @@ static class Cli
         else
         {
             Console.Out.Write(formatted);
+        }
+        return 0;
+    }
+
+    // `overt bind --type <FullName> [--module <name>] [--output <file>]`
+    //   — generate an Overt facade for a .NET type via reflection. Writes to
+    //   stdout unless --output is given.
+    public static int BindProgram(string[] args)
+    {
+        string? typeName = null;
+        string? moduleName = null;
+        string? outputPath = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            switch (arg)
+            {
+                case "--help" or "-h":
+                    Console.Out.WriteLine(
+                        "usage: overt bind --type <FullName> [--module <name>] [--output <file>]");
+                    return 0;
+                case "--type":
+                    if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --type needs a value"); return 2; }
+                    typeName = args[i];
+                    break;
+                case "--module":
+                    if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --module needs a value"); return 2; }
+                    moduleName = args[i];
+                    break;
+                case "--output" or "-o":
+                    if (++i >= args.Length) { Console.Error.WriteLine("overt bind: --output needs a value"); return 2; }
+                    outputPath = args[i];
+                    break;
+                default:
+                    Console.Error.WriteLine($"overt bind: unknown argument '{arg}'");
+                    return 2;
+            }
+        }
+        if (typeName is null)
+        {
+            Console.Error.WriteLine("overt bind: --type <FullName> is required");
+            return 2;
+        }
+
+        // Resolve via the currently-loaded assemblies. For BCL types this is
+        // fine; for custom assemblies the caller would need to pre-load them
+        // (a future --assembly flag) — out of MVP scope.
+        Type? targetType = null;
+        foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            targetType = asm.GetType(typeName, throwOnError: false);
+            if (targetType is not null) break;
+        }
+        if (targetType is null)
+        {
+            // Try to load via Type.GetType's assembly-qualified resolution.
+            targetType = Type.GetType(typeName, throwOnError: false);
+        }
+        if (targetType is null)
+        {
+            Console.Error.WriteLine(
+                $"overt bind: type '{typeName}' not found in loaded assemblies");
+            return 1;
+        }
+
+        // Default module name: last segment of the type's full name, lower-cased.
+        moduleName ??= (targetType.Name).ToLowerInvariant();
+
+        var overtSource = BindGenerator.Generate(moduleName, targetType);
+        if (outputPath is not null)
+        {
+            File.WriteAllText(outputPath, overtSource);
+            Console.Error.WriteLine($"overt bind: wrote {outputPath}");
+        }
+        else
+        {
+            Console.Out.Write(overtSource);
         }
         return 0;
     }

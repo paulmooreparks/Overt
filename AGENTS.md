@@ -393,20 +393,56 @@ Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
 A `trace { ... }` block is a pass-through today — no events are actually
 emitted. Subscribe works, but you won't see anything.
 
-### FFI
+### FFI — C# extern bindings
+
+`extern "csharp" fn` binds a static C# method. The binds target is the
+fully-qualified C# symbol; the emitted call happens at runtime.
 
 ```overt
-extern "c" fn c_strlen(s: CString) -> Int
+// Pure — return is passed through verbatim.
+extern "csharp" fn path_combine(a: String, b: String) -> String
+    binds "System.IO.Path.Combine"
+
+// Effectful — Result return causes the extern runtime to wrap exceptions
+// as Err(IoError { narrative = <exception message> }).
+extern "csharp" fn read_all_text(path: String) !{io, fails} -> Result<String, IoError>
+    binds "System.IO.File.ReadAllText"
+```
+
+Auto-exception conversion works for error types with a single `narrative`
+string constructor (currently only `IoError`). Other error types rethrow;
+map them to `IoError` via a wrapper fn until richer mappings land.
+
+**Generate facades with `overt bind`:**
+
+```
+overt bind --type System.IO.Path --module path --output facades/path.ov
+```
+
+This reflects on the .NET type and emits extern declarations for its public
+static methods. Effect rows come from a curated namespace table (pure for
+`System.Math`, `System.String`, `System.IO.Path`; `!{io, fails}` for
+`System.IO.*`, `System.Console.*`, etc.; `!{io, async, fails}` for
+`System.Net.*`). Overload collisions become `name_<arity>` (e.g.
+`combine_2`, `combine_3`, `combine_4`). Parameters or returns the
+generator can't map cleanly (spans, arrays, custom types) emit as
+`// skipped` comments.
+
+### FFI — C extern bindings
+
+`extern "c" fn` parses but is **not wired at runtime yet** — P/Invoke
+integration is a later milestone. For now, use a C# extern as an
+intermediary (declare a C# static method that calls the C function, bind to
+that).
+
+```overt
+extern "c" fn c_strlen(s: CString) -> Int    // parses but throws at runtime
 
 fn strlen(s: String) -> Int {
     let cs: CString = CString.from(s)
     unsafe { c_strlen(cs) }
 }
 ```
-
-`CString.from` constructs a byte-string at the FFI boundary. **`extern`
-bindings don't actually call native code yet** — they throw at runtime. FFI
-compiles cleanly but won't execute until the binding milestone lands.
 
 ---
 

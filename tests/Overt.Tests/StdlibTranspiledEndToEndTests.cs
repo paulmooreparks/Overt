@@ -284,6 +284,60 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternCsharp_CallsBcl()
+    {
+        // Pure BCL static call through extern — should return the same string
+        // System.IO.Path.Combine would return when called from C#.
+        const string src = """
+            module extern_e2e
+
+            extern "csharp" fn path_combine(a: String, b: String) -> String
+                binds "System.IO.Path.Combine"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let combined: String = path_combine(a = "dir", b = "file.txt")
+                println(combined)?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "extern_e2e_path");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        // Path.Combine uses the platform separator; on Windows that's `\`.
+        Assert.True(stdout.Contains("dir/file.txt") || stdout.Contains("dir\\file.txt"),
+            $"expected a combined path in stdout, got: {stdout}");
+    }
+
+    [Fact]
+    public void Transpiled_ExternCsharp_ExceptionBecomesErr()
+    {
+        // Call a BCL method that will throw (reading a nonexistent file);
+        // the extern's Result<_, IoError> return means the catch wraps the
+        // exception message into Err instead of letting it fly.
+        const string src = """
+            module extern_err_e2e
+
+            extern "csharp" fn read_all_text(path: String) !{io, fails} -> Result<String, IoError>
+                binds "System.IO.File.ReadAllText"
+
+            fn main() !{io} -> Result<(), IoError> {
+                match read_all_text(path = "/definitely/does/not/exist.txt") {
+                    Ok(s)  => println("unexpected-ok: ${s}")?,
+                    Err(e) => println("got-err")?,
+                }
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "extern_e2e_err");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("got-err", stdout);
+        Assert.DoesNotContain("unexpected-ok", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ArithEvalDemo_RunsAndPrints()
     {
         // The arithmetic evaluator demo — an interpreter in ~50 lines of Overt.

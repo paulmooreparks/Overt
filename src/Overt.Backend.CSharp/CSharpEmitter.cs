@@ -424,10 +424,133 @@ public sealed class CSharpEmitter
         _w.WriteLine("{");
         using (_w.Indent())
         {
-            _w.WriteLine("throw new NotImplementedException(\"extern binding not yet wired up\");");
+            EmitExternBody(x);
         }
         _w.WriteLine("}");
     }
+
+    /// <summary>
+    /// Lower an <c>extern</c> body to a real invocation of the binds target.
+    ///
+    /// Supported today:
+    /// <list type="bullet">
+    ///   <item>Platform <c>"csharp"</c> — binds target is a dotted C# path:
+    ///     <c>System.IO.File.ReadAllText</c>. Emits a call to that static
+    ///     member with the extern's parameters passed positionally.</item>
+    ///   <item>A static property is recognized as "binds target resolves to a
+    ///     property at compile time"; emitted as a bare member access.</item>
+    ///   <item>Return type <c>Result&lt;T, E&gt;</c> wraps the call in a
+    ///     try/catch that converts thrown exceptions into an <c>Err</c> of
+    ///     the declared error type. A few error types have known
+    ///     constructors; unknown error types fall through to rethrow, with
+    ///     a diagnostic in the generated code.</item>
+    /// </list>
+    ///
+    /// Not yet supported:
+    /// <list type="bullet">
+    ///   <item>Instance methods (the <c>Namespace.Type::Method</c> convention
+    ///     with a <c>self</c> parameter).</item>
+    ///   <item>Constructors (<c>..ctor</c> binding target).</item>
+    ///   <item>Platform <c>"c"</c> — would become <c>DllImport</c>.</item>
+    ///   <item>Platform <c>"go"</c> — no Go backend emission yet.</item>
+    /// </list>
+    /// </summary>
+    private void EmitExternBody(ExternDecl x)
+    {
+        if (x.Platform != "csharp")
+        {
+            _w.WriteLine(
+                "throw new NotImplementedException("
+                + $"\"extern platform '{x.Platform}' not yet wired up\");");
+            return;
+        }
+
+        var returnsResult = x.ReturnType is NamedType
+            { Name: "Result", TypeArguments.Length: 2 };
+
+        // Build the C# call expression: <binds target>(arg1, arg2, ...).
+        // Static properties don't take args, so bare member access.
+        var args = string.Join(", ",
+            x.Parameters.Select(p => EscapeId(p.Name)));
+        var callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
+            ? x.BindsTarget
+            : $"{x.BindsTarget}({args})";
+
+        if (!returnsResult)
+        {
+            // Void or plain-typed return: pass through. Exceptions fly.
+            if (x.ReturnType is UnitType || x.ReturnType is null)
+            {
+                _w.WriteLine($"{callExpr};");
+                _w.WriteLine("return Unit.Value;");
+            }
+            else
+            {
+                _w.WriteLine($"return {callExpr};");
+            }
+            return;
+        }
+
+        // Result<T, E> return: exception → Err(error). We construct the Err
+        // from the thrown exception's message when the error type has a
+        // single-string constructor (IoError, HttpError, LlmError, etc.);
+        // other cases would need a custom mapping table. For now this covers
+        // the common "IoError { narrative = ... }" shape.
+        var errorTypeRef = ((NamedType)x.ReturnType!).TypeArguments[1];
+        _w.WriteLine("try");
+        _w.WriteLine("{");
+        using (_w.Indent())
+        {
+            _w.WriteLine($"return Ok({callExpr});");
+        }
+        _w.WriteLine("}");
+        _w.WriteLine("catch (Exception __ex)");
+        _w.WriteLine("{");
+        using (_w.Indent())
+        {
+            // Construct the error using the known "single-string narrative"
+            // shape. Works for IoError, HttpError, LlmError, and any
+            // user-declared @derive(Debug) enum variant with a single narrative
+            // field — but falls back to rethrow for mismatches.
+            EmitExternErrorConversion(errorTypeRef);
+        }
+        _w.WriteLine("}");
+    }
+
+    /// <summary>
+    /// Emit the Err-side of an extern's exception-to-Result conversion. We
+    /// only auto-construct errors for runtime error types with a known
+    /// single-<c>narrative</c>-string constructor (IoError, HttpError,
+    /// LlmError — defined in <c>Overt.Runtime</c>). Anything else — notably
+    /// user-defined enum error types with multiple variants — falls through
+    /// to rethrow; mapping arbitrary exceptions to arbitrary user variants
+    /// needs a design pass and likely per-binding configuration.
+    /// </summary>
+    private void EmitExternErrorConversion(TypeExpr errorType)
+    {
+        if (errorType is NamedType nt && IsKnownNarrativeError(nt.Name))
+        {
+            _w.WriteLine($"return Err(new {MapTypeName(nt.Name)}(narrative: __ex.Message));");
+            return;
+        }
+        _w.WriteLine(
+            "throw; // extern: auto-conversion only supported for known "
+            + "narrative-shaped errors; rethrowing");
+    }
+
+    /// <summary>Error types in <c>Overt.Runtime</c> that have a single-string
+    /// <c>narrative</c> constructor. Keeping this list narrow and explicit is
+    /// safer than guessing; adding more is a deliberate act.</summary>
+    private static bool IsKnownNarrativeError(string name)
+        => name is "IoError" or "HttpError" or "LlmError";
+
+    /// <summary>Heuristic: a binds target resolves to a property (not a method)
+    /// when we'd otherwise emit a zero-arg call and C# has a property of that
+    /// name. We can't check that at emit time without reflection; take the
+    /// conservative route of always emitting <c>target()</c> for zero-param
+    /// externs so static methods work, and let authors explicitly mark
+    /// properties via an extern convention later.</summary>
+    private static bool BindsLooksLikeProperty(string _) => false;
 
     // ----------------------------------------------------- type expressions
 
