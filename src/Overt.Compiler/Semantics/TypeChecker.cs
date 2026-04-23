@@ -203,7 +203,9 @@ public sealed class TypeChecker
                         SymbolKind.Parameter, param.Name, param.Span, param);
                     _symbolTypes[paramSymbol] = LowerType(param.Type);
                 }
-                AnnotateExpression(f.Body);
+                var bodyType = AnnotateExpression(f.Body);
+                CheckReturnType(f, bodyType);
+                CheckEffectRow(f);
                 break;
             case TypeAliasDecl t:
                 if (t.Predicate is { } pred) AnnotateExpression(pred);
@@ -211,6 +213,28 @@ public sealed class TypeChecker
             // ExternDecl, RecordDecl, EnumDecl have no bodies to annotate.
         }
         _currentTypeParams = new HashSet<string>();
+    }
+
+    // ---------------------------------------------- return type check
+
+    /// <summary>
+    /// Check the function body's trailing-expression type against the declared return
+    /// type. Only fires when both are concrete — generic returns like <c>Result&lt;T, E&gt;</c>
+    /// (still carrying type variables from factory functions like <c>Ok</c>) skip the
+    /// check pending unification.
+    /// </summary>
+    private void CheckReturnType(FunctionDecl fn, TypeRef actualBodyType)
+    {
+        var declaredReturn = fn.ReturnType is null ? PrimitiveType.Unit : LowerType(fn.ReturnType);
+        if (!IsConcrete(declaredReturn) || !IsConcrete(actualBodyType)) return;
+        if (TypesEqual(declaredReturn, actualBodyType)) return;
+
+        var bodySpan = fn.Body.TrailingExpression?.Span ?? fn.Body.Span;
+        ReportErrorWithHelp("OV0301",
+            $"function `{fn.Name}` declares return type `{declaredReturn.Display}` "
+                + $"but body evaluates to `{actualBodyType.Display}`",
+            bodySpan,
+            $"either change the declared return type or adjust the body to yield `{declaredReturn.Display}`");
     }
 
     /// <summary>
@@ -741,6 +765,178 @@ public sealed class TypeChecker
         FunctionTypeRef ft => ft.Parameters.Any(ContainsTypeVar) || ContainsTypeVar(ft.Return),
         _ => false,
     };
+
+    // ------------------------------------------------ effect-row check
+
+    /// <summary>
+    /// v1 core effects declared concretely in Overt source (DESIGN.md §7). Anything
+    /// else appearing in an effect row is treated as an effect-row type variable
+    /// (e.g. <c>E</c> / <c>F</c>) and skipped by the checker until unification lands.
+    /// <c>fails</c> is implicit (implied by any <c>Result</c> return) and never
+    /// checked explicitly.
+    /// </summary>
+    private static readonly HashSet<string> ConcreteEffects = new(StringComparer.Ordinal)
+    {
+        "io", "async", "inference",
+    };
+
+    private static bool IsConcreteEffect(string name) => ConcreteEffects.Contains(name);
+
+    /// <summary>
+    /// Compute the set of effects a function body transitively requires and diagnose
+    /// any concrete effect not covered by the declared effect row. Conservative: we do
+    /// NOT solve effect-row type variables at call sites, so effects that reach the
+    /// body only via a variable (<c>fn f(g: fn() !{E} -> ())</c> calling <c>g()</c>)
+    /// are invisible to this pass. Proper unification closes that gap; this pass
+    /// catches the easy, high-signal cases — <c>fn pure() { println("hi") }</c> would
+    /// fire OV0310.
+    /// </summary>
+    private void CheckEffectRow(FunctionDecl fn)
+    {
+        var declared = fn.Effects is { } row
+            ? new HashSet<string>(row.Effects, StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
+        var body = new HashSet<string>(StringComparer.Ordinal);
+        CollectBodyEffects(fn.Body, body);
+
+        foreach (var effect in body)
+        {
+            if (!IsConcreteEffect(effect)) continue;
+            if (declared.Contains(effect)) continue;
+
+            var declaredForDisplay = fn.Effects is null
+                ? "empty"
+                : $"`!{{{string.Join(", ", fn.Effects.Effects)}}}`";
+            var suggested = fn.Effects is null
+                ? $"!{{{effect}}}"
+                : $"!{{{string.Join(", ", fn.Effects.Effects.Append(effect))}}}";
+            var reportSpan = fn.Effects?.Span ?? new SourceSpan(fn.Span.Start, fn.Span.Start);
+            ReportErrorWithHelp("OV0310",
+                $"function `{fn.Name}` performs effect `{effect}` but its effect row is {declaredForDisplay}",
+                reportSpan,
+                $"add `{effect}` to the signature: `{suggested}`");
+        }
+    }
+
+    private void CollectBodyEffects(Expression expr, HashSet<string> acc)
+    {
+        switch (expr)
+        {
+            case CallExpr c:
+                if (TryGetCalleeFunctionType(c.Callee, out var ft))
+                {
+                    foreach (var eff in ft.Effects) acc.Add(eff);
+                }
+                CollectBodyEffects(c.Callee, acc);
+                foreach (var a in c.Arguments) CollectBodyEffects(a.Value, acc);
+                break;
+
+            case ParallelExpr pe:
+                acc.Add("async");
+                foreach (var t in pe.Tasks) CollectBodyEffects(t, acc);
+                break;
+
+            case RaceExpr re:
+                acc.Add("async");
+                foreach (var t in re.Tasks) CollectBodyEffects(t, acc);
+                break;
+
+            case BlockExpr b:
+                foreach (var stmt in b.Statements)
+                {
+                    switch (stmt)
+                    {
+                        case LetStmt ls: CollectBodyEffects(ls.Initializer, acc); break;
+                        case AssignmentStmt asn: CollectBodyEffects(asn.Value, acc); break;
+                        case ExpressionStmt es: CollectBodyEffects(es.Expression, acc); break;
+                    }
+                }
+                if (b.TrailingExpression is { } tail) CollectBodyEffects(tail, acc);
+                break;
+
+            case IfExpr ie:
+                CollectBodyEffects(ie.Condition, acc);
+                CollectBodyEffects(ie.Then, acc);
+                if (ie.Else is { } el) CollectBodyEffects(el, acc);
+                break;
+
+            case MatchExpr me:
+                CollectBodyEffects(me.Scrutinee, acc);
+                foreach (var arm in me.Arms) CollectBodyEffects(arm.Body, acc);
+                break;
+
+            case WhileExpr we:
+                CollectBodyEffects(we.Condition, acc);
+                CollectBodyEffects(we.Body, acc);
+                break;
+
+            case BinaryExpr be:
+                CollectBodyEffects(be.Left, acc);
+                CollectBodyEffects(be.Right, acc);
+                break;
+
+            case UnaryExpr ue:
+                CollectBodyEffects(ue.Operand, acc);
+                break;
+
+            case PropagateExpr pr:
+                CollectBodyEffects(pr.Operand, acc);
+                break;
+
+            case FieldAccessExpr fa:
+                CollectBodyEffects(fa.Target, acc);
+                break;
+
+            case TupleExpr te:
+                foreach (var elem in te.Elements) CollectBodyEffects(elem, acc);
+                break;
+
+            case WithExpr w:
+                CollectBodyEffects(w.Target, acc);
+                foreach (var u in w.Updates) CollectBodyEffects(u.Value, acc);
+                break;
+
+            case RecordLiteralExpr rl:
+                CollectBodyEffects(rl.TypeTarget, acc);
+                foreach (var f in rl.Fields) CollectBodyEffects(f.Value, acc);
+                break;
+
+            case InterpolatedStringExpr isx:
+                foreach (var part in isx.Parts)
+                {
+                    if (part is StringInterpolationPart ip)
+                    {
+                        CollectBodyEffects(ip.Expression, acc);
+                    }
+                }
+                break;
+
+            case UnsafeExpr ux:
+                CollectBodyEffects(ux.Body, acc);
+                break;
+
+            case TraceExpr tx:
+                CollectBodyEffects(tx.Body, acc);
+                break;
+
+            // Leaf primary expressions contribute no effects.
+        }
+    }
+
+    private bool TryGetCalleeFunctionType(Expression callee, out FunctionTypeRef ft)
+    {
+        if (callee is IdentifierExpr id
+            && _resolution.Resolutions.TryGetValue(id.Span, out var sym)
+            && _symbolTypes.TryGetValue(sym, out var type)
+            && type is FunctionTypeRef f)
+        {
+            ft = f;
+            return true;
+        }
+        ft = null!;
+        return false;
+    }
 
     // ----------------------------------------------- diagnostic reporting
 
