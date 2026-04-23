@@ -207,7 +207,7 @@ public static class Prelude
     // `Trace.subscribe(...)` etc.
     public static class Trace
     {
-        public static void subscribe(Action<object> consumer)
+        public static void subscribe(Action<TraceEvent> consumer)
             => throw new NotImplementedException("stdlib Trace.subscribe not wired up");
     }
 }

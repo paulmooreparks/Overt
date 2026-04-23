@@ -53,7 +53,9 @@ public class CSharpCompileCheckTests
         var source = File.ReadAllText(Path.Combine(ExamplesDir, ovFile));
         var lex = Lexer.Lex(source);
         var parse = Parser.Parse(lex.Tokens);
-        var csharp = CSharpEmitter.Emit(parse.Module);
+        var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(parse.Module);
+        var typed = Overt.Compiler.Semantics.TypeChecker.Check(parse.Module, resolved);
+        var csharp = CSharpEmitter.Emit(parse.Module, typed);
 
         var tree = CSharpSyntaxTree.ParseText(csharp, new CSharpParseOptions(LanguageVersion.Latest));
         var compilation = CSharpCompilation.Create(
@@ -73,26 +75,25 @@ public class CSharpCompileCheckTests
     // is a regression guarantee: the emitter, runtime, and example file are all
     // compatible, end-to-end, shape-wise.
     //
-    // The remaining six examples (bst, dashboard, effects, ffi, refinement, trace) do
-    // NOT yet compile-check cleanly and are NOT in this theory. Each needs semantic
-    // information the untyped emitter can't synthesize:
+    // Five examples still have known emitter gaps and are NOT yet in this theory:
     //
-    //   - bst.ov          pattern lowering of `Tree.Empty` / `Tree.Node { ... }` as
-    //                     switch arms (needs type info to resolve enum variants).
-    //   - dashboard.ov    tuple-destructure `let (users, orders) = parallel {...}` —
-    //                     the parallel placeholder `default!` has no target type.
-    //   - effects.ov      generic method inference — `apply_twice<T,E>` called with
-    //                     named args cannot infer type parameters.
-    //   - ffi.ov          `Some(home) => ...` match arm needs Option-variant pattern
-    //                     lowering; `unsafe { call(cs) }` used in expression position
-    //                     wants type info to pick statement vs expression form.
-    //   - refinement.ov   generic type aliases (`type NonEmpty<T> = ...`) don't lower
-    //                     to C# using-directives; need record wrapping.
-    //   - trace.ov        same enum-variant widening issue as state_machine but on
-    //                     match-arm RHS where the variant lives under `Err(...)`.
+    //   - bst.ov          `List.empty()` needs explicit type args emitted from the
+    //                     enclosing return-type context; context threading isn't wired.
+    //   - dashboard.ov    same `List.empty()` issue, plus tuple-destructure of a
+    //                     parallel-block placeholder whose `.Unwrap()` has no receiver.
+    //   - effects.ov      generic method inference — `apply_twice<T, E>` called with
+    //                     named args blocks C#'s argument-driven inference; needs
+    //                     explicit type args emitted from the enclosing-call context.
+    //   - refinement.ov   `Ok(List<T>)` doesn't target-type into `Result<NonEmpty<T>, E>`
+    //                     without an implicit conversion on the wrapper record (runtime
+    //                     work, not emitter).
+    //   - trace.ov        `fn print_event(...) -> ()` body is `println(...)` which
+    //                     evaluates to Result<Unit,IoError>. Per DESIGN.md §11 an
+    //                     ignored Result is a compile error; the example needs updating
+    //                     to `let _ = println(...)` or similar.
     //
-    // Each is scheduled for the type-checker arc. As they clear, move them up into
-    // the InlineData list.
+    // All of these are tractable; most need expected-type threading from the enclosing
+    // return/arg context into child expression emission. Separate session.
     [Theory]
     [InlineData("hello.ov")]
     [InlineData("mutation.ov")]
@@ -100,6 +101,7 @@ public class CSharpCompileCheckTests
     [InlineData("state_machine.ov")]
     [InlineData("race.ov")]
     [InlineData("inference.ov")]
+    [InlineData("ffi.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);

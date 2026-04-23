@@ -142,13 +142,15 @@ static class Cli
         var lex = Lexer.Lex(source);
         var parse = Parser.Parse(lex.Tokens);
         var resolved = NameResolver.Resolve(parse.Module);
+        var typed = TypeChecker.Check(parse.Module, resolved);
 
-        var csharp = CSharpEmitter.Emit(parse.Module);
+        var csharp = CSharpEmitter.Emit(parse.Module, typed);
         Console.Out.Write(csharp);
 
         var combined = lex.Diagnostics
             .AddRange(parse.Diagnostics)
-            .AddRange(resolved.Diagnostics);
+            .AddRange(resolved.Diagnostics)
+            .AddRange(typed.Diagnostics);
         return WriteDiagnostics(inputFile, combined);
     }
 

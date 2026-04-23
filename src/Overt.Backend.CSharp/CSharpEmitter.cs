@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text;
+using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
 
 namespace Overt.Backend.CSharp;
@@ -29,16 +30,30 @@ namespace Overt.Backend.CSharp;
 public sealed class CSharpEmitter
 {
     private readonly IndentedWriter _w;
+    private readonly TypeCheckResult? _types;
 
-    private CSharpEmitter(IndentedWriter w) { _w = w; }
+    private CSharpEmitter(IndentedWriter w, TypeCheckResult? types)
+    {
+        _w = w;
+        _types = types;
+    }
 
-    public static string Emit(ModuleDecl module)
+    public static string Emit(ModuleDecl module, TypeCheckResult? types = null)
     {
         var sb = new StringBuilder();
-        var emitter = new CSharpEmitter(new IndentedWriter(sb));
+        var emitter = new CSharpEmitter(new IndentedWriter(sb), types);
         emitter.EmitModule(module);
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Best-effort type lookup for an expression. Returns <see cref="UnknownType"/> when
+    /// no type-check result is available or the expression wasn't annotated.
+    /// </summary>
+    private TypeRef TypeOf(Expression e)
+        => _types?.ExpressionTypes.TryGetValue(e.Span, out var t) == true
+            ? t
+            : UnknownType.Instance;
 
     // ------------------------------------------------------------- module
 
@@ -158,15 +173,24 @@ public sealed class CSharpEmitter
 
     private void EmitTypeAlias(TypeAliasDecl t)
     {
-        // C# only supports using-aliases for types that can be spelled out. Generic
-        // parameters on the alias and `where` predicates are dropped with a comment.
-        if (t.TypeParameters.Length > 0 || t.Predicate is not null)
+        // C# using-aliases can't be generic and can't carry predicates. Generic or
+        // refinement aliases lower to wrapper records instead; non-generic plain aliases
+        // stay as using-directives so primitive aliases don't pay for a wrapping type.
+        if (t.Predicate is not null)
         {
-            _w.Write($"// TODO: type alias `{t.Name}` with ");
-            if (t.TypeParameters.Length > 0) _w.Write("generic params ");
-            if (t.Predicate is not null) _w.Write("refinement predicate ");
-            _w.WriteLine("- emitted as direct alias, constraints dropped");
+            _w.Write($"// TODO: refinement `{t.Name}`: where-predicate dropped");
+            _w.WriteLine();
         }
+
+        if (t.TypeParameters.Length > 0)
+        {
+            var typeParams = string.Join(", ", t.TypeParameters);
+            _w.Write($"public sealed record {t.Name}<{typeParams}>(");
+            EmitType(t.Target);
+            _w.WriteLine(" Inner);");
+            return;
+        }
+
         _w.Write($"using {t.Name} = ");
         EmitType(t.Target);
         _w.WriteLine(";");
@@ -380,6 +404,33 @@ public sealed class CSharpEmitter
                 EmitBlockAsStatement(we.Body);
                 break;
 
+            case MatchExpr me:
+                // `match scrutinee { ... }` in statement position: emit as a switch
+                // statement with each arm's body as a case block. Variant patterns still
+                // go through EmitPatternForMatch so stdlib variants resolve to their
+                // typed C# record forms.
+                var scrutineeType = TypeOf(me.Scrutinee);
+                _w.Write("switch (");
+                EmitExpression(me.Scrutinee);
+                _w.WriteLine(")");
+                _w.WriteLine("{");
+                using (_w.Indent())
+                {
+                    foreach (var arm in me.Arms)
+                    {
+                        _w.Write("case ");
+                        EmitPatternForMatch(arm.Pattern, scrutineeType);
+                        _w.WriteLine(":");
+                        using (_w.Indent())
+                        {
+                            EmitExpressionAsStatement(arm.Body);
+                            _w.WriteLine("break;");
+                        }
+                    }
+                }
+                _w.WriteLine("}");
+                break;
+
             case BlockExpr b:
                 EmitBlockAsStatement(b);
                 break;
@@ -556,12 +607,25 @@ public sealed class CSharpEmitter
                 EmitMatch(me);
                 break;
 
-            case ParallelExpr:
-                _w.Write("/* TODO: parallel {...} - requires async runtime */ default!");
+            case ParallelExpr pe:
+                // Emit a typed placeholder tuple so `let (a, b) = parallel { ... }`
+                // can destructure. Each task's type comes from the type checker; when
+                // unknown, fall back to `object?`.
+                _w.Write("/* TODO: parallel {...} */ (");
+                for (var i = 0; i < pe.Tasks.Length; i++)
+                {
+                    if (i > 0) _w.Write(", ");
+                    var taskType = TypeOf(pe.Tasks[i]);
+                    var cs = CSharpTypeDisplay(taskType);
+                    _w.Write($"default({cs})!");
+                }
+                _w.Write(")");
                 break;
 
-            case RaceExpr:
-                _w.Write("/* TODO: race {...} - requires async runtime */ default!");
+            case RaceExpr re:
+                _w.Write("/* TODO: race {...} */ default(");
+                _w.Write(re.Tasks.Length > 0 ? CSharpTypeDisplay(TypeOf(re.Tasks[0])) : "object");
+                _w.Write(")!");
                 break;
 
             case UnsafeExpr ux:
@@ -725,6 +789,7 @@ public sealed class CSharpEmitter
 
     private void EmitMatch(MatchExpr me)
     {
+        var scrutineeType = TypeOf(me.Scrutinee);
         _w.Write("(");
         EmitExpression(me.Scrutinee);
         _w.WriteLine(" switch");
@@ -733,7 +798,7 @@ public sealed class CSharpEmitter
         {
             foreach (var arm in me.Arms)
             {
-                EmitPatternForMatch(arm.Pattern);
+                EmitPatternForMatch(arm.Pattern, scrutineeType);
                 _w.Write(" => ");
                 EmitExpression(arm.Body);
                 _w.WriteLine(",");
@@ -742,30 +807,44 @@ public sealed class CSharpEmitter
         _w.Write("})");
     }
 
-    private void EmitPatternForMatch(Pattern p)
+    private void EmitPatternForMatch(Pattern p, TypeRef scrutineeType)
     {
         switch (p)
         {
             case WildcardPattern: _w.Write("_"); break;
-            case IdentifierPattern id: _w.Write($"var {EscapeId(id.Name)}"); break;
+            case IdentifierPattern id:
+                // A single identifier in pattern position is a bound variable UNLESS it
+                // names a known zero-arg variant on the scrutinee's type (like `None` on
+                // Option, or an enum's bare variant). In that case it's a reference.
+                var variant = ResolveStdlibVariant(id.Name, scrutineeType);
+                if (variant is not null)
+                {
+                    _w.Write($"{variant} _");
+                }
+                else
+                {
+                    _w.Write($"var {EscapeId(id.Name)}");
+                }
+                break;
             case PathPattern pp:
-                // `A.B` with no args — emit the sealed-record type name (A_B) for
-                // pattern-matching against the variant.
+                // `A.B` with no args — flat sealed-record name (A_B).
                 _w.Write(JoinPath(pp.Path));
                 _w.Write(" _");
                 break;
             case ConstructorPattern cp:
-                // `Ok(x)` or `A.B(x, y)` — emit as a positional record pattern. Unqualified
-                // variant names (single-segment path) are left to resolve via type context
-                // (e.g. `Ok` / `Err` / `Some` / `None` from the runtime prelude).
-                _w.Write(JoinPath(cp.Path));
+                // Unqualified stdlib constructors (Ok / Err / Some) resolve via the
+                // scrutinee's type. Qualified paths (`A.B(x)`) emit as `A_B(...)`.
+                var ctorName = ResolveStdlibVariant(cp.Path, scrutineeType) ?? JoinPath(cp.Path);
+                _w.Write(ctorName);
                 if (cp.Arguments.Length > 0)
                 {
                     _w.Write("(");
                     for (var i = 0; i < cp.Arguments.Length; i++)
                     {
                         if (i > 0) _w.Write(", ");
-                        EmitPatternForMatch(cp.Arguments[i]);
+                        // Inside a constructor, subpatterns lose the scrutinee context —
+                        // we don't track variant-argument types yet.
+                        EmitPatternForMatch(cp.Arguments[i], UnknownType.Instance);
                     }
                     _w.Write(")");
                 }
@@ -778,7 +857,7 @@ public sealed class CSharpEmitter
                     if (i > 0) _w.Write(", ");
                     _w.Write(EscapeId(rp.Fields[i].Name));
                     _w.Write(": ");
-                    EmitPatternForMatch(rp.Fields[i].Subpattern);
+                    EmitPatternForMatch(rp.Fields[i].Subpattern, UnknownType.Instance);
                 }
                 _w.Write(" }");
                 break;
@@ -787,12 +866,41 @@ public sealed class CSharpEmitter
                 for (var i = 0; i < tp.Elements.Length; i++)
                 {
                     if (i > 0) _w.Write(", ");
-                    EmitPatternForMatch(tp.Elements[i]);
+                    var elemType = scrutineeType is TupleTypeRef tt && i < tt.Elements.Length
+                        ? tt.Elements[i]
+                        : UnknownType.Instance;
+                    EmitPatternForMatch(tp.Elements[i], elemType);
                 }
                 _w.Write(")");
                 break;
         }
     }
+
+    /// <summary>
+    /// Map an unqualified stdlib variant name (<c>Ok</c>, <c>Err</c>, <c>Some</c>,
+    /// <c>None</c>) to the fully-typed C# record type for pattern matching, using the
+    /// scrutinee's type to fill in generic arguments. Returns null when the name isn't
+    /// a stdlib variant or when scrutinee type info isn't rich enough.
+    /// </summary>
+    private static string? ResolveStdlibVariant(string name, TypeRef scrutineeType)
+    {
+        if (scrutineeType is not NamedTypeRef nt) return null;
+        return (nt.Name, name) switch
+        {
+            ("Result", "Ok") when nt.TypeArguments.Length == 2 =>
+                $"ResultOk<{nt.TypeArguments[0].Display}, {nt.TypeArguments[1].Display}>",
+            ("Result", "Err") when nt.TypeArguments.Length == 2 =>
+                $"ResultErr<{nt.TypeArguments[0].Display}, {nt.TypeArguments[1].Display}>",
+            ("Option", "Some") when nt.TypeArguments.Length == 1 =>
+                $"OptionSome<{nt.TypeArguments[0].Display}>",
+            ("Option", "None") when nt.TypeArguments.Length == 1 =>
+                $"OptionNone<{nt.TypeArguments[0].Display}>",
+            _ => null,
+        };
+    }
+
+    private static string? ResolveStdlibVariant(ImmutableArray<string> path, TypeRef scrutineeType)
+        => path.Length == 1 ? ResolveStdlibVariant(path[0], scrutineeType) : null;
 
     /// <summary>
     /// Join a dotted path for an enum variant reference. Multi-segment paths collapse
@@ -916,6 +1024,35 @@ public sealed class CSharpEmitter
 
     private static bool IsPascalCase(string s)
         => s.Length > 0 && char.IsUpper(s[0]) && !s.Contains('_');
+
+    /// <summary>
+    /// Render a <see cref="TypeRef"/> as C# source text. Parallels the compiler's
+    /// TypeRef.Display but uses the C# spelling (lowercase primitives, nullable
+    /// object fallback for unknowns).
+    /// </summary>
+    private static string CSharpTypeDisplay(TypeRef t) => t switch
+    {
+        PrimitiveType { Name: "Int" } => "int",
+        PrimitiveType { Name: "Float" } => "double",
+        PrimitiveType { Name: "Bool" } => "bool",
+        PrimitiveType { Name: "String" } => "string",
+        PrimitiveType { Name: "Unit" } => "Unit",
+        PrimitiveType p => p.Name,
+        NamedTypeRef n when n.TypeArguments.Length == 0 => n.Name,
+        NamedTypeRef n =>
+            $"{n.Name}<{string.Join(", ", n.TypeArguments.Select(CSharpTypeDisplay))}>",
+        TupleTypeRef tt =>
+            $"({string.Join(", ", tt.Elements.Select(CSharpTypeDisplay))})",
+        TypeVarRef tv => tv.Name,
+        FunctionTypeRef ft =>
+            ft.Return is PrimitiveType { Name: "Unit" }
+                ? (ft.Parameters.Length == 0
+                    ? "Action"
+                    : $"Action<{string.Join(", ", ft.Parameters.Select(CSharpTypeDisplay))}>")
+                : $"Func<{string.Join(", ", ft.Parameters.Select(CSharpTypeDisplay))}, "
+                    + $"{CSharpTypeDisplay(ft.Return)}>",
+        _ => "object?",
+    };
 
     /// <summary>
     /// C# reserved and contextual keywords. Overt identifiers that happen to spell these
