@@ -226,8 +226,10 @@ public sealed class TypeChecker
     private void CheckReturnType(FunctionDecl fn, TypeRef actualBodyType)
     {
         var declaredReturn = fn.ReturnType is null ? PrimitiveType.Unit : LowerType(fn.ReturnType);
-        if (!IsConcrete(declaredReturn) || !IsConcrete(actualBodyType)) return;
-        if (TypesEqual(declaredReturn, actualBodyType)) return;
+        var declaredUnfolded = UnfoldAlias(declaredReturn);
+        var actualUnfolded = UnfoldAlias(actualBodyType);
+        if (!IsConcrete(declaredUnfolded) || !IsConcrete(actualUnfolded)) return;
+        if (TypesEqual(declaredUnfolded, actualUnfolded)) return;
 
         var bodySpan = fn.Body.TrailingExpression?.Span ?? fn.Body.Span;
         ReportErrorWithHelp("OV0301",
@@ -235,6 +237,25 @@ public sealed class TypeChecker
                 + $"but body evaluates to `{actualBodyType.Display}`",
             bodySpan,
             $"either change the declared return type or adjust the body to yield `{declaredReturn.Display}`");
+    }
+
+    /// <summary>
+    /// Replace a non-generic type-alias reference with the lowered target type.
+    /// Makes the type-equality and compatibility checks transparent for simple
+    /// aliases like <c>type Age = Int</c> — values of type <c>Int</c> pass freely
+    /// to <c>Age</c> parameters, and the refinement predicate (if any) is the
+    /// only additional check that fires. Generic aliases (<c>type NonEmpty&lt;T&gt;
+    /// = List&lt;T&gt;</c>) are emitted as wrapper records by the C# backend and
+    /// stay nominal — don't unfold them here.
+    /// </summary>
+    private TypeRef UnfoldAlias(TypeRef type)
+    {
+        if (type is not NamedTypeRef nt || nt.TypeArguments.Length > 0) return type;
+        var alias = _module.Declarations
+            .OfType<TypeAliasDecl>()
+            .FirstOrDefault(t => t.Name == nt.Name && t.TypeParameters.Length == 0);
+        if (alias is null) return type;
+        return LowerType(alias.Target);
     }
 
     /// <summary>
@@ -409,18 +430,28 @@ public sealed class TypeChecker
         var count = Math.Min(c.Arguments.Length, ft.Parameters.Length);
         for (var i = 0; i < count; i++)
         {
-            var expected = ft.Parameters[i];
-            var actual = _expressionTypes.TryGetValue(c.Arguments[i].Value.Span, out var t)
-                ? t
-                : UnknownType.Instance;
+            var expected = UnfoldAlias(ft.Parameters[i]);
+            var actual = UnfoldAlias(
+                _expressionTypes.TryGetValue(c.Arguments[i].Value.Span, out var t)
+                    ? t
+                    : UnknownType.Instance);
 
             if (!IsConcrete(expected) || !IsConcrete(actual)) continue;
             if (TypesEqual(expected, actual)) continue;
 
             ReportErrorWithHelp("OV0300",
-                $"argument {i + 1}: expected `{expected.Display}`, got `{actual.Display}`",
+                $"argument {i + 1}: expected `{ft.Parameters[i].Display}`, got `{actual.Display}`",
                 c.Arguments[i].Value.Span,
                 "argument type does not match the declared parameter type");
+        }
+
+        // Refinement-predicate check runs regardless of the above type-equality
+        // result — a literal of the base type is type-compatible but may still
+        // violate the refinement predicate.
+        for (var i = 0; i < count; i++)
+        {
+            CheckRefinementAtBoundary(c.Arguments[i].Value, ft.Parameters[i],
+                boundaryDescription: $"argument {i + 1}");
         }
     }
 
@@ -723,6 +754,11 @@ public sealed class TypeChecker
                     var initType = AnnotateExpression(ls.Initializer);
                     var bindingType = ls.Type is { } annotated ? LowerType(annotated) : initType;
                     BindPatternSymbols(ls.Target, bindingType, SymbolKind.LetBinding);
+                    if (ls.Type is not null)
+                    {
+                        CheckRefinementAtBoundary(ls.Initializer, bindingType,
+                            boundaryDescription: "let binding");
+                    }
                     break;
                 case AssignmentStmt asn:
                     AnnotateExpression(asn.Value);
@@ -815,6 +851,26 @@ public sealed class TypeChecker
         {
             AnnotateExpression(fi.Value);
         }
+
+        // Refinement check on each field against the record's declared field type.
+        if (NamedTypeFromTarget(rl.TypeTarget) is NamedTypeRef typeTarget)
+        {
+            var recordDecl = _module.Declarations
+                .OfType<RecordDecl>()
+                .FirstOrDefault(r => r.Name == typeTarget.Name);
+            if (recordDecl is not null)
+            {
+                foreach (var fi in rl.Fields)
+                {
+                    var field = recordDecl.Fields.FirstOrDefault(f => f.Name == fi.Name);
+                    if (field is null) continue;
+                    var fieldType = LowerType(field.Type);
+                    CheckRefinementAtBoundary(fi.Value, fieldType,
+                        boundaryDescription: $"field `{fi.Name}`");
+                }
+            }
+        }
+
         // The record literal's type is determined by the type-target identifier chain.
         // For `Point { ... }` the type is `Point`; for `Tree.Node { ... }` the type is
         // the enum base `Tree`. Walk the chain to pick the head name, which is the
@@ -1130,6 +1186,90 @@ public sealed class TypeChecker
         ft = null!;
         return false;
     }
+
+    // ---------------------------------------- refinement predicate check
+
+    /// <summary>
+    /// At any point where a value flows into a position typed as a refined alias
+    /// (call arg, let binding, record field), check whether the value — if a literal
+    /// — satisfies the alias's <c>where</c> predicate. Violations that can be decided
+    /// statically fire OV0311. Undecidable predicates or non-literal values fall
+    /// through silently; DESIGN.md §8 says those become runtime assertions at the
+    /// boundary (emission work, not this pass).
+    /// </summary>
+    private void CheckRefinementAtBoundary(
+        Expression value,
+        TypeRef expectedType,
+        string boundaryDescription)
+    {
+        if (GetRefinementAlias(expectedType) is not { } alias) return;
+        if (alias.Predicate is null) return;
+
+        var selfValue = RefinementEvaluator.TryExtractLiteral(value);
+        if (selfValue is null) return;
+
+        var result = RefinementEvaluator.Evaluate(alias.Predicate, selfValue);
+        if (result != false) return; // null = undecidable, true = satisfied
+
+        var predicateText = FormatPredicate(alias.Predicate);
+        var d = new Diagnostic(
+            DiagnosticSeverity.Error,
+            "OV0311",
+            $"{boundaryDescription}: value does not satisfy refinement predicate on `{alias.Name}`",
+            value.Span)
+            .WithHelp($"values of type `{alias.Name}` must satisfy: {predicateText}")
+            .WithNoteAt(alias.Span, $"refinement `{alias.Name}` is declared here");
+        _diagnostics.Add(d);
+    }
+
+    /// <summary>
+    /// Locate the <see cref="TypeAliasDecl"/> whose <paramref name="type"/> references
+    /// it, if that alias carries a refinement predicate. Returns null for plain types,
+    /// non-alias references, or aliases without predicates.
+    /// </summary>
+    private TypeAliasDecl? GetRefinementAlias(TypeRef type)
+    {
+        if (type is not NamedTypeRef nt) return null;
+        return _module.Declarations
+            .OfType<TypeAliasDecl>()
+            .FirstOrDefault(t => t.Name == nt.Name && t.Predicate is not null);
+    }
+
+    /// <summary>
+    /// Pretty-print a predicate expression for inclusion in a diagnostic message.
+    /// Recognizes the common range / logical shapes; falls back to a placeholder
+    /// for anything more exotic.
+    /// </summary>
+    private static string FormatPredicate(Expression e) => e switch
+    {
+        BinaryExpr be => $"{FormatPredicate(be.Left)} {FormatBinaryOp(be.Op)} {FormatPredicate(be.Right)}",
+        UnaryExpr { Op: UnaryOp.Negate } ue => $"-{FormatPredicate(ue.Operand)}",
+        UnaryExpr { Op: UnaryOp.LogicalNot } ue => $"!{FormatPredicate(ue.Operand)}",
+        IdentifierExpr id => id.Name,
+        IntegerLiteralExpr i => i.Lexeme,
+        FloatLiteralExpr f => f.Lexeme,
+        BooleanLiteralExpr b => b.Value ? "true" : "false",
+        StringLiteralExpr s => s.Value,
+        _ => "...",
+    };
+
+    private static string FormatBinaryOp(BinaryOp op) => op switch
+    {
+        BinaryOp.LogicalAnd => "&&",
+        BinaryOp.LogicalOr => "||",
+        BinaryOp.Equal => "==",
+        BinaryOp.NotEqual => "!=",
+        BinaryOp.Less => "<",
+        BinaryOp.LessEqual => "<=",
+        BinaryOp.Greater => ">",
+        BinaryOp.GreaterEqual => ">=",
+        BinaryOp.Add => "+",
+        BinaryOp.Subtract => "-",
+        BinaryOp.Multiply => "*",
+        BinaryOp.Divide => "/",
+        BinaryOp.Modulo => "%",
+        _ => "?",
+    };
 
     // ----------------------------------------------- diagnostic reporting
 

@@ -381,6 +381,107 @@ public class TypeDiagnosticTests
         Assert.Contains("`Option.Some`", d.Message);
     }
 
+    // ------------------------------- OV0311 refinement predicates
+
+    [Fact]
+    public void OV0311_LiteralOutOfRange_AtCallArg_Fires()
+    {
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn take(a: Age) -> Age { a }\n"
+            + "fn f() -> Age { take(200) }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0311");
+        Assert.Contains("`Age`", d.Message);
+        var help = Assert.Single(d.Notes, n => n.Kind == DiagnosticNoteKind.Help);
+        Assert.Contains("0 <= self", help.Text);
+    }
+
+    [Fact]
+    public void OV0311_LiteralInRange_NoDiagnostic()
+    {
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn take(a: Age) -> Age { a }\n"
+            + "fn f() -> Age { take(42) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0311");
+    }
+
+    [Fact]
+    public void OV0311_FloatRefinement_Works()
+    {
+        var r = Check(
+            "module t\ntype Percent = Float where 0.0 <= self && self <= 100.0\n"
+            + "fn take(p: Percent) -> Percent { p }\n"
+            + "fn f() -> Percent { take(150.0) }");
+        Assert.Contains(r.Diagnostics, d => d.Code == "OV0311");
+    }
+
+    [Fact]
+    public void OV0311_UndecidablePredicate_NoDiagnostic()
+    {
+        // `size(self) > 0` calls a function against self; not in the decidable
+        // fragment. Should NOT fire — this is runtime-assertion territory.
+        var r = Check(
+            "module t\ntype NonEmpty<T> = List<T> where size(self) > 0\n"
+            + "fn f() -> Int { 42 }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0311");
+    }
+
+    [Fact]
+    public void OV0311_NonLiteralArgument_NoDiagnostic()
+    {
+        // Variables / call results can't be statically decided; should fall through
+        // silently pending runtime assertions.
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn take(a: Age) -> Age { a }\n"
+            + "fn f(n: Int) -> Age { take(n) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0311");
+    }
+
+    [Fact]
+    public void OV0311_LetBinding_LiteralOutOfRange_Fires()
+    {
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn f(a: Age) -> Age { let b: Age = 999; b }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0311");
+        Assert.Contains("let binding", d.Message);
+    }
+
+    [Fact]
+    public void OV0311_RecordFieldInit_LiteralOutOfRange_Fires()
+    {
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "record Person { age: Age, name: String }\n"
+            + "fn f() -> Person { Person { age = 200, name = \"x\" } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0311");
+        Assert.Contains("field `age`", d.Message);
+    }
+
+    [Fact]
+    public void OV0311_NegativeLiteral_EvaluatesCorrectly()
+    {
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn take(a: Age) -> Age { a }\n"
+            + "fn f() -> Age { take(-5) }");
+        Assert.Contains(r.Diagnostics, d => d.Code == "OV0311");
+    }
+
+    [Fact]
+    public void Aliases_TransparentToTypeEquality()
+    {
+        // Passing an Int literal to an Age parameter should NOT fire OV0300 —
+        // non-generic aliases are transparent. Only the refinement check applies.
+        var r = Check(
+            "module t\ntype Age = Int where 0 <= self && self <= 150\n"
+            + "fn take(a: Age) -> Age { a }\n"
+            + "fn f() -> Age { take(42) }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0300");
+    }
+
     // ---------------------------------------------- smoke: examples stay clean
 
     [Theory]
