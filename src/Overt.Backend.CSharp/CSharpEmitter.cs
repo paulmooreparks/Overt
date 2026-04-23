@@ -65,6 +65,26 @@ public sealed class CSharpEmitter
     /// </summary>
     private TypeRef? _expectedType;
 
+    /// <summary>
+    /// Maps each <see cref="PropagateExpr"/> that's been hoisted to a local variable
+    /// holding its unwrapped Ok value. When the expression walker later visits the
+    /// <c>?</c> node, it emits the local name instead of <c>.Unwrap()</c>, so the
+    /// happy path is a field read and the Err path has already returned. Keyed by
+    /// source span because AST nodes are records and would compare by structure.
+    /// </summary>
+    private readonly Dictionary<SourceSpan, string> _hoistMap = new();
+
+    /// <summary>Unique-name counter for hoisted <c>?</c> temporaries.</summary>
+    private int _propagateCounter;
+
+    /// <summary>
+    /// Enclosing function's declared return type, set by <see cref="EmitFunction"/>.
+    /// Used by the <c>?</c>-hoisting pass to derive the error type to propagate when
+    /// the operand's Result shape cannot be recovered from type annotations alone
+    /// (e.g., <c>|&gt;?</c> where generic inference across the pipe isn't wired up).
+    /// </summary>
+    private TypeRef? _currentFnReturn;
+
     private CSharpEmitter(IndentedWriter w, TypeCheckResult? types, string? sourcePath)
     {
         _w = w;
@@ -325,7 +345,16 @@ public sealed class CSharpEmitter
             _w.Write(EscapeId(fn.Parameters[i].Name));
         }
         _w.WriteLine(")");
-        EmitBlockAsMethodBody(fn.Body, fn.ReturnType);
+        var savedReturn = _currentFnReturn;
+        _currentFnReturn = fn.ReturnType is null ? null : LowerType(fn.ReturnType);
+        try
+        {
+            EmitBlockAsMethodBody(fn.Body, fn.ReturnType);
+        }
+        finally
+        {
+            _currentFnReturn = savedReturn;
+        }
     }
 
     /// <summary>Type-parameter names that appear in the function's value-positions
@@ -474,6 +503,7 @@ public sealed class CSharpEmitter
             if (block.TrailingExpression is { } tail)
             {
                 EmitLineDirective(tail.Span);
+                EmitHoistsForExpression(tail);
                 _w.Write("return ");
                 WithExpected(declaredReturn, () => EmitExpression(tail));
                 _w.WriteLine(";");
@@ -522,6 +552,7 @@ public sealed class CSharpEmitter
         switch (stmt)
         {
             case LetStmt ls:
+                EmitHoistsForExpression(ls.Initializer);
                 _w.Write("var ");
                 EmitPatternForBinding(ls.Target);
                 _w.Write(" = ");
@@ -530,6 +561,7 @@ public sealed class CSharpEmitter
                 break;
 
             case AssignmentStmt asn:
+                EmitHoistsForExpression(asn.Value);
                 _w.Write(EscapeId(asn.Name));
                 _w.Write(" = ");
                 EmitExpression(asn.Value);
@@ -539,6 +571,214 @@ public sealed class CSharpEmitter
             case ExpressionStmt es:
                 EmitExpressionAsStatement(es.Expression);
                 break;
+        }
+    }
+
+    // --------------------------------------------------- ? propagation lowering
+    //
+    // Every `?` on a Result<T, E> in an unconditionally-evaluated position is
+    // hoisted into a local before the enclosing statement: a temporary holds the
+    // Result, an `if (IsErr) return Err(...)` branch propagates, and a second local
+    // extracts the Ok value. The expression walker then substitutes the Ok-local at
+    // the `?` site. This gives DESIGN.md §11 its real semantics — errors as values,
+    // no hidden unwinding.
+    //
+    // `?` inside conditionally-evaluated subexpressions (if/match/while arms, block
+    // expressions) is NOT hoisted by this pass; evaluating both branches would be
+    // incorrect. Those sites fall back to .Unwrap() for now and are a known gap for
+    // a follow-up that generates per-branch local hoisting.
+
+    /// <summary>
+    /// Walk <paramref name="expr"/> collecting every propagating site (<c>?</c> or
+    /// <c>|&gt;?</c>) in an always-evaluated position, and emit the hoist preamble
+    /// (<c>var __q_N = ...; if (...) return Err(...)</c>) for each. After this
+    /// call, the expression walker substitutes the hoisted Ok-local at each site
+    /// via <see cref="_hoistMap"/>.
+    /// </summary>
+    private void EmitHoistsForExpression(Expression expr)
+    {
+        var hoists = new List<Expression>();
+        CollectHoistablePropagates(expr, hoists);
+        foreach (var node in hoists)
+        {
+            EmitSingleHoist(node);
+        }
+    }
+
+    /// <summary>
+    /// Recursively gather propagating sites (<see cref="PropagateExpr"/> and
+    /// pipe-propagate <see cref="BinaryExpr"/>s) that are always evaluated when
+    /// the containing statement runs. Stops at conditional-evaluation boundaries
+    /// (if / match / while / block-as-expression) so branches aren't eagerly
+    /// forced.
+    /// </summary>
+    private static void CollectHoistablePropagates(Expression expr, List<Expression> into)
+    {
+        switch (expr)
+        {
+            case PropagateExpr pr:
+                CollectHoistablePropagates(pr.Operand, into);
+                into.Add(pr);
+                break;
+
+            case BinaryExpr { Op: BinaryOp.PipePropagate } be:
+                // `a |>? f(b)` — recurse into both sides, then hoist the pipe
+                // itself. The "operand" of the implicit `?` is the spliced call,
+                // which EmitSingleHoist knows how to emit.
+                CollectHoistablePropagates(be.Left, into);
+                CollectHoistablePropagates(be.Right, into);
+                into.Add(be);
+                break;
+
+            case CallExpr c:
+                CollectHoistablePropagates(c.Callee, into);
+                foreach (var arg in c.Arguments)
+                    CollectHoistablePropagates(arg.Value, into);
+                break;
+
+            case BinaryExpr be:
+                CollectHoistablePropagates(be.Left, into);
+                CollectHoistablePropagates(be.Right, into);
+                break;
+
+            case UnaryExpr ue:
+                CollectHoistablePropagates(ue.Operand, into);
+                break;
+
+            case FieldAccessExpr fa:
+                CollectHoistablePropagates(fa.Target, into);
+                break;
+
+            case RecordLiteralExpr rl:
+                foreach (var f in rl.Fields) CollectHoistablePropagates(f.Value, into);
+                break;
+
+            case WithExpr we:
+                CollectHoistablePropagates(we.Target, into);
+                foreach (var f in we.Updates) CollectHoistablePropagates(f.Value, into);
+                break;
+
+            case TupleExpr te:
+                foreach (var e in te.Elements) CollectHoistablePropagates(e, into);
+                break;
+
+            case InterpolatedStringExpr isx:
+                foreach (var part in isx.Parts)
+                    if (part is StringInterpolationPart iep)
+                        CollectHoistablePropagates(iep.Expression, into);
+                break;
+
+            // Stop at conditional/block boundaries — branches should not be hoisted
+            // eagerly. Same for identifier/literal leaves and language forms whose
+            // bodies are their own hoisting scope.
+            case IfExpr:
+            case MatchExpr:
+            case WhileExpr:
+            case BlockExpr:
+            case ParallelExpr:
+            case RaceExpr:
+            case UnsafeExpr:
+            case TraceExpr:
+            case IdentifierExpr:
+            case IntegerLiteralExpr:
+            case FloatLiteralExpr:
+            case BooleanLiteralExpr:
+            case StringLiteralExpr:
+            case UnitExpr:
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Emit the preamble for one hoisted propagating site (<c>?</c> or <c>|&gt;?</c>):
+    /// evaluate the operand into a temp, early-return <c>Err(...)</c> on failure,
+    /// extract the Ok value into a second temp. Records the Ok-local in
+    /// <see cref="_hoistMap"/> keyed by the site's span.
+    ///
+    /// C# infers the <c>Result&lt;_, _&gt;</c> generics via <c>var</c>, so the hoist
+    /// doesn't need to spell them — it only needs the enclosing function's return
+    /// error type to target-type the <c>Err&lt;E&gt;(...)</c> factory. That means the
+    /// only prerequisite is that the enclosing function returns a <c>Result&lt;_, E&gt;</c>.
+    /// </summary>
+    private void EmitSingleHoist(Expression node)
+    {
+        Expression operand;
+        SourceSpan siteSpan;
+        switch (node)
+        {
+            case PropagateExpr pr:
+                operand = pr.Operand;
+                siteSpan = pr.Span;
+                break;
+            case BinaryExpr { Op: BinaryOp.PipePropagate } be:
+                operand = be;
+                siteSpan = be.Span;
+                break;
+            default:
+                return;
+        }
+
+        // Can't hoist if we don't know the enclosing function's error type — fall
+        // back to .Unwrap() at the site.
+        if (_currentFnReturn is not NamedTypeRef
+            { Name: "Result", TypeArguments: { Length: 2 } retArgs })
+        {
+            return;
+        }
+        var errCs = CSharpTypeDisplay(retArgs[1]);
+
+        var id = _propagateCounter++;
+        var qName = $"__q_{id}";
+        var vName = $"__qv_{id}";
+
+        _w.Write($"var {qName} = (");
+        if (operand is BinaryExpr pipe)
+        {
+            EmitPipeSpliceOnly(pipe);
+        }
+        else
+        {
+            EmitExpression(operand);
+        }
+        _w.WriteLine(");");
+        _w.WriteLine($"if (!{qName}.IsOk) return Err<{errCs}>({qName}.UnwrapErr());");
+        _w.WriteLine($"var {vName} = {qName}.Unwrap();");
+
+        _hoistMap[siteSpan] = vName;
+    }
+
+    /// <summary>
+    /// Emit the pipe-splice for a <c>|&gt;?</c> without its trailing <c>.Unwrap()</c>.
+    /// Used by hoisting so the Result is captured pre-unwrap for an early-return
+    /// check. Mirrors <see cref="EmitPipe"/>'s splice logic.
+    /// </summary>
+    private void EmitPipeSpliceOnly(BinaryExpr be)
+    {
+        if (be.Right is CallExpr call)
+        {
+            _w.Write("(");
+            EmitExpression(call.Callee);
+            _w.Write("(");
+            EmitExpression(be.Left);
+            foreach (var arg in call.Arguments)
+            {
+                _w.Write(", ");
+                if (arg.Name is { } name)
+                {
+                    _w.Write(name);
+                    _w.Write(": ");
+                }
+                EmitExpression(arg.Value);
+            }
+            _w.Write("))");
+        }
+        else
+        {
+            _w.Write("(");
+            EmitExpression(be.Right);
+            _w.Write("(");
+            EmitExpression(be.Left);
+            _w.Write("))");
         }
     }
 
@@ -614,6 +854,12 @@ public sealed class CSharpEmitter
             // reject anything that isn't a valid statement-expression (calls, assignments,
             // increments, etc.) — that's the type checker's job later.
             default:
+                EmitHoistsForExpression(expr);
+                // If the root is a `?` that we just hoisted, the side effect has
+                // already run in the hoist preamble and the value is discarded
+                // anyway — emitting `__qv_N;` would be a bare-identifier statement
+                // (CS0201). Skip the trailing emit in that case.
+                if (expr is PropagateExpr pr && _hoistMap.ContainsKey(pr.Span)) break;
                 EmitExpression(expr);
                 _w.WriteLine(";");
                 break;
@@ -707,10 +953,20 @@ public sealed class CSharpEmitter
                 break;
 
             case PropagateExpr pr:
-                // `expr?` expects `expr` to be a Result<T, E>. Its T is the current
-                // expected type; E is open. Thread a Result<currentExpected, _> into
-                // the operand so parallel/race placeholders and Ok/Err constructors
-                // inside see the right target shape.
+                // If a statement-level pre-pass has already hoisted this `?` into a
+                // local (the common case — see CollectHoistablePropagates), emit the
+                // local's name; the Err path has already returned above this point.
+                if (_hoistMap.TryGetValue(pr.Span, out var hoistedName))
+                {
+                    _w.Write(hoistedName);
+                    break;
+                }
+
+                // Fallback for `?` nested inside a conditionally-evaluated context
+                // (if/match/while arms, or block-as-expression) where eager hoisting
+                // would evaluate branches that shouldn't run. These sites still use
+                // .Unwrap() — which throws on Err — and are tracked as a known gap
+                // for conditional-hoist lowering in a follow-up.
                 var innerExpected = _expectedType is not null and not UnknownType
                     ? new NamedTypeRef("Result",
                         ImmutableArray.Create<TypeRef>(_expectedType, UnknownType.Instance))
@@ -931,6 +1187,16 @@ public sealed class CSharpEmitter
 
     private void EmitBinary(BinaryExpr be)
     {
+        // If this is a `|>?` we've already hoisted, substitute the hoisted Ok-local.
+        // The Err path has early-returned above this point; the value of the pipe
+        // here is the unwrapped T.
+        if (be.Op == BinaryOp.PipePropagate
+            && _hoistMap.TryGetValue(be.Span, out var hoistedPipe))
+        {
+            _w.Write(hoistedPipe);
+            return;
+        }
+
         // Pipes rewrite to call-arg splicing: `x |> f(a, b)` → `f(x, a, b)`.
         if (be.Op is BinaryOp.PipeCompose or BinaryOp.PipePropagate)
         {

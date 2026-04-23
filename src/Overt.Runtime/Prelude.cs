@@ -37,10 +37,16 @@ public abstract record Result<T, E>
     public abstract bool IsOk { get; }
     public bool IsErr => !IsOk;
 
-    /// <summary>Unwrap the <c>Ok</c> value or throw. Mirrors the <c>?</c> operator's
-    /// post-lowering shape; a future pass will replace direct calls with proper
-    /// propagation at the caller site.</summary>
+    /// <summary>Extract the <c>Ok</c> value or throw. Used by the C# emitter on the
+    /// Ok branch after a <c>?</c>-hoist has already early-returned on Err, and as a
+    /// fallback inside conditionally-evaluated expressions where hoisting isn't
+    /// applied.</summary>
     public abstract T Unwrap();
+
+    /// <summary>Extract the <c>Err</c> value or throw. Used by the C# emitter's
+    /// <c>?</c>-hoist on the Err branch to construct the propagated error without
+    /// having to spell out generic arguments at the pattern-match site.</summary>
+    public abstract E UnwrapErr();
 
     public static implicit operator Result<T, E>(_OkMarker<T> ok) => new ResultOk<T, E>(ok.Value);
     public static implicit operator Result<T, E>(_ErrMarker<E> err) => new ResultErr<T, E>(err.Error);
@@ -50,6 +56,8 @@ public sealed record ResultOk<T, E>(T Value) : Result<T, E>
 {
     public override bool IsOk => true;
     public override T Unwrap() => Value;
+    public override E UnwrapErr()
+        => throw new InvalidOperationException($"UnwrapErr called on Ok({Value})");
 }
 
 public sealed record ResultErr<T, E>(E Error) : Result<T, E>
@@ -57,6 +65,7 @@ public sealed record ResultErr<T, E>(E Error) : Result<T, E>
     public override bool IsOk => false;
     public override T Unwrap()
         => throw new InvalidOperationException($"Unwrap called on Err({Error})");
+    public override E UnwrapErr() => Error;
 }
 
 // Markers carry just enough information for Result<T, E>'s implicit conversions to

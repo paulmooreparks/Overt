@@ -159,9 +159,11 @@ public static class Stdlib
             ret: Generic("List", TV("T")),
             effects: new[] { "E" }));
 
-        // par_map<T, U, E>(list: List<T>, f: fn(T) !{E} -> Result<U, ?>) !{E, io, async}
-        //   -> List<Result<U, ?>>
-        // Simplified: return List<U> and carry io/async/E effects.
+        // par_map<T, U, E>(list: List<T>, f: fn(T) !{io, async} -> Result<U, E>)
+        //     !{io, async} -> Result<List<U>, E>
+        // Runs the callback concurrently over each item; any Err short-circuits the
+        // whole pipeline, so the return type is a Result wrapping the output list.
+        // `|>?` unwraps this — see InferBinary's PipePropagate branch.
         e.Add(Fn("par_map",
             typeParams: new[] { "T", "U", "E" },
             parameters: new TypeRef[]
@@ -169,11 +171,11 @@ public static class Stdlib
                 Generic("List", TV("T")),
                 new FunctionTypeRef(
                     ImmutableArray.Create<TypeRef>(TV("T")),
-                    TV("U"),
-                    ImmutableArray.Create("E")),
+                    Generic("Result", TV("U"), TV("E")),
+                    ImmutableArray.Create("io", "async")),
             },
-            ret: Generic("List", TV("U")),
-            effects: new[] { "io", "async", "E" }));
+            ret: Generic("Result", Generic("List", TV("U")), TV("E")),
+            effects: new[] { "io", "async" }));
 
         // fold<T, U>(list: List<T>, seed: U, step: fn(U, T) -> U) -> U
         e.Add(Fn("fold",

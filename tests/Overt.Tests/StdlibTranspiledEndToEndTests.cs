@@ -142,6 +142,80 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_QuestionMark_PropagatesErrAsValue()
+    {
+        // Direct `?` on a Result-returning function: if the callee returns Err,
+        // main must return Err *without* throwing. Verifies DESIGN.md §11's
+        // "errors as values, no hidden unwinding."
+        const string src = """
+            module e2e_qmark_err
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Int = try_something()?
+                Ok(())
+            }
+
+            fn try_something() -> Result<Int, IoError> {
+                Err(IoError { narrative = "nope" })
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "e2e_qmark_err");
+
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        // The narrative should have survived through the propagation.
+        var errProp = result.GetType().GetProperty("Error");
+        Assert.NotNull(errProp);
+        var err = errProp!.GetValue(result);
+        Assert.Equal("nope", err!.GetType().GetProperty("narrative")!.GetValue(err));
+    }
+
+    [Fact]
+    public void Transpiled_PipePropagate_PropagatesErrAsValue()
+    {
+        // `|>?` on a fallible pipe: par_map returns Err, which |>? should early-
+        // return from main without throwing. Previously this path threw
+        // InvalidOperationException via .Unwrap(); now it returns Err as a value.
+        const string src = """
+            module e2e_pipeprop_err
+
+            fn main() !{io, async} -> Result<(), IoError> {
+                let _: Int =
+                    build_list()
+                      |>? par_map(try_double)
+                      |>  fold(seed = 0, step = add)
+
+                Ok(())
+            }
+
+            fn build_list() -> List<Int> {
+                List.concat_three(
+                    first  = List.singleton(1),
+                    middle = List.singleton(2),
+                    last   = List.singleton(3))
+            }
+
+            fn try_double(n: Int) -> Result<Int, IoError> {
+                if n == 2 {
+                    Err(IoError { narrative = "no two" })
+                } else {
+                    Ok(n * 2)
+                }
+            }
+
+            fn add(acc: Int, n: Int) -> Int { acc + n }
+            """;
+
+        var (result, _) = CompileAndRun(src, "e2e_pipeprop_err");
+
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Transpiled_ParMap_RunsEndToEnd_PropagatesErr()
     {
         // par_map where one input maps to Err — the runtime should return the first

@@ -502,17 +502,35 @@ public sealed class TypeChecker
                         ? PrimitiveType.Int
                         : UnknownType.Instance,
 
-            // Pipe is desugared: x |> f(a, b) has the call's return type.
-            BinaryOp.PipeCompose or BinaryOp.PipePropagate =>
+            // Pipe is desugared: x |> f(a, b) has the call's return type. `|>?`
+            // additionally unwraps a Result<T, E> result to T, since the Err is
+            // propagated to the enclosing function.
+            BinaryOp.PipeCompose =>
                 right is FunctionTypeRef ft ? ft.Return :
                 be.Right is CallExpr call
                     && _expressionTypes.TryGetValue(call.Callee.Span, out var t)
                     && t is FunctionTypeRef ft2 ? ft2.Return
                     : UnknownType.Instance,
 
+            BinaryOp.PipePropagate =>
+                UnwrapResultOrKeep(
+                    right is FunctionTypeRef pft ? pft.Return :
+                    be.Right is CallExpr pcall
+                        && _expressionTypes.TryGetValue(pcall.Callee.Span, out var pt)
+                        && pt is FunctionTypeRef pft2 ? pft2.Return
+                        : UnknownType.Instance),
+
             _ => UnknownType.Instance,
         };
     }
+
+    /// <summary>Unwrap a <c>Result&lt;T, E&gt;</c> to <c>T</c>; identity otherwise.
+    /// Used by <c>|&gt;?</c>'s type inference: the pipe reveals the Ok-type to the
+    /// downstream operand, with Err propagated to the enclosing function.</summary>
+    private static TypeRef UnwrapResultOrKeep(TypeRef t)
+        => t is NamedTypeRef { Name: "Result", TypeArguments: { Length: 2 } args }
+            ? args[0]
+            : t;
 
     private TypeRef InferUnary(UnaryExpr ue)
     {

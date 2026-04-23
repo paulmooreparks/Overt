@@ -42,7 +42,7 @@ Grammar specs (authoritative for the parser/lexer):
 
 The frontend works end-to-end on C# with real semantic enforcement. **Every example in [`examples/`](examples/) transpiles into C# that compiles cleanly via Roslyn**, pinned by a test for every example. The transpiled `examples/hello.ov` actually runs and prints "Hello, LLM!" — verified by the [`tests/Overt.EndToEnd`](tests/Overt.EndToEnd) harness.
 
-What exists today, pinned by 316 passing tests:
+What exists today, pinned by 318 passing tests:
 
 - **Lexer** (mode-stack, full interpolation, token-stream goldens for every example).
 - **Parser** (recursive descent, full precedence grammar, all 12 examples parse cleanly).
@@ -56,6 +56,7 @@ What exists today, pinned by 316 passing tests:
   - Non-generic type aliases are transparent for type-equality; the refinement check is the only layer that fires on `let a: Age = 42`.
 - **Synthetic stdlib declarations** with real signatures — `Result`, `Option`, `List`, `Ok`/`Err`/`Some`/`None`, `println`, collection operations, `Trace`, `CString`, variant lists for `Option`/`Result`.
 - **Real stdlib runtime implementations** ([`Overt.Runtime.Prelude`](src/Overt.Runtime/Prelude.cs)) — `map`, `filter`, `fold` over `ImmutableArray`; `par_map` runs concurrently via `Parallel.For` and returns first-Err by original index; `Trace.subscribe`/`Trace.emit` dispatch to registered subscribers. Transpiled Overt programs that touch collections now run, not just compile — verified by [`StdlibTranspiledEndToEndTests`](tests/Overt.Tests/StdlibTranspiledEndToEndTests.cs), which compiles a small `.ov` program in-memory and invokes `Module.main()`.
+- **Faithful `?` / `|>?` propagation — errors are values, not exceptions.** The emitter's `?`-hoisting pass transforms every always-evaluated `?` and `|>?` site into a `var __q_N = ...; if (!__q_N.IsOk) return Err<E>(__q_N.UnwrapErr()); var __qv_N = __q_N.Unwrap();` preamble before the enclosing statement, then substitutes the unwrapped local at the original site. Conditionally-evaluated sites (inside if/match/while arms or block expressions) fall back to `.Unwrap()` and are marked as a follow-up. Verified by new end-to-end tests that catch an Err flowing out of `Module.main()` as a returned value.
 - **C# emitter** (type-aware, expected-type threading for generic inference, stdlib variant-pattern lowering, `#line` directives for PDB mapping back to `.ov` source).
 - **Runtime prelude** ([`Overt.Runtime`](src/Overt.Runtime)) — `Unit`, `Result<T, E>`, `Option<T>`, `IoError`, `RaceAllFailed<E>`, `List<T>` and friends, target-typed marker structs for `Ok`/`Err`/`Some`.
 - **End-to-end harness** that regenerates `Generated.cs` from `hello.ov` on demand (`OVERT_REGEN_HARNESS=1 dotnet test`) and runs the transpiled program.
@@ -64,7 +65,7 @@ What exists today, pinned by 316 passing tests:
 
 What's notably absent, ordered by impact on "can I write real code in this":
 
-- **`?` operator faithfully propagates Err.** Current emitter lowers `?` / `|>?` to `.Unwrap()`, which throws on Err rather than early-returning a constructed `Err(...)`. Works in practice because a program that hits an unexpected Err fails loudly, but it violates DESIGN.md §11 — `?` is supposed to be errors-as-values, not exceptions. Proper lowering needs either CPS/continuation rewriting or a synthetic temp + conditional return at each `?` site. Small emitter change; touches every call that uses `?`.
+- **Conditionally-evaluated `?` still throws.** The hoisting pass is intentionally stopped at `if` / `match` / `while` arms and block-as-expression boundaries — hoisting both branches eagerly would run code that shouldn't run. `?` inside those contexts still lowers to `.Unwrap()` (throws on Err). Common in practice when a match arm does `foo()?`. Follow-up: per-branch hoisting that threads the early-return through the arm body.
 - **Language gaps vs. real programs.** The parser accepts every construct the 12 examples use, but real programs will hit: `for each` / `loop` / `break` / `continue`, integer and float literal patterns in `match`, block comments. None are hard; each is a small parser + checker + emitter increment.
 - **Runtime-assertion emission for undecidable refinement predicates.** The checker marks `size(self) > 0`-style predicates as "needs runtime check"; the emitter does not yet generate the check. Works around it today by writing the validation in user code, as refinement.ov does.
 - **Formatter.** Not started. Canonical form is enforced by convention in the examples, not mechanically. Blocks the `@review` / `@agent` comment-tooling story.
@@ -80,8 +81,8 @@ What's notably absent, ordered by impact on "can I write real code in this":
 
 Ordered by "how directly this unblocks someone writing real Overt code":
 
-1. **Faithful `?` propagation in the emitter** (1 session). Currently `?` / `|>?` lower to `.Unwrap()` which throws on Err. Replace with real early-return lowering: at each `?` site, introduce a temp, check `IsErr`, return a constructed `Err(...)` of the enclosing function's return type if so, else continue with `.Unwrap()`. Makes DESIGN.md §11 actually true. Small, mechanical, but touches every `?` call site in emitter output.
-2. **Language gaps: `for each` / `loop` / integer-literal patterns / `break` / `continue`** (1–2 sessions). Parser + checker + emitter work. Each is self-contained. The union covers what a user writing a CLI tool would hit.
+1. **Language gaps: `for each` / `loop` / integer-literal patterns / `break` / `continue`** (1–2 sessions). Parser + checker + emitter work. Each is self-contained. The union covers what a user writing a CLI tool would hit.
+2. **Conditional-context `?` hoisting** (½ session). Extend the hoisting pass to walk into `if` / `match` / `while` arms, hoisting each arm's `?` sites into the arm's body with a proper early-return chain. Closes the last remaining gap in "errors are values, no hidden unwinding."
 3. **Runtime-assertion emission for undecidable refinement predicates** (1 session). The emitter's implicit-operator generator on wrapper records should evaluate the predicate and throw on violation. Closes the last gap in the refinement-types guarantee.
 4. **`AGENTS.md` — the agent-facing grounding doc** (1 session, best done after #1 so stubs are real). ~400–600 line operational reference: every construct gets one canonical example, effect rows and their meanings, `Result`/`?` idioms, the stdlib surface with real signatures, what each OV diagnostic means and how to fix it. Designed to be loaded verbatim into an agent's context at session start. Not `DESIGN.md` — that's rationale; this is *how to write Overt today*. Paired with a pass over diagnostics to add `note:` pointers into `AGENTS.md` sections so an agent hitting an error learns the rule in situ.
 5. **Formatter** (2 sessions). Rules are in §21. Rust's `rustfmt` / Go's `gofmt` is the shape — consumes AST + trivia, emits canonical source. Needed for `@review` / `@agent` comment tooling and for asserting "one canonical form" mechanically.
@@ -149,4 +150,4 @@ The author (paul@smartsam.com) has 26 years of C# experience and concurrent Go e
 
 ---
 
-**Semantic-enforcement arc is operationally complete: 11 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, and refinement predicates. Real stdlib runtime is now in — collection-heavy transpiled programs actually run, not just compile. 316/316 tests. Godbolt release engineering staged and waiting on a tag push. Next most-valuable piece: faithful `?` lowering so Err propagation is errors-as-values instead of throw-based. After that: language gaps (`for each` / `loop` / literal patterns), then `AGENTS.md` as the grounding doc for agents writing Overt.**
+**Semantic-enforcement arc is operationally complete: 11 diagnostic codes now reject real bugs across type correctness, exhaustiveness, effect rows, ignored Results, and refinement predicates. Real stdlib runtime is in and `?` / `|>?` now lower to faithful early-return propagation (DESIGN.md §11's errors-as-values, not throw-based). 318/318 tests. Godbolt release engineering staged and waiting on a tag push. Next most-valuable piece: language gaps (`for each` / `loop` / literal patterns in `match`), then `AGENTS.md` as the grounding doc for agents writing Overt.**
