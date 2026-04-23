@@ -112,17 +112,31 @@ git push origin add-overt
 2. Click **New pull request**, then **compare across forks**.
 3. base: `compiler-explorer/infra:main`, compare: `<you>/infra:add-overt`.
 4. Title: `Add Overt`.
-5. Description — something like:
+5. Description — paste this, adjusting the URL and PR number:
 
-   > Adds an install recipe for Overt, a transpile-to-C# language.
-   >
-   > Release artifact: <your release URL>
-   >
-   > The companion `compiler-explorer` PR is at <link after you open it>.
-   >
-   > Overt is Apache-2.0. Repo: <https://github.com/paulmooreparks/Overt>
+   ```markdown
+   Adds an install recipe for Overt, an agent-first programming language
+   that transpiles to C#.
 
-6. Submit.
+   - **Repo:** https://github.com/paulmooreparks/Overt
+   - **License:** Apache-2.0
+   - **Release artifact:** https://github.com/paulmooreparks/Overt/releases/download/v0.1.0-preview/overt-0.1.0-preview-linux-x64.tar.xz
+   - **Tarball shape:** `overt-0.1.0-preview/bin/overt` (single-file
+     self-contained Linux x64 binary produced by `dotnet publish`)
+   - **Companion PR:** compiler-explorer/compiler-explorer#<NUMBER>
+     (to be filled in after that PR is opened)
+
+   This adds a `tarballs`-type installer for the 0.1.0-preview release.
+   Future versions append to the `targets:` list.
+
+   Happy to adjust `url_pattern`, `dir_pattern`, `strip_components`, or
+   `check_exe` if any of those don't match your infra conventions — just
+   let me know and I'll push an update.
+   ```
+
+6. Submit. **Leave the companion-PR line as-is with the `<NUMBER>`
+   placeholder.** When you open the compiler-explorer PR in Stage 3,
+   come back and edit this PR's description to fill in its number.
 
 ### 2.5 What happens next
 
@@ -236,20 +250,49 @@ git push origin add-overt
 1. <https://github.com/compiler-explorer/compiler-explorer/pulls> → **New**.
 2. base: `compiler-explorer/compiler-explorer:main`, compare: your branch.
 3. Title: `Add Overt language`.
-4. Description — similar to the infra PR:
+4. Description — paste this, filling in the infra PR number from stage 2:
 
-   > Adds Overt support. Companion infra PR: <infra PR link>
-   >
-   > Overt is a transpile-to-C# agent-first language.
-   > - Repo: <https://github.com/paulmooreparks/Overt>
-   > - License: Apache-2.0
-   > - Compiler output pane shows transpiled C# source (supportsAsm=false
-   >   for now; will wire up csc chaining in a follow-up).
-   > - Example programs: 12 in the repo's `examples/` directory.
-   > - Runtime errors, debugger stepping, and stack traces resolve to the
-   >   original `.ov` source via `#line` directives + portable PDB.
+   ```markdown
+   Adds Overt as a new language. Overt is an agent-first, transpile-to-C#
+   language — source in `.ov` files, output is C# source text (the
+   compiler-output pane shows transpiled C#, not assembly; `supportsAsm`
+   is false for now).
 
-5. Submit.
+   - **Repo:** https://github.com/paulmooreparks/Overt
+   - **License:** Apache-2.0
+   - **Infra PR:** compiler-explorer/infra#<NUMBER>
+   - **Release artifact:** https://github.com/paulmooreparks/Overt/releases/download/v0.1.0-preview/overt-0.1.0-preview-linux-x64.tar.xz
+
+   What the diff contains:
+
+   - `etc/config/overt.defaults.properties` — compiler config for the
+     0.1.0-preview and a `trunk` placeholder. Default flags are
+     `--emit=csharp --no-color`.
+   - `examples/overt/default.ov` — the hello-world shown when a user
+     first lands on the language.
+   - `lib/languages.ts` — new `overt` entry, alphabetical.
+   - `static/modes/overt-mode.ts` — Monaco syntax mode.
+
+   Compiler behavior notes that might matter for review:
+
+   - The emitted C# carries `#line` directives so runtime errors and
+     stack traces resolve to the original `.ov` file via portable PDB —
+     same mechanism F#/Razor/Blazor use.
+   - Diagnostics follow `path:line:col: severity: CODE: message` with
+     `help:`/`note:` follow-up lines. Codes are stable (`OV00xx` lexer,
+     `OV01xx` parser, `OV02xx` resolver, `OV03xx` type checker).
+   - `overt --version` prints a single line; `overt --emit=<stage> <file>`
+     is the full CLI surface. Stages: tokens, ast, resolved, typed,
+     csharp, go (go is not yet implemented and exits 1 with a clear
+     message).
+
+   No logo for v0 — happy to add one if that's required or if you'd like
+   to request it as a post-merge follow-up.
+   ```
+
+5. Submit. **Then immediately go back to your infra PR (stage 2.4) and
+   edit its description — replace `compiler-explorer/compiler-explorer#<NUMBER>`
+   with the actual number from this PR's URL.**
 
 ### 3.6 Review loop
 
