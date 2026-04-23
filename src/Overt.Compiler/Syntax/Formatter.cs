@@ -153,6 +153,7 @@ public static class Formatter
             case FunctionDecl fn: FormatFunction(fn, ctx); break;
             case TypeAliasDecl ta: FormatTypeAlias(ta, ctx); break;
             case ExternDecl ex: FormatExtern(ex, ctx); break;
+            case UseDecl u: FormatUse(u, ctx); break;
             default:
                 ctx.Line($"// TODO: unformatted decl {decl.GetType().Name}");
                 break;
@@ -215,6 +216,21 @@ public static class Formatter
         }
         ctx.Depth--;
         ctx.Line("}");
+    }
+
+    // ---------------------------------------------------------- use
+
+    private static void FormatUse(UseDecl u, FormatContext ctx)
+    {
+        ctx.WriteIndent();
+        ctx.Write($"use {u.ModuleName}.{{");
+        for (var i = 0; i < u.ImportedSymbols.Length; i++)
+        {
+            if (i > 0) ctx.Write(", ");
+            ctx.Write(u.ImportedSymbols[i]);
+        }
+        ctx.Write("}");
+        ctx.Newline();
     }
 
     // ---------------------------------------------------------- annotations

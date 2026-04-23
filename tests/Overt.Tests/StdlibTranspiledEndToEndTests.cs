@@ -99,6 +99,139 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_MultiModule_UsesImportedFunction()
+    {
+        // Two-file program: main.ov imports a function from helper.ov.
+        // Writes the files to a temp dir, invokes the real `overt run` code
+        // path via ModuleGraph + per-module resolve/check, compiles all
+        // syntax trees into one assembly, and runs Module.main.
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-multimod-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "mathhelper.ov"), """
+                module mathhelper
+
+                fn triple(x: Int) -> Int { x * 3 }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use mathhelper.{triple}
+
+                fn main() !{io} -> Result<(), IoError> {
+                    let n: Int = triple(7)
+                    println("n=${n}")?
+                    Ok(())
+                }
+                """);
+
+            var graph = Overt.Compiler.Modules.ModuleGraph.Resolve(
+                Path.Combine(tmp, "entry.ov"),
+                ImmutableArray<string>.Empty);
+            Assert.Empty(graph.Diagnostics);
+
+            var exportedSymbols =
+                new Dictionary<string, ImmutableDictionary<string, Overt.Compiler.Semantics.Symbol>>(
+                    StringComparer.Ordinal);
+            var symbolTypesByModule =
+                new Dictionary<string, ImmutableDictionary<Overt.Compiler.Semantics.Symbol, Overt.Compiler.Semantics.TypeRef>>(
+                    StringComparer.Ordinal);
+            var trees = new List<SyntaxTree>();
+            foreach (var mod in graph.Modules)
+            {
+                var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
+                var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(mod.Ast, importable);
+                Assert.Empty(resolved.Diagnostics);
+                var importedTypes = CollectImportedTypes(
+                    mod.Ast, exportedSymbols, symbolTypesByModule);
+                var typed = Overt.Compiler.Semantics.TypeChecker.Check(
+                    mod.Ast, resolved, importedTypes);
+                Assert.Empty(typed.Diagnostics);
+
+                var cs = CSharpEmitter.Emit(mod.Ast, typed, mod.SourcePath);
+                trees.Add(CSharpSyntaxTree.ParseText(cs,
+                    new CSharpParseOptions(LanguageVersion.Latest)));
+
+                var exports = ImmutableDictionary.CreateBuilder<string, Overt.Compiler.Semantics.Symbol>(
+                    StringComparer.Ordinal);
+                foreach (var fn in mod.Ast.Declarations.OfType<FunctionDecl>())
+                    exports[fn.Name] = new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Function, fn.Name, fn.Span, fn);
+                exportedSymbols[mod.Name] = exports.ToImmutable();
+                symbolTypesByModule[mod.Name] = typed.SymbolTypes;
+            }
+
+            var compilation = CSharpCompilation.Create(
+                "multimod_e2e",
+                syntaxTrees: trees,
+                references: References,
+                options: new CSharpCompilationOptions(
+                    OutputKind.DynamicallyLinkedLibrary,
+                    nullableContextOptions: NullableContextOptions.Enable));
+
+            using var ms = new MemoryStream();
+            var emit = compilation.Emit(ms);
+            if (!emit.Success)
+            {
+                var errs = string.Join("\n", emit.Diagnostics
+                    .Where(d => d.Severity == DiagnosticSeverity.Error)
+                    .Select(d => "  " + d.GetMessage()));
+                throw new Xunit.Sdk.XunitException(
+                    "Emitted C# failed to compile:\n" + errs);
+            }
+            ms.Position = 0;
+            var loaded = Assembly.Load(ms.ToArray());
+
+            // Find the entry module's Module.main (not mathhelper's — that has
+            // no main). Filter by namespace.
+            var entryModule = loaded.GetTypes()
+                .First(t => t.Name == "Module" && t.Namespace == "Overt.Generated.Entry");
+            var main = entryModule.GetMethod("main", BindingFlags.Public | BindingFlags.Static)!;
+
+            using var sw = new StringWriter();
+            var prev = Console.Out;
+            Console.SetOut(sw);
+            try
+            {
+                var result = main.Invoke(null, null);
+                Assert.NotNull(result);
+                Assert.Equal("True",
+                    result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            }
+            finally { Console.SetOut(prev); }
+
+            Assert.Contains("n=21", sw.ToString());
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, recursive: true); } catch { }
+        }
+    }
+
+    private static ImmutableDictionary<Overt.Compiler.Semantics.Symbol, Overt.Compiler.Semantics.TypeRef>
+        CollectImportedTypes(
+            ModuleDecl module,
+            Dictionary<string, ImmutableDictionary<string, Overt.Compiler.Semantics.Symbol>> exports,
+            Dictionary<string, ImmutableDictionary<Overt.Compiler.Semantics.Symbol, Overt.Compiler.Semantics.TypeRef>> types)
+    {
+        var builder = ImmutableDictionary.CreateBuilder<
+            Overt.Compiler.Semantics.Symbol, Overt.Compiler.Semantics.TypeRef>();
+        foreach (var use in module.Declarations.OfType<UseDecl>())
+        {
+            if (!exports.TryGetValue(use.ModuleName, out var modExports)) continue;
+            if (!types.TryGetValue(use.ModuleName, out var modTypes)) continue;
+            foreach (var n in use.ImportedSymbols)
+            {
+                if (!modExports.TryGetValue(n, out var s)) continue;
+                if (modTypes.TryGetValue(s, out var t)) builder[s] = t;
+            }
+        }
+        return builder.ToImmutable();
+    }
+
+    [Fact]
     public void Transpiled_MapFilterFold_RunsEndToEnd()
     {
         // A small program: sum of squares of the evens in [1..5].

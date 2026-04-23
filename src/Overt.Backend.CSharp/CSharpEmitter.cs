@@ -175,6 +175,17 @@ public sealed class CSharpEmitter
         _w.WriteLine("using System.Threading.Tasks;");
         _w.WriteLine("using Overt.Runtime;");
         _w.WriteLine("using static Overt.Runtime.Prelude;");
+
+        // For each imported module, add a `using static` so the imported
+        // functions/externs are reachable unqualified — the resolver has
+        // already put the symbols in scope at the Overt level; the emitter
+        // just needs the C# side of that to work out.
+        foreach (var use in module.Declarations.OfType<UseDecl>())
+        {
+            _w.WriteLine(
+                $"using static Overt.Generated.{PascalCase(use.ModuleName)}.Module;");
+        }
+
         _w.WriteLine();
         _w.WriteLine($"namespace Overt.Generated.{PascalCase(module.Name)};");
         _w.WriteLine();
@@ -190,7 +201,8 @@ public sealed class CSharpEmitter
             _w.WriteLine();
         }
 
-        foreach (var decl in module.Declarations.Where(d => d is not TypeAliasDecl))
+        foreach (var decl in module.Declarations
+            .Where(d => d is not TypeAliasDecl and not UseDecl))
         {
             EmitDeclaration(decl);
             _w.WriteLine();

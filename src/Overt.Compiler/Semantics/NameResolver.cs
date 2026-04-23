@@ -18,22 +18,40 @@ namespace Overt.Compiler.Semantics;
 public sealed class NameResolver
 {
     private readonly ModuleDecl _module;
+    private readonly ImmutableDictionary<string, ImmutableDictionary<string, Symbol>> _importableModules;
     private readonly List<Diagnostic> _diagnostics = new();
     private readonly Dictionary<SourceSpan, Symbol> _resolutions = new();
+    private readonly Dictionary<string, Symbol> _importedSymbols = new(StringComparer.Ordinal);
 
-    private NameResolver(ModuleDecl module)
+    private NameResolver(
+        ModuleDecl module,
+        ImmutableDictionary<string, ImmutableDictionary<string, Symbol>> importableModules)
     {
         _module = module;
+        _importableModules = importableModules;
     }
 
+    /// <summary>Resolve a module with no cross-file imports — the original
+    /// entry point, preserved for single-file callers.</summary>
     public static ResolutionResult Resolve(ModuleDecl module)
+        => Resolve(
+            module,
+            ImmutableDictionary<string, ImmutableDictionary<string, Symbol>>.Empty);
+
+    /// <summary>Resolve a module whose <c>use</c> declarations may reference
+    /// symbols from previously-resolved modules. <paramref name="importableModules"/>
+    /// maps <c>module name -&gt; (symbol name -&gt; Symbol)</c>.</summary>
+    public static ResolutionResult Resolve(
+        ModuleDecl module,
+        ImmutableDictionary<string, ImmutableDictionary<string, Symbol>> importableModules)
     {
-        var resolver = new NameResolver(module);
+        var resolver = new NameResolver(module, importableModules);
         resolver.ResolveModule();
         return new ResolutionResult(
             module,
             resolver._resolutions.ToImmutableDictionary(),
-            resolver._diagnostics.ToImmutableArray());
+            resolver._diagnostics.ToImmutableArray(),
+            resolver._importedSymbols.ToImmutableDictionary(StringComparer.Ordinal));
     }
 
     private void ResolveModule()
@@ -50,6 +68,14 @@ public sealed class NameResolver
         }
 
         var moduleScope = new Scope(preludeScope);
+
+        // Resolve `use` declarations first so imported names sit in scope
+        // before we process the module's own top-level decls. Errors in
+        // `use` resolution don't stop parsing of the rest.
+        foreach (var use in _module.Declarations.OfType<UseDecl>())
+        {
+            ResolveUseDecl(use, moduleScope);
+        }
 
         // Pass 1: collect all top-level declarations so that mutual recursion and
         // forward references work. Name resolution inside bodies happens in pass 2.
@@ -73,6 +99,40 @@ public sealed class NameResolver
         foreach (var decl in _module.Declarations)
         {
             ResolveDeclaration(decl, moduleScope);
+        }
+    }
+
+    /// <summary>Pull the named symbols from the imported module into the
+    /// current module's scope. Missing symbols (name not exported) and missing
+    /// modules are diagnosed separately.</summary>
+    private void ResolveUseDecl(UseDecl use, Scope moduleScope)
+    {
+        if (!_importableModules.TryGetValue(use.ModuleName, out var exports))
+        {
+            // Missing-module errors are already emitted by ModuleGraph; avoid a
+            // duplicate here. A resolver-only invocation (single-file compile)
+            // with an unknown module name would silently skip, which is fine
+            // for the `overt fmt`-style callers that don't go through the
+            // graph resolver.
+            return;
+        }
+        foreach (var sym in use.ImportedSymbols)
+        {
+            if (!exports.TryGetValue(sym, out var imported))
+            {
+                _diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "OV0168",
+                    $"module `{use.ModuleName}` has no exported symbol `{sym}`",
+                    use.Span,
+                    ImmutableArray.Create(new DiagnosticNote(
+                        DiagnosticNoteKind.Help,
+                        "check the list of symbols the module declares at top level",
+                        null))));
+                continue;
+            }
+            moduleScope.Define(imported);
+            _importedSymbols[sym] = imported;
         }
     }
 
@@ -569,4 +629,9 @@ public sealed class NameResolver
 public sealed record ResolutionResult(
     ModuleDecl Module,
     ImmutableDictionary<SourceSpan, Symbol> Resolutions,
-    ImmutableArray<Diagnostic> Diagnostics);
+    ImmutableArray<Diagnostic> Diagnostics,
+    ImmutableDictionary<string, Symbol>? ImportedSymbols = null)
+{
+    public ImmutableDictionary<string, Symbol> ImportedSymbols { get; init; } =
+        ImportedSymbols ?? ImmutableDictionary.Create<string, Symbol>(StringComparer.Ordinal);
+}

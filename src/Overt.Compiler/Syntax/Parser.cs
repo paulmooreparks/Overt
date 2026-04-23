@@ -127,6 +127,16 @@ public sealed class Parser
             }
             return ParseTypeAliasDecl();
         }
+        if (Check(TokenKind.KeywordUse))
+        {
+            if (attributes.Length > 0)
+            {
+                ReportError("OV0157",
+                    "attributes on `use` declarations are not supported",
+                    attributes[0].Span);
+            }
+            return ParseUseDecl();
+        }
 
         if (attributes.Length > 0)
         {
@@ -701,6 +711,52 @@ public sealed class Parser
         return new BlockExpr(
             statements.ToImmutable(),
             trailingExpression,
+            new SourceSpan(startPos, closing.Span.End));
+    }
+
+    private UseDecl ParseUseDecl()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordUse, "use declaration");
+
+        // Module name: single identifier for v1 (dotted paths are future work
+        // per DESIGN.md §19).
+        var nameToken = Expect(TokenKind.Identifier, "use declaration (module name)");
+        var moduleName = nameToken.Lexeme;
+
+        // Required selector: .{sym1, sym2, ...}. DESIGN.md §19 forbids wildcard
+        // imports — so bare `use foo` is not a valid form.
+        if (!Match(TokenKind.Dot))
+        {
+            ReportErrorWithHelp("OV0163",
+                "use declaration requires selective imports",
+                new SourceSpan(startPos, nameToken.Span.End),
+                "spell out the symbols you want: `use " + moduleName + ".{name1, name2}`. "
+                    + "Wildcard imports are disallowed (DESIGN.md §19).");
+            return new UseDecl(moduleName, ImmutableArray<string>.Empty,
+                new SourceSpan(startPos, nameToken.Span.End));
+        }
+        Expect(TokenKind.LeftBrace, "use selector");
+
+        var symbols = ImmutableArray.CreateBuilder<string>();
+        if (!Check(TokenKind.RightBrace))
+        {
+            var first = Expect(TokenKind.Identifier, "use selector symbol");
+            symbols.Add(first.Lexeme);
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightBrace)) break;
+                var sym = Expect(TokenKind.Identifier, "use selector symbol");
+                symbols.Add(sym.Lexeme);
+            }
+        }
+        var closing = Expect(TokenKind.RightBrace, "use selector");
+        // Optional trailing semicolon.
+        Match(TokenKind.Semicolon);
+
+        return new UseDecl(
+            moduleName,
+            symbols.ToImmutable(),
             new SourceSpan(startPos, closing.Span.End));
     }
 

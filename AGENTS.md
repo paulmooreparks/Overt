@@ -44,8 +44,21 @@ overt --emit=csharp hello.ov    # dumps the transpiled C# to stdout
 
 ## 2. Modules and declarations
 
-A module is one `.ov` file. `use` parses but the module system spans one file
-today — don't write multi-file programs yet.
+A module is one `.ov` file. Cross-file imports work via `use`:
+
+```overt
+use pathutil.{path_combine}
+```
+
+- Modules are looked up by filename in the entry file's directory (and any
+  `--facade-dir` on the command line — future work).
+- Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want.
+- `use x.{a}` brings `a` into the current module's scope, unqualified.
+- Dotted paths (`use stdlib.http.client`) and aliases (`use x as y`) are
+  future work; v1 is single-segment selective imports only.
+- `overt run` resolves the full module graph. Other emit modes
+  (`--emit=csharp`, etc.) operate on a single file only and will fail on
+  files with `use` declarations.
 
 Top-level declarations:
 - `fn <name>(...) ...` — function
@@ -463,8 +476,12 @@ fn strlen(s: String) -> Int {
 
 **If you try these, you will get an error or a runtime failure. Don't.**
 
-- **Multi-file modules.** `use` parses but cross-file resolution isn't wired.
-  One module = one file.
+- **Dotted module paths and aliasing.** `use stdlib.http.client` (directory-walking)
+  and `use stdlib.http as http` (aliasing) are future work. v1 accepts only
+  single-segment selective imports: `use mymodule.{fn1, fn2}`.
+- **`--emit=<stage>` on a file with `use` declarations.** Those one-off
+  emit modes only resolve the single file. Imports won't bind and you'll
+  see OV0200 / OV0168. Use `overt run` for multi-module programs.
 - **FFI calls at runtime.** `extern` compiles; invocation throws.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
 - **`?` nested deep inside a call argument within an if/match arm used as a value.**

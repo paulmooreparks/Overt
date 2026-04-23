@@ -50,7 +50,10 @@ public sealed class TypeChecker
     // distinguish NamedType("T") as a type variable vs. a named-type reference.
     private HashSet<string> _currentTypeParams = new();
 
-    private TypeChecker(ModuleDecl module, ResolutionResult resolution)
+    private TypeChecker(
+        ModuleDecl module,
+        ResolutionResult resolution,
+        ImmutableDictionary<Symbol, TypeRef>? importedSymbolTypes)
     {
         _module = module;
         _resolution = resolution;
@@ -61,11 +64,28 @@ public sealed class TypeChecker
         {
             _symbolTypes[symbol] = type;
         }
+
+        // Seed with types of symbols pulled in by `use` imports from other modules.
+        // The resolver has already placed these symbols in scope; the checker just
+        // needs their types so calls through them get real signatures.
+        if (importedSymbolTypes is not null)
+        {
+            foreach (var (symbol, type) in importedSymbolTypes)
+            {
+                _symbolTypes[symbol] = type;
+            }
+        }
     }
 
     public static TypeCheckResult Check(ModuleDecl module, ResolutionResult resolution)
+        => Check(module, resolution, importedSymbolTypes: null);
+
+    public static TypeCheckResult Check(
+        ModuleDecl module,
+        ResolutionResult resolution,
+        ImmutableDictionary<Symbol, TypeRef>? importedSymbolTypes)
     {
-        var checker = new TypeChecker(module, resolution);
+        var checker = new TypeChecker(module, resolution, importedSymbolTypes);
         checker.CheckModule();
         return new TypeCheckResult(
             module,

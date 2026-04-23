@@ -52,6 +52,20 @@ public sealed record TypeAliasDecl(
 /// </code>
 /// Only C FFI requires <c>unsafe</c> and the <c>from</c> clause.
 /// </summary>
+/// <summary>
+/// A selective import of symbols from another module. MVP shape:
+/// <code>
+///   use module_name.{symbol1, symbol2}
+/// </code>
+/// Per DESIGN.md §19, wildcard imports are disallowed — callers must name
+/// the symbols they want. Aliasing (<c>use m as alias</c>) and dotted paths
+/// (<c>use stdlib.http.client</c>) are future work.
+/// </summary>
+public sealed record UseDecl(
+    string ModuleName,
+    ImmutableArray<string> ImportedSymbols,
+    SourceSpan Span) : Declaration(Span);
+
 public sealed record ExternDecl(
     string Platform,
     bool IsUnsafe,

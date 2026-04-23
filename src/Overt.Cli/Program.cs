@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Reflection;
 using Overt.Backend.CSharp;
 using Overt.Compiler.Diagnostics;
+using Overt.Compiler.Modules;
 using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
 
@@ -212,32 +213,70 @@ static class Cli
             return 1;
         }
 
-        // Transpile.
-        var source = File.ReadAllText(inputFile);
-        var lex = Lexer.Lex(source);
-        var parse = Parser.Parse(lex.Tokens);
-        var resolved = NameResolver.Resolve(parse.Module);
-        var typed = TypeChecker.Check(parse.Module, resolved);
-
-        var diagnostics = lex.Diagnostics
-            .AddRange(parse.Diagnostics)
-            .AddRange(resolved.Diagnostics)
-            .AddRange(typed.Diagnostics);
-        if (WriteDiagnostics(inputFile, diagnostics) != 0)
+        // Resolve the module graph: the entry file plus everything its `use`
+        // declarations transitively import. For each module, parse it; for
+        // each module in topological order, name-resolve and type-check with
+        // its imports' symbols already in scope.
+        var graph = ModuleGraph.Resolve(inputFile, ImmutableArray<string>.Empty);
+        var allDiagnostics = graph.Diagnostics;
+        if (graph.Modules.Length == 0)
         {
+            if (WriteDiagnostics(inputFile, allDiagnostics) != 0) return 1;
+            Console.Error.WriteLine("overt run: module graph is empty");
             return 1;
         }
 
-        // Pass the source path through so runtime errors map to the .ov file via
-        // portable PDBs. The in-memory compile below emits PDBs by default (Roslyn's
-        // Emit writes them into the MemoryStream when the compilation has #line info).
-        var sourcePath = Path.GetFullPath(inputFile);
-        var csharp = CSharpEmitter.Emit(parse.Module, typed, sourcePath);
+        // Per-module resolutions + type-check, threading imports through so
+        // downstream modules see their dependencies' typed symbols.
+        var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
+        var moduleTypes = new Dictionary<string, TypeCheckResult>(StringComparer.Ordinal);
+        var exportedSymbols = new Dictionary<string, ImmutableDictionary<string, Symbol>>(
+            StringComparer.Ordinal);
+        var symbolTypesByModule = new Dictionary<string, ImmutableDictionary<Symbol, TypeRef>>(
+            StringComparer.Ordinal);
 
-        // Compile in-memory. Reference the Overt runtime + whatever's loaded in
-        // the current AppDomain (BCL + System.*).
-        var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
-            csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
+        foreach (var module in graph.Modules)
+        {
+            // Build the importable-modules table from everything resolved
+            // before this one (the graph is topologically ordered).
+            var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
+
+            var resolved = NameResolver.Resolve(module.Ast, importable);
+            allDiagnostics = allDiagnostics.AddRange(resolved.Diagnostics);
+            moduleResolutions[module.Name] = resolved;
+
+            // Seed the type checker with imported symbol types from every
+            // module `module` uses. Each imported symbol maps to its type in
+            // the defining module's symbol-types table.
+            var importedTypes = CollectImportedSymbolTypes(
+                module.Ast, exportedSymbols, symbolTypesByModule);
+
+            var typed = TypeChecker.Check(module.Ast, resolved, importedTypes);
+            allDiagnostics = allDiagnostics.AddRange(typed.Diagnostics);
+            moduleTypes[module.Name] = typed;
+
+            // Export this module's top-level symbols for downstream modules
+            // to import. ImportedSymbols here means the module's own decls,
+            // not its imports (an Overt export is any top-level fn/extern).
+            exportedSymbols[module.Name] = CollectTopLevelExports(module.Ast);
+            symbolTypesByModule[module.Name] = typed.SymbolTypes;
+        }
+
+        if (WriteDiagnostics(inputFile, allDiagnostics) != 0) return 1;
+
+        // Emit C# for every module in the graph. The entry module's
+        // assembly name matches the input file so stack traces point there.
+        var trees = new List<RoslynCore.SyntaxTree>();
+        foreach (var module in graph.Modules)
+        {
+            var csharp = CSharpEmitter.Emit(
+                module.Ast,
+                moduleTypes[module.Name],
+                module.SourcePath);
+            var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
+                csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
+            trees.Add(tree);
+        }
         var refs = ImmutableArray.CreateBuilder<RoslynCore.MetadataReference>();
         var runtimeAssembly = typeof(global::Overt.Runtime.Unit).Assembly;
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
@@ -254,7 +293,7 @@ static class Cli
 
         var compilation = RoslynCSharp.CSharpCompilation.Create(
             assemblyName: Path.GetFileNameWithoutExtension(inputFile),
-            syntaxTrees: new[] { tree },
+            syntaxTrees: trees,
             references: refs.ToImmutable(),
             options: new RoslynCSharp.CSharpCompilationOptions(
                 RoslynCore.OutputKind.DynamicallyLinkedLibrary,
@@ -318,6 +357,55 @@ static class Cli
         var err = errProp?.GetValue(result);
         Console.Error.WriteLine($"overt run: main returned Err: {err}");
         return 1;
+    }
+
+    // ------------------------------------------- multi-module helpers (run)
+
+    /// <summary>For a module <paramref name="module"/>, gather the typed
+    /// symbol map for every symbol it imports via <c>use</c> from already-
+    /// compiled modules. Downstream TypeChecker uses this so a call through
+    /// an imported symbol sees a real signature, not UnknownType.</summary>
+    static ImmutableDictionary<Symbol, TypeRef> CollectImportedSymbolTypes(
+        ModuleDecl module,
+        Dictionary<string, ImmutableDictionary<string, Symbol>> exportedSymbols,
+        Dictionary<string, ImmutableDictionary<Symbol, TypeRef>> symbolTypesByModule)
+    {
+        var builder = ImmutableDictionary.CreateBuilder<Symbol, TypeRef>();
+        foreach (var use in module.Declarations.OfType<UseDecl>())
+        {
+            if (!exportedSymbols.TryGetValue(use.ModuleName, out var exports)) continue;
+            if (!symbolTypesByModule.TryGetValue(use.ModuleName, out var exportedTypes)) continue;
+            foreach (var name in use.ImportedSymbols)
+            {
+                if (!exports.TryGetValue(name, out var sym)) continue;
+                if (exportedTypes.TryGetValue(sym, out var type))
+                {
+                    builder[sym] = type;
+                }
+            }
+        }
+        return builder.ToImmutable();
+    }
+
+    /// <summary>A module's top-level exports — fns, externs, records, enums,
+    /// type aliases. Indexed by simple name for <c>use</c> lookup.</summary>
+    static ImmutableDictionary<string, Symbol> CollectTopLevelExports(ModuleDecl module)
+    {
+        var builder = ImmutableDictionary.CreateBuilder<string, Symbol>(StringComparer.Ordinal);
+        foreach (var decl in module.Declarations)
+        {
+            var sym = decl switch
+            {
+                FunctionDecl f => new Symbol(SymbolKind.Function, f.Name, f.Span, f),
+                ExternDecl x => new Symbol(SymbolKind.Extern, x.Name, x.Span, x),
+                RecordDecl r => new Symbol(SymbolKind.Record, r.Name, r.Span, r),
+                EnumDecl e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
+                TypeAliasDecl t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
+                _ => (Symbol?)null,
+            };
+            if (sym is not null) builder[sym.Name] = sym;
+        }
+        return builder.ToImmutable();
     }
 
     // `overt fmt [--write] <file.ov>` — format the file. Default writes to
