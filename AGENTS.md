@@ -7,9 +7,43 @@ It is not rationale — that lives in `DESIGN.md`. Each section here shows the
 **one canonical form** for a construct (no alternatives, no history) and the
 diagnostic you'll see if you miswrite it.
 
-Status as of commit tip: 322 tests; `overt run` executes transpiled programs
-via in-memory Roslyn. The C# backend is primary; Go is scaffolded only. Three
-example programs run end-to-end today: `hello.ov`, `arith_eval.ov`, `trace.ov`.
+Status as of commit tip: 359 tests; `overt run` executes transpiled programs
+via in-memory Roslyn. The C# backend is primary; Go is scaffolded only.
+
+---
+
+## 0. Overt is for you, the agent
+
+Overt's design target is **you**. Every tradeoff in the language prefers
+agent read/write/reason-about clarity over human aesthetic conventions. When
+you're writing Overt code, drop the human-oriented habits you carry from
+other languages and apply the following, which are optimized for how you
+actually work:
+
+- **Verbosity that eliminates implicit behavior is a feature, not a smell.**
+  A longer form with zero implicit transformations per line beats a terser
+  form with two. You have a strong pattern-matcher and weak causal-chain
+  simulation; explicit step-by-step plays to that asymmetry.
+
+- **Named intermediate `let` bindings are the default for sequencing.** Don't
+  reach for pipe composition just because it looks cleaner. Three
+  consecutive `let` statements with visible inputs and outputs are easier
+  for you to modify correctly than one pipe chain where each arrow hides a
+  splice and an unwrap. Pipes exist in Overt but are an expert idiom, not
+  the canonical form — see §10's guidance.
+
+- **Redundant type annotations are valuable.** `let n: Int = ...` beats
+  `let n = ...` even when the compiler could infer. The annotation is a
+  check you didn't silently produce something of a different type, and a
+  cue to your future self reading the line out of context.
+
+- **When two forms are equivalent, pick the one that reads as a sequence of
+  atomic steps.** That's the form you'll modify correctly weeks later, with
+  or without the surrounding file in context.
+
+The human maintainer reading your code is secondary audience. They will be
+fine. Don't optimize for their pattern-matching at the expense of yours.
+Details and rationale: `DESIGN.md` §2 and §4 ("canonical-form tie-breaker").
 
 ---
 
@@ -356,6 +390,31 @@ Pipe composition splices the piped value as the **first** argument:
 xs |> filter(is_even)            // filter(xs, is_even)
 xs |> fold(seed = 0, step = add) // fold(xs, seed=0, step=add)
 ```
+
+`|>?` is the propagating form: it splices as first arg AND unwraps the
+`Result`, early-returning `Err` from the enclosing function:
+
+```overt
+ids |>? par_map(fetch_user) |> filter(is_active) |> map(get_name) |> Ok
+```
+
+**Pipes are an expert idiom, not the canonical form for sequencing.** Each
+arrow carries two implicit transformations (positional splice + optional
+unwrap) that you must mentally simulate at each step. For the common
+"do step A, then step B, then step C" shape, prefer named `let` bindings:
+
+```overt
+// Canonical for agent RWRA — each step explicit, no implicit operations.
+let filtered: List<Int> = filter(xs, is_even)
+let squared:  List<Int> = map(filtered, square)
+let total:    Int       = fold(squared, seed = 0, step = add)
+```
+
+Reach for pipes only when the intent is genuinely pipeline-shaped (a single
+value flowing through uniform transformations), and when the readability
+win of seeing the flow as a single expression outweighs the cost of the
+implicit splice/unwrap mechanics. For anything with meaningful intermediate
+values worth naming, the three-let form is what to produce.
 
 There is **no method-call syntax**. Dots mean record field access or
 module-qualified stdlib lookup (`List.empty`, `Trace.subscribe`), nothing

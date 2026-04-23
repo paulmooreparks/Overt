@@ -113,6 +113,79 @@ Ordered by "how directly this unblocks someone writing real Overt code":
 
 ---
 
+## Agent-RWRA findings and hypotheses
+
+These are observations from agent use of Overt that aren't yet validated at
+scale but are concrete enough to capture. They're about which design
+decisions make reading/writing/reasoning easier for LLM agents — the
+primary audience.
+
+### H1 (2026-04-24). The three-let form likely beats pipe composition for agent RWRA.
+
+**Observation.** Same computation expressed three ways in `examples/app.ov`-style programs:
+
+```overt
+// Three lets — verbose, zero implicit transformations per line.
+let b1: StringBuilder = sb.new_()
+let b2: StringBuilder = sb.append_string(self = b1, value = "hello ")?
+let b3: StringBuilder = sb.append_string(self = b2, value = "from Overt")?
+let result: String = sb.to_string(b3)?
+
+// let mut — single accumulator, explicit mutation.
+let mut b: StringBuilder = sb.new_()
+b = sb.append_string(self = b, value = "hello ")?
+b = sb.append_string(self = b, value = "from Overt")?
+let result: String = sb.to_string(b)?
+
+// Pipe chain — terse, two implicit transformations per arrow.
+let result: String =
+    sb.new_()
+      |>? sb.append_string(value = "hello ")
+      |>? sb.append_string(value = "from Overt")
+      |>? sb.to_string
+```
+
+**The agent self-report (Claude Opus 4.7, 2026-04-24):** the three-let form
+is easiest to RWRA. No implicit semantics anywhere; every line tells its
+inputs and outputs directly; edits are local. Pipes cost two implicit
+operations per arrow (positional splice + `|>?` unwrap) that the agent must
+simulate mentally at each step. `let mut` sits in the middle — the mutation
+tracking is a smaller tax than pipe mechanics but bigger than no tax at all.
+
+**Why this matters.** Pipe syntax is optimized for human visual-flow
+recognition. The three-let form is optimized for agent step-by-step
+reasoning. Overt's target is agent RWRA primary, human RWRA secondary —
+which suggests pipes are a human-optimized feature that may not earn their
+seat at the table.
+
+**Hypothesis to validate.** As real agent-authored Overt programs
+accumulate, measure: when agents are free to pick between equivalent pipe
+and three-let forms, which do they pick, and which yields fewer bugs on
+modification? If the finding holds:
+
+- AGENTS.md should steer agents toward the three-let (or `let mut`) form as
+  canonical, and explicitly mark pipes as an expert idiom.
+- The formatter could consider de-pipelining when it can prove equivalence.
+- Pipes might get reclassified from "core" to "v1 optional" — if the
+  empirical data says they hurt more than they help, removing them from
+  the language is on the table.
+
+Do not pre-emptively strip pipes; the finding is a single-agent
+self-report, not data yet. Validate first.
+
+### H2 (2026-04-24). Conditional-context `?` inconsistency is the same class of problem.
+
+`?` in a direct if-expression arm now lowers to early-return (stmt-level
+restructuring). `?` buried deep inside a call argument within an arm falls
+back to `.Unwrap()`-that-throws — same `?` character, different semantics,
+no visible marker. This is exactly the "implicit transformation per site"
+problem that pipes have, except worse because the inconsistency is hidden.
+Treat the fix (extend `NeedsStmtLowering` into call args) as higher
+priority than its "½ session, low urgency" estimate suggests. An agent
+cannot safely rely on `?` unless its behavior is uniform.
+
+---
+
 ## Agent-facing documentation strategy
 
 Three surfaces, each doing a different job. All three matter; none substitutes for the others.

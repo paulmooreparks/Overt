@@ -100,6 +100,42 @@ Consequences throughout the language:
 
 **Forward-looking caveat:** token prices have fallen roughly 10× over two years, and the trend is not stopping. This section's constraints are real today but transitional. As costs continue to fall, the calculus shifts further toward "verbose wherever it buys a correctness check." The levers above are right for the current era; the underlying principle — tokens-per-correct-unit-of-work — is durable.
 
+### Canonical-form tie-breaker: fewer implicit transformations per line
+
+When two equivalent forms compute the same value and Overt must pick one as canonical, **prefer the form with fewer implicit transformations per line**, even when the alternative is terser.
+
+This is where Overt's design instinct differs most sharply from languages designed for humans. Human language design typically optimizes for reducing *visual noise* — fewer characters, fewer lines, fewer named intermediates, chained compositions that read "naturally" left-to-right. That instinct is correct for humans, who pattern-match fluidly on visual shape and track state cheaply across a short span of text.
+
+LLM agents have the inverse profile. They pattern-match *extremely* well on lexical shape but track state poorly across function calls and implicit transformations. Every implicit operation per line — a positional splice in a pipe, a type coercion driven by inference, an exception-like early return buried inside an operator — is a tax the agent pays in mental simulation, and it's exactly the kind of tax that produces subtle bugs at modification time.
+
+Concrete example. Computing the same result three ways:
+
+```overt
+// Three lets — verbose; zero implicit transformations per line.
+let b1: StringBuilder = sb.new_()
+let b2: StringBuilder = sb.append_string(self = b1, value = "hello ")?
+let b3: StringBuilder = sb.append_string(self = b2, value = "world")?
+let result: String = sb.to_string(b3)?
+
+// Pipe chain — terse; two implicit transformations per arrow
+// (positional splice + `|>?` unwrap).
+let result: String =
+    sb.new_()
+      |>? sb.append_string(value = "hello ")
+      |>? sb.append_string(value = "world")
+      |>? sb.to_string
+```
+
+The pipe form is fewer tokens and reads "fluidly" to a human. The three-let form is what an agent will get right more often. That's the priority order, and it flips the usual preference.
+
+**Implications:**
+
+- Where two constructs overlap, the tie-breaker is explicitness-per-line, not token count.
+- Verbosity that eliminates implicit behavior is *worth* the tokens. This is a sharper restatement of §2's central inversion.
+- Inherited reader-facing conventions from human languages (pipe chains, implicit returns, point-free style, heavy type inference) need positive justification to stay — "elegant" isn't one.
+
+A preliminary finding to this effect is logged in [`CARRYOVER.md`](CARRYOVER.md) under "Agent-RWRA findings and hypotheses" as H1. Validation requires real agent-authored Overt programs; until then the principle above is directional, not a basis for stripping existing features.
+
 ---
 
 ## 5. Semantic primitives (decided)
