@@ -591,15 +591,14 @@ public static class BindGenerator
     // ------------------------------------------------------------- mappings
 
     /// <summary>Map a .NET type to its Overt spelling; null for types we don't
-    /// handle in the MVP. <c>long</c> is deliberately NOT mapped to Overt's
-    /// <c>Int</c>: Overt's Int lowers to C# <c>int</c> (32-bit), so a BCL
-    /// method returning <c>long</c> would produce a mismatch at emit time.
-    /// An <c>Int64</c> type is future work; until then <c>long</c>-returning
-    /// methods are emitted as <c>// skipped</c>.</summary>
+    /// handle. Overt has distinct <c>Int</c> (C# <c>int</c>, 32-bit) and
+    /// <c>Int64</c> (C# <c>long</c>, 64-bit); downcasting at the boundary is
+    /// the caller's responsibility.</summary>
     private static string? MapCSharpTypeToOvert(Type t)
     {
         if (t == typeof(string)) return "String";
         if (t == typeof(int)) return "Int";
+        if (t == typeof(long)) return "Int64";
         if (t == typeof(double) || t == typeof(float)) return "Float";
         if (t == typeof(bool)) return "Bool";
         return null;

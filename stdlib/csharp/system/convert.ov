@@ -37,7 +37,9 @@ extern "csharp" fn to_boolean_int(value: Int) -> Bool
     binds "System.Convert.ToBoolean"
 
 // skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_boolean_long(value: Int64) -> Bool
+    binds "System.Convert.ToBoolean"
+
 // skipped System.Convert.ToBoolean: parameter 'value' has unsupported type 'System.UInt64'
 extern "csharp" fn to_boolean_string(value: String) -> Bool
     binds "System.Convert.ToBoolean"
@@ -61,7 +63,7 @@ extern "csharp" fn to_boolean_double(value: Float) -> Bool
 // skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
 // skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
 // skipped System.Convert.ToByte: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
 // skipped System.Convert.ToByte: return type 'System.Byte' is unsupported
@@ -80,7 +82,7 @@ extern "csharp" fn to_boolean_double(value: Float) -> Bool
 // skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToChar: return type 'System.Char' is unsupported
 // skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToChar: return type 'System.Char' is unsupported
 // skipped System.Convert.ToChar: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToChar: return type 'System.Char' is unsupported
 // skipped System.Convert.ToChar: return type 'System.Char' is unsupported
@@ -98,7 +100,7 @@ extern "csharp" fn to_boolean_double(value: Float) -> Bool
 // skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
 // skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
 // skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToDateTime: return type 'System.DateTime' is unsupported
 // skipped System.Convert.ToDateTime: parameter 'value' has unsupported type 'System.Char'
@@ -115,7 +117,7 @@ extern "csharp" fn to_boolean_double(value: Float) -> Bool
 // skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
 // skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
 // skipped System.Convert.ToDecimal: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
 // skipped System.Convert.ToDecimal: return type 'System.Decimal' is unsupported
@@ -135,7 +137,9 @@ extern "csharp" fn to_double_int(value: Int) -> Float
     binds "System.Convert.ToDouble"
 
 // skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_double_long(value: Int64) -> Float
+    binds "System.Convert.ToDouble"
+
 // skipped System.Convert.ToDouble: parameter 'value' has unsupported type 'System.UInt64'
 extern "csharp" fn to_double_float(value: Float) -> Float
     binds "System.Convert.ToDouble"
@@ -168,7 +172,7 @@ extern "csharp" fn to_double_bool(value: Bool) -> Float
 // skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
 // skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.UInt32'
 // skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Int16'
-// skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
 // skipped System.Convert.ToInt16: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
 // skipped System.Convert.ToInt16: return type 'System.Int16' is unsupported
@@ -191,7 +195,9 @@ extern "csharp" fn to_int32_bool(value: Bool) -> Int
 extern "csharp" fn to_int32_int(value: Int) -> Int
     binds "System.Convert.ToInt32"
 
-// skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_int32_long(value: Int64) -> Int
+    binds "System.Convert.ToInt32"
+
 // skipped System.Convert.ToInt32: parameter 'value' has unsupported type 'System.UInt64'
 extern "csharp" fn to_int32_float(value: Float) -> Int
     binds "System.Convert.ToInt32"
@@ -210,24 +216,38 @@ extern "csharp" fn to_int32_string_int(value: String, from_base: Int) -> Int
     binds "System.Convert.ToInt32"
 
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Object'
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+extern "csharp" fn to_int64_bool(value: Bool) -> Int64
+    binds "System.Convert.ToInt64"
+
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Char'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.SByte'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Byte'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Int16'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt16'
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+extern "csharp" fn to_int64_int(value: Int) -> Int64
+    binds "System.Convert.ToInt64"
+
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt32'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.UInt64'
-// skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Int64'
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+extern "csharp" fn to_int64_long(value: Int64) -> Int64
+    binds "System.Convert.ToInt64"
+
+extern "csharp" fn to_int64_float(value: Float) -> Int64
+    binds "System.Convert.ToInt64"
+
+extern "csharp" fn to_int64_double(value: Float) -> Int64
+    binds "System.Convert.ToInt64"
+
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Decimal'
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+extern "csharp" fn to_int64_string(value: String) -> Int64
+    binds "System.Convert.ToInt64"
+
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.DateTime'
 // skipped System.Convert.ToInt64: parameter 'value' has unsupported type 'System.Object'
 // skipped System.Convert.ToInt64: parameter 'provider' has unsupported type 'System.IFormatProvider'
-// skipped System.Convert.ToInt64: return type 'System.Int64' is unsupported
+extern "csharp" fn to_int64_string_int(value: String, from_base: Int) -> Int64
+    binds "System.Convert.ToInt64"
+
 // skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Object'
 // skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
 // skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.SByte'
@@ -237,7 +257,7 @@ extern "csharp" fn to_int32_string_int(value: String, from_base: Int) -> Int
 // skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
 // skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
 // skipped System.Convert.ToSByte: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
 // skipped System.Convert.ToSByte: return type 'System.SByte' is unsupported
@@ -257,7 +277,9 @@ extern "csharp" fn to_single_int(value: Int) -> Float
     binds "System.Convert.ToSingle"
 
 // skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_single_long(value: Int64) -> Float
+    binds "System.Convert.ToSingle"
+
 // skipped System.Convert.ToSingle: parameter 'value' has unsupported type 'System.UInt64'
 extern "csharp" fn to_single_float(value: Float) -> Float
     binds "System.Convert.ToSingle"
@@ -288,7 +310,9 @@ extern "csharp" fn to_string_int(value: Int) -> String
     binds "System.Convert.ToString"
 
 // skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_string_long(value: Int64) -> String
+    binds "System.Convert.ToString"
+
 // skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt64'
 extern "csharp" fn to_string_float(value: Float) -> String
     binds "System.Convert.ToString"
@@ -310,7 +334,7 @@ extern "csharp" fn to_string_string(value: String) -> String
 // skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
 // skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
 // skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
 // skipped System.Convert.ToString: parameter 'provider' has unsupported type 'System.IFormatProvider'
@@ -322,7 +346,9 @@ extern "csharp" fn to_string_string(value: String) -> String
 extern "csharp" fn to_string_int_int(value: Int, to_base: Int) -> String
     binds "System.Convert.ToString"
 
-// skipped System.Convert.ToString: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn to_string_long_int(value: Int64, to_base: Int) -> String
+    binds "System.Convert.ToString"
+
 // skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Object'
 // skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
 // skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Char'
@@ -332,7 +358,7 @@ extern "csharp" fn to_string_int_int(value: Int, to_base: Int) -> String
 // skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
 // skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
 // skipped System.Convert.ToUInt16: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
 // skipped System.Convert.ToUInt16: return type 'System.UInt16' is unsupported
@@ -351,7 +377,7 @@ extern "csharp" fn to_string_int_int(value: Int, to_base: Int) -> String
 // skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
 // skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
 // skipped System.Convert.ToUInt32: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
 // skipped System.Convert.ToUInt32: return type 'System.UInt32' is unsupported
@@ -370,7 +396,7 @@ extern "csharp" fn to_string_int_int(value: Int, to_base: Int) -> String
 // skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt16'
 // skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
 // skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt32'
-// skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.Int64'
+// skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
 // skipped System.Convert.ToUInt64: parameter 'value' has unsupported type 'System.UInt64'
 // skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported
 // skipped System.Convert.ToUInt64: return type 'System.UInt64' is unsupported

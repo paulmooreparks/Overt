@@ -80,7 +80,8 @@ fine.
 
 ## 3. Types
 
-Primitives: `Int`, `Float`, `Bool`, `String`, `()` (unit).
+Primitives: `Int` (32-bit, `int`), `Int64` (64-bit, `long`), `Float` (64-bit,
+`double`), `Bool`, `String`, `()` (unit).
 
 Generic stdlib types:
 - `Result<T, E>` — success or failure

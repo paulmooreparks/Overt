@@ -760,6 +760,7 @@ public sealed class CSharpEmitter
     private static string MapTypeName(string name) => name switch
     {
         "Int" => "int",
+        "Int64" => "long",
         "Float" => "double",
         "Bool" => "bool",
         "String" => "string",
@@ -2191,6 +2192,7 @@ public sealed class CSharpEmitter
     private static string CSharpTypeDisplay(TypeRef t) => t switch
     {
         PrimitiveType { Name: "Int" } => "int",
+        PrimitiveType { Name: "Int64" } => "long",
         PrimitiveType { Name: "Float" } => "double",
         PrimitiveType { Name: "Bool" } => "bool",
         PrimitiveType { Name: "String" } => "string",

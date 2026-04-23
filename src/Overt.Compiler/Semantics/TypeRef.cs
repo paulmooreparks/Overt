@@ -33,6 +33,7 @@ public sealed record UnknownType : TypeRef
 public sealed record PrimitiveType(string Name) : TypeRef
 {
     public static readonly PrimitiveType Int = new("Int");
+    public static readonly PrimitiveType Int64 = new("Int64");
     public static readonly PrimitiveType Float = new("Float");
     public static readonly PrimitiveType Bool = new("Bool");
     public static readonly PrimitiveType String = new("String");

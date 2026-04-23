@@ -29,9 +29,9 @@ extern "csharp" fn days_in_month(year_arg: Int, month_arg: Int) !{io, fails} -> 
     binds "System.DateTime.DaysInMonth"
 
 // skipped System.DateTime.Equals: parameter 't1' has unsupported type 'System.DateTime'
-// skipped System.DateTime.FromBinary: parameter 'dateData' has unsupported type 'System.Int64'
-// skipped System.DateTime.FromFileTime: parameter 'fileTime' has unsupported type 'System.Int64'
-// skipped System.DateTime.FromFileTimeUtc: parameter 'fileTime' has unsupported type 'System.Int64'
+// skipped System.DateTime.FromBinary: return type 'System.DateTime' is unsupported
+// skipped System.DateTime.FromFileTime: return type 'System.DateTime' is unsupported
+// skipped System.DateTime.FromFileTimeUtc: return type 'System.DateTime' is unsupported
 // skipped System.DateTime.FromOADate: return type 'System.DateTime' is unsupported
 extern "csharp" fn is_leap_year(year_arg: Int) !{io, fails} -> Result<Bool, IoError>
     binds "System.DateTime.IsLeapYear"
@@ -57,6 +57,9 @@ extern "csharp" fn is_leap_year(year_arg: Int) !{io, fails} -> Result<Bool, IoEr
 // skipped System.DateTime.TryParseExact: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.DateTime.TryParseExact: parameter 'formats' has unsupported type 'System.String[]'
 // skipped System.DateTime.TryParseExact: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
+extern "csharp" fn new_long(ticks_arg: Int64) -> DateTime
+    binds "System.DateTime..ctor"
+
 extern "csharp" fn new_int_int_int(year_arg: Int, month_arg: Int, day_arg: Int) -> DateTime
     binds "System.DateTime..ctor"
 
@@ -99,6 +102,9 @@ extern "csharp" fn nanosecond(self: DateTime) !{io, fails} -> Result<Int, IoErro
 extern "csharp" fn second(self: DateTime) !{io, fails} -> Result<Int, IoError>
     binds "System.DateTime::Second"
 
+extern "csharp" fn ticks(self: DateTime) !{io, fails} -> Result<Int64, IoError>
+    binds "System.DateTime::Ticks"
+
 extern "csharp" fn year(self: DateTime) !{io, fails} -> Result<Int, IoError>
     binds "System.DateTime::Year"
 
@@ -123,6 +129,9 @@ extern "csharp" fn add_months(self: DateTime, months: Int) !{io, fails} -> Resul
 extern "csharp" fn add_seconds(self: DateTime, value: Float) !{io, fails} -> Result<DateTime, IoError>
     binds "System.DateTime::AddSeconds"
 
+extern "csharp" fn add_ticks(self: DateTime, value: Int64) !{io, fails} -> Result<DateTime, IoError>
+    binds "System.DateTime::AddTicks"
+
 extern "csharp" fn add_years(self: DateTime, value: Int) !{io, fails} -> Result<DateTime, IoError>
     binds "System.DateTime::AddYears"
 
@@ -137,6 +146,15 @@ extern "csharp" fn get_hash_code(self: DateTime) !{io, fails} -> Result<Int, IoE
 
 extern "csharp" fn is_daylight_saving_time(self: DateTime) !{io, fails} -> Result<Bool, IoError>
     binds "System.DateTime::IsDaylightSavingTime"
+
+extern "csharp" fn to_binary(self: DateTime) !{io, fails} -> Result<Int64, IoError>
+    binds "System.DateTime::ToBinary"
+
+extern "csharp" fn to_file_time(self: DateTime) !{io, fails} -> Result<Int64, IoError>
+    binds "System.DateTime::ToFileTime"
+
+extern "csharp" fn to_file_time_utc(self: DateTime) !{io, fails} -> Result<Int64, IoError>
+    binds "System.DateTime::ToFileTimeUtc"
 
 extern "csharp" fn to_local_time(self: DateTime) !{io, fails} -> Result<DateTime, IoError>
     binds "System.DateTime::ToLocalTime"

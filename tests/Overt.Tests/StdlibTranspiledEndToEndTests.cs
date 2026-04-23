@@ -564,6 +564,32 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Int64_BindsToLong()
+    {
+        // Int64 is Overt's 64-bit integer primitive; lowers to C# `long`.
+        // Environment.TickCount64 is a natural demo — returns `long` at the
+        // BCL boundary and must come through as Int64, not truncate to int.
+        const string src = """
+            module int64_e2e
+
+            extern "csharp" fn tick_count_64() !{io} -> Int64
+                binds "System.Environment.TickCount64"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let t: Int64 = tick_count_64()
+                let positive: Bool = t > 0
+                println("positive=${positive}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "int64_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("positive=True", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ExternInstanceMethodsAndConstructor_RoundTripStringBuilder()
     {
         // Exercises the opaque-type + instance-method + constructor machinery

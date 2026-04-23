@@ -338,7 +338,7 @@ public sealed class NameResolver
     }
 
     private static bool IsPrimitiveTypeName(string name) =>
-        name is "Int" or "Float" or "Bool" or "String";
+        name is "Int" or "Int64" or "Float" or "Bool" or "String";
 
     // -------------------------------------------------------- expressions
 

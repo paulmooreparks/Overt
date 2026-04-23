@@ -57,7 +57,9 @@ extern "csharp" fn system_page_size() !{io} -> Result<Int, IoError>
 extern "csharp" fn tick_count() !{io} -> Result<Int, IoError>
     binds "System.Environment.TickCount"
 
-// skipped System.Environment.TickCount64: property type 'System.Int64' is unsupported
+extern "csharp" fn tick_count64() !{io} -> Result<Int64, IoError>
+    binds "System.Environment.TickCount64"
+
 extern "csharp" fn user_domain_name() !{io} -> Result<String, IoError>
     binds "System.Environment.UserDomainName"
 
@@ -68,7 +70,9 @@ extern "csharp" fn user_name() !{io} -> Result<String, IoError>
     binds "System.Environment.UserName"
 
 // skipped System.Environment.Version: property type 'System.Version' is unsupported
-// skipped System.Environment.WorkingSet: property type 'System.Int64' is unsupported
+extern "csharp" fn working_set() !{io} -> Result<Int64, IoError>
+    binds "System.Environment.WorkingSet"
+
 extern "csharp" fn exit(exit_code_arg: Int) !{io} -> ()
     binds "System.Environment.Exit"
 

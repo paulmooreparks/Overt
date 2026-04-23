@@ -205,11 +205,12 @@ public sealed class TypeChecker
     }
 
     private static bool IsPrimitive(string name) =>
-        name is "Int" or "Float" or "Bool" or "String";
+        name is "Int" or "Int64" or "Float" or "Bool" or "String";
 
     private static PrimitiveType PrimitiveFor(string name) => name switch
     {
         "Int" => PrimitiveType.Int,
+        "Int64" => PrimitiveType.Int64,
         "Float" => PrimitiveType.Float,
         "Bool" => PrimitiveType.Bool,
         "String" => PrimitiveType.String,
