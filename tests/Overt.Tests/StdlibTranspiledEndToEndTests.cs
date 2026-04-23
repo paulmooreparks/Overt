@@ -142,6 +142,62 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_QuestionInIfArm_PropagatesErrAsValue()
+    {
+        // `?` inside an if-expression arm that's the value of a let binding —
+        // statement-level lowering means the Err flows out as a returned value,
+        // not through .Unwrap()-that-throws.
+        const string src = """
+            module ifq_e2e
+
+            fn choose(which: Bool) -> Result<Int, IoError> {
+                if which {
+                    Err(IoError { narrative = "left" })
+                } else {
+                    Ok(99)
+                }
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = if true { choose(which = true)? } else { choose(which = false)? }
+                println("n=${n}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "ifq_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        // Err should NOT have reached the println.
+        Assert.DoesNotContain("n=", stdout);
+        var err = result.GetType().GetProperty("Error")!.GetValue(result);
+        Assert.Equal("left", err!.GetType().GetProperty("narrative")!.GetValue(err));
+    }
+
+    [Fact]
+    public void Transpiled_QuestionInIfArm_SuccessPath()
+    {
+        const string src = """
+            module ifq_ok_e2e
+
+            fn choose(which: Bool) -> Result<Int, IoError> {
+                if which { Err(IoError { narrative = "left" }) } else { Ok(99) }
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = if false { choose(which = true)? } else { choose(which = false)? }
+                println("n=${n}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "ifq_ok_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("n=99", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ForEachLoopBreakContinue_WorkEndToEnd()
     {
         // Exercises `for each`, `loop` + `break`, `while` + `continue` in one program.

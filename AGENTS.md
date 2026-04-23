@@ -300,14 +300,22 @@ ids |>? par_map(fetch_user) |> filter(is_active) |> map(get_name) |> Ok
 `|>?` unwraps `Result<T, E>` to `T` along the pipe, propagating `Err` to the
 enclosing function's return. `|>` is the infallible form.
 
-### Known gap: conditional-context `?`
+### `?` in if-expression arms works
 
-`?` inside an `if`/`while` arm body that is used as an expression (not a
-statement) currently lowers to `.Unwrap()` which throws on `Err`. Works in
-practice if the `Err` path is rare. The proper fix (statement-level
-restructuring) is tracked in `CARRYOVER.md`. If correctness on cold paths
-matters, lift the `?` into a let or a match on the `Result` instead of
-embedding it in an if-expression arm.
+```overt
+let n: Int = if cond { choose(true)? } else { choose(false)? }
+```
+
+This lowers to statement-level C# (`int n; if (cond) { ... } else { ... }`)
+so the `?`-hoist's early-return reaches the enclosing function directly.
+Requires the `let` to have a type annotation and a single identifier target
+(not tuple destructuring); both arms have the hoist applied independently
+so only the chosen branch's operand evaluates.
+
+`?` in other conditionally-evaluated positions — nested deep inside a call
+argument within an if-arm, say — may still fall back to `.Unwrap()`. If
+you're in doubt, bind the `?` to a let first, then use that in the larger
+expression.
 
 ---
 
@@ -423,9 +431,11 @@ compiles cleanly but won't execute until the binding milestone lands.
   One module = one file.
 - **FFI calls at runtime.** `extern` compiles; invocation throws.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
-- **`?` inside if-expression / while-expression arms that are used as a value.**
-  Lowers to `.Unwrap()`, which throws on Err. Match arms used as a value
-  work in Result context only; same IIFE issue for non-Result contexts.
+- **`?` nested deep inside a call argument within an if/match arm used as a value.**
+  Direct `if { foo()? }` in a let initializer works (stmt-level lowering).
+  Buried in a call like `foo(if cond { bar()? } else { baz })` it may fall
+  back to `.Unwrap()` which throws. Lift the `?` into a let if you need
+  guaranteed propagation.
 - **Conditional-context refinement runtime checks.** Decidable predicates
   are checked at literal crossings; undecidable ones are silently deferred
   (no runtime assertion emitted).

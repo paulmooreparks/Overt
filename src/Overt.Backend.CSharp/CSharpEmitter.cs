@@ -559,6 +559,13 @@ public sealed class CSharpEmitter
         switch (stmt)
         {
             case LetStmt ls:
+                // When the initializer is directly an if / match containing `?`,
+                // lower to statement-level C# if/else or switch with assignments
+                // into a pre-declared temp. This lets the `?`-hoist's early-return
+                // reach the enclosing function, not get trapped in an IIFE. See
+                // TryEmitStmtLoweredLet for the eligible shapes.
+                if (TryEmitStmtLoweredLet(ls)) break;
+
                 EmitHoistsForExpression(ls.Initializer);
                 _w.Write("var ");
                 EmitPatternForBinding(ls.Target);
@@ -568,6 +575,7 @@ public sealed class CSharpEmitter
                 break;
 
             case AssignmentStmt asn:
+                if (TryEmitStmtLoweredAssign(asn)) break;
                 EmitHoistsForExpression(asn.Value);
                 _w.Write(EscapeId(asn.Name));
                 _w.Write(" = ");
@@ -586,6 +594,196 @@ public sealed class CSharpEmitter
             case ContinueStmt:
                 _w.WriteLine("continue;");
                 break;
+        }
+    }
+
+    // ------------------------------------- statement-level if/match lowering
+    //
+    // When a `let x: T = if cond { foo()? } else { bar() }` (or match) would
+    // otherwise trap a `?`-hoist's `return Err<E>(...)` inside an IIFE that
+    // returns T (not Result<_, E>), we lower the whole initializer to a C#
+    // if-statement (or switch-statement) that assigns into a pre-declared
+    // temp. The `?`-hoist then lives inside the branch body and can return
+    // from the enclosing function directly.
+    //
+    // Eligibility (narrow by design — other shapes keep their existing
+    // emission):
+    //   - Initializer is directly IfExpr or MatchExpr
+    //   - At least one arm body contains `?` or `|>?` somewhere
+    //   - Target is a single IdentifierPattern (no tuple destructuring)
+    //   - Let has an explicit type annotation, OR the context makes it
+    //     declarable — in practice we just require an annotation today, to
+    //     avoid inferring a type here
+
+    private bool TryEmitStmtLoweredLet(LetStmt ls)
+    {
+        if (ls.Target is not IdentifierPattern ip) return false;
+        if (ls.Type is null) return false;
+        if (!NeedsStmtLowering(ls.Initializer)) return false;
+
+        var targetType = LowerType(ls.Type);
+        _w.Write(CSharpTypeDisplay(targetType));
+        _w.Write(" ");
+        _w.Write(EscapeId(ip.Name));
+        _w.WriteLine(";");
+        AssignInto(EscapeId(ip.Name), ls.Initializer, targetType);
+        return true;
+    }
+
+    private bool TryEmitStmtLoweredAssign(AssignmentStmt asn)
+    {
+        if (!NeedsStmtLowering(asn.Value)) return false;
+        // We know the LHS name exists; assign into it directly.
+        AssignInto(EscapeId(asn.Name), asn.Value, UnknownType.Instance);
+        return true;
+    }
+
+    /// <summary>True when <paramref name="e"/> is directly an if or match whose
+    /// body contains a propagating site. Nested cases (propagate buried inside
+    /// a call argument, say) aren't eligible here — they keep their existing
+    /// emission.</summary>
+    private static bool NeedsStmtLowering(Expression e)
+    {
+        if (e is IfExpr ie)
+        {
+            return ContainsPropagate(ie.Then)
+                || (ie.Else is { } elseBlock && ContainsPropagate(elseBlock));
+        }
+        if (e is MatchExpr me)
+        {
+            return me.Arms.Any(arm => ContainsPropagate(arm.Body));
+        }
+        return false;
+    }
+
+    /// <summary>Whether an expression subtree contains any <c>?</c> or <c>|&gt;?</c>
+    /// site. Used by <see cref="NeedsStmtLowering"/> to decide between the
+    /// expression-level and statement-level lowerings.</summary>
+    private static bool ContainsPropagate(Expression e) => e switch
+    {
+        PropagateExpr => true,
+        BinaryExpr { Op: BinaryOp.PipePropagate } => true,
+        BinaryExpr be => ContainsPropagate(be.Left) || ContainsPropagate(be.Right),
+        UnaryExpr ue => ContainsPropagate(ue.Operand),
+        CallExpr c => ContainsPropagate(c.Callee) || c.Arguments.Any(a => ContainsPropagate(a.Value)),
+        FieldAccessExpr fa => ContainsPropagate(fa.Target),
+        IfExpr ie => ContainsPropagate(ie.Then) || (ie.Else is { } b && ContainsPropagate(b)),
+        MatchExpr me => ContainsPropagate(me.Scrutinee) || me.Arms.Any(a => ContainsPropagate(a.Body)),
+        BlockExpr b =>
+            b.Statements.Any(StmtContainsPropagate)
+            || (b.TrailingExpression is { } t && ContainsPropagate(t)),
+        TupleExpr te => te.Elements.Any(ContainsPropagate),
+        RecordLiteralExpr rl => rl.Fields.Any(f => ContainsPropagate(f.Value)),
+        WithExpr we => ContainsPropagate(we.Target) || we.Updates.Any(u => ContainsPropagate(u.Value)),
+        InterpolatedStringExpr isx => isx.Parts.OfType<StringInterpolationPart>()
+            .Any(p => ContainsPropagate(p.Expression)),
+        _ => false,
+    };
+
+    private static bool StmtContainsPropagate(Statement s) => s switch
+    {
+        LetStmt ls => ContainsPropagate(ls.Initializer),
+        AssignmentStmt asn => ContainsPropagate(asn.Value),
+        ExpressionStmt es => ContainsPropagate(es.Expression),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Emit a C# statement that assigns <paramref name="e"/> into the lvalue
+    /// <paramref name="target"/>. Recurses through if / match to produce real
+    /// C# if/else / switch statements; `?`-hoists fire at each leaf position.
+    /// For shapes that don't restructure (a plain expression leaf), hoists
+    /// run first and then `target = expr;` is emitted.
+    /// </summary>
+    private void AssignInto(string target, Expression e, TypeRef targetType)
+    {
+        switch (e)
+        {
+            case IfExpr ie:
+                _w.Write("if (");
+                EmitExpression(ie.Condition);
+                _w.WriteLine(")");
+                _w.WriteLine("{");
+                using (_w.Indent()) AssignIntoBlock(target, ie.Then, targetType);
+                _w.WriteLine("}");
+                if (ie.Else is { } elseBlock)
+                {
+                    _w.WriteLine("else");
+                    _w.WriteLine("{");
+                    using (_w.Indent()) AssignIntoBlock(target, elseBlock, targetType);
+                    _w.WriteLine("}");
+                }
+                else
+                {
+                    _w.WriteLine("else");
+                    _w.WriteLine("{");
+                    using (_w.Indent()) _w.WriteLine($"{target} = Unit.Value;");
+                    _w.WriteLine("}");
+                }
+                break;
+
+            case MatchExpr me:
+                var scrutineeType = TypeOf(me.Scrutinee);
+                _w.Write("switch (");
+                EmitExpression(me.Scrutinee);
+                _w.WriteLine(")");
+                _w.WriteLine("{");
+                using (_w.Indent())
+                {
+                    foreach (var arm in me.Arms)
+                    {
+                        _w.Write("case ");
+                        EmitPatternForMatch(arm.Pattern, scrutineeType);
+                        _w.WriteLine(":");
+                        using (_w.Indent())
+                        {
+                            AssignIntoExpression(target, arm.Body, targetType);
+                            _w.WriteLine("break;");
+                        }
+                    }
+                }
+                _w.WriteLine("}");
+                break;
+
+            default:
+                // Plain expression leaf — hoist any top-level `?` then assign.
+                EmitHoistsForExpression(e);
+                _w.Write(target);
+                _w.Write(" = ");
+                WithExpected(targetType, () => EmitExpression(e));
+                _w.WriteLine(";");
+                break;
+        }
+    }
+
+    /// <summary>Assign the value of a block into <paramref name="target"/>. Emits
+    /// the block's statements, then assigns its trailing expression (recursing
+    /// through nested if/match via <see cref="AssignIntoExpression"/>).</summary>
+    private void AssignIntoBlock(string target, BlockExpr block, TypeRef targetType)
+    {
+        foreach (var stmt in block.Statements) EmitStatement(stmt);
+        if (block.TrailingExpression is { } tail)
+        {
+            AssignIntoExpression(target, tail, targetType);
+        }
+        else
+        {
+            _w.WriteLine($"{target} = Unit.Value;");
+        }
+    }
+
+    /// <summary>Like <see cref="AssignInto"/> but treats a BlockExpr as a block
+    /// (inline statements + trailing) rather than as an IIFE-wrapped expression.
+    /// This is the right thing when we're already at statement position.</summary>
+    private void AssignIntoExpression(string target, Expression e, TypeRef targetType)
+    {
+        if (e is BlockExpr b)
+        {
+            AssignIntoBlock(target, b, targetType);
+        }
+        else
+        {
+            AssignInto(target, e, targetType);
         }
     }
 
