@@ -380,6 +380,55 @@ static class Cli
         return 2;
     }
 
+    /// <summary>
+    /// Maps OV diagnostic codes to the AGENTS.md section that explains the
+    /// relevant rule. Looked up by <see cref="WriteDiagnostics"/> so every
+    /// reported diagnostic is paired with a pointer into the grounding doc —
+    /// an agent hitting the error learns the rule from the message itself.
+    /// </summary>
+    static readonly Dictionary<string, string> AgentsMdSection = new(StringComparer.Ordinal)
+    {
+        // Lex — general lexical rules don't map cleanly to one §; point at the spec.
+        ["OV0001"] = "docs/grammar/lexical.md",
+        ["OV0002"] = "docs/grammar/lexical.md",
+        ["OV0003"] = "docs/grammar/lexical.md",
+        ["OV0102"] = "docs/grammar/lexical.md",
+        ["OV0103"] = "docs/grammar/lexical.md",
+
+        // Parse
+        ["OV0150"] = "AGENTS.md §2 (modules and declarations)",
+        ["OV0151"] = "AGENTS.md §5 (effect rows)",
+        ["OV0152"] = "AGENTS.md §3 (types)",
+        ["OV0153"] = "AGENTS.md §3 (types)",
+        ["OV0154"] = "AGENTS.md §10 (calls and pipes — named-arg rule)",
+        ["OV0155"] = "AGENTS.md §6 (match patterns)",
+        ["OV0156"] = "AGENTS.md §3 (types — interpolated strings)",
+        ["OV0157"] = "AGENTS.md §2 (declarations)",
+        ["OV0158"] = "AGENTS.md §6 (match patterns)",
+        ["OV0159"] = "AGENTS.md §6 (match patterns)",
+        ["OV0160"] = "AGENTS.md §2 (declarations — uniqueness)",
+        ["OV0161"] = "AGENTS.md §7 (let mut)",
+        ["OV0162"] = "AGENTS.md §6 (match arms)",
+
+        // Resolve
+        ["OV0200"] = "AGENTS.md §2 (declarations and scope)",
+        ["OV0201"] = "AGENTS.md §7 (no shadowing)",
+
+        // Type check
+        ["OV0300"] = "AGENTS.md §10 (call argument types)",
+        ["OV0301"] = "AGENTS.md §2 (function return type)",
+        ["OV0302"] = "AGENTS.md §3 (record fields)",
+        ["OV0303"] = "AGENTS.md §6 (if/match arm types)",
+        ["OV0304"] = "AGENTS.md §6 (condition must be Bool)",
+        ["OV0306"] = "AGENTS.md §10 (call arity)",
+        ["OV0307"] = "AGENTS.md §9 (errors as values)",
+        ["OV0308"] = "AGENTS.md §6 (exhaustive match)",
+        ["OV0310"] = "AGENTS.md §5 (effect rows)",
+        ["OV0311"] = "AGENTS.md §4 (refinement types)",
+        ["OV0312"] = "AGENTS.md §8 (control flow — break/continue)",
+        ["OV0313"] = "AGENTS.md §8 (control flow — for each)",
+    };
+
     static int WriteDiagnostics(string path, ImmutableArray<Diagnostic> diagnostics)
     {
         var errors = 0;
@@ -400,6 +449,13 @@ static class Cli
                 {
                     Console.Error.WriteLine($"  {kind}: {note.Text}");
                 }
+            }
+            // Tack on the AGENTS.md pointer for this code. Printed after any
+            // call-site-emitted notes so the canonical fix (the `help:` line)
+            // appears first and the doc reference second.
+            if (AgentsMdSection.TryGetValue(d.Code, out var section))
+            {
+                Console.Error.WriteLine($"  note: see {section}");
             }
             if (d.Severity == DiagnosticSeverity.Error)
             {
