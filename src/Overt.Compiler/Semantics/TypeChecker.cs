@@ -40,6 +40,13 @@ public sealed class TypeChecker
     {
         _module = module;
         _resolution = resolution;
+
+        // Seed with the stdlib's synthetic declarations so identifier references into
+        // the prelude resolve to real types, not UnknownType.
+        foreach (var (symbol, type) in Stdlib.Types)
+        {
+            _symbolTypes[symbol] = type;
+        }
     }
 
     public static TypeCheckResult Check(ModuleDecl module, ResolutionResult resolution)

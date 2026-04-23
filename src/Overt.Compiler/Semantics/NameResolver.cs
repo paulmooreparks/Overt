@@ -38,7 +38,18 @@ public sealed class NameResolver
 
     private void ResolveModule()
     {
-        var moduleScope = new Scope();
+        // Seed the module scope with synthetic stdlib declarations (DESIGN.md §18).
+        // Without this, every reference to `println` / `Ok` / `Result` / `List` etc.
+        // would require an allow-list hack to avoid unknown-name diagnostics.
+        // Prelude is marked ambient: patterns and locals may reuse stdlib names without
+        // tripping no-shadowing.
+        var preludeScope = new Scope(isPrelude: true);
+        foreach (var stdlibSymbol in Stdlib.Symbols.Values)
+        {
+            preludeScope.Define(stdlibSymbol);
+        }
+
+        var moduleScope = new Scope(preludeScope);
 
         // Pass 1: collect all top-level declarations so that mutual recursion and
         // forward references work. Name resolution inside bodies happens in pass 2.
@@ -189,10 +200,9 @@ public sealed class NameResolver
                 var symbol = scope.Lookup(nt.Name);
                 if (symbol is null)
                 {
-                    // Built-in primitive types (Int, Float, Bool, String, Option, Result, List,
-                    // etc.) aren't in scope yet because we have no stdlib. Leave these
-                    // unresolved and defer to a later pass that knows the stdlib.
-                    if (!IsLikelyStdlibType(nt.Name))
+                    // Primitive names (Int, Float, Bool, String) aren't in the prelude
+                    // scope because they're part of the type grammar, not declared values.
+                    if (!IsPrimitiveTypeName(nt.Name))
                     {
                         Report("OV0200",
                             $"unknown type `{nt.Name}`",
@@ -219,17 +229,8 @@ public sealed class NameResolver
         }
     }
 
-    // Placeholder: until a stdlib-aware resolver exists, don't flag common stdlib type
-    // names as unknown. This list is an obvious accretion point; we'll replace it once
-    // stdlib declarations are available to the resolver.
-    private static readonly HashSet<string> StdlibTypes = new(StringComparer.Ordinal)
-    {
-        "Int", "Float", "Bool", "String", "CString", "Ptr",
-        "Option", "Result", "List", "Map", "Set",
-        "IoError", "HttpError", "TraceEvent", "RaceAllFailed",
-    };
-
-    private static bool IsLikelyStdlibType(string name) => StdlibTypes.Contains(name);
+    private static bool IsPrimitiveTypeName(string name) =>
+        name is "Int" or "Float" or "Bool" or "String";
 
     // -------------------------------------------------------- expressions
 
@@ -393,30 +394,11 @@ public sealed class NameResolver
         var sym = scope.Lookup(id.Name);
         if (sym is null)
         {
-            // Stdlib constructors / modules (`Ok`, `Err`, `Some`, `None`, `List`, etc.)
-            // are not bound until a stdlib resolver exists — tolerate them here, flag
-            // everything else.
-            if (!IsLikelyStdlibName(id.Name))
-            {
-                ReportUnknownName(id.Name, id.Span, scope);
-            }
+            ReportUnknownName(id.Name, id.Span, scope);
             return;
         }
         _resolutions[id.Span] = sym;
     }
-
-    private static readonly HashSet<string> StdlibNames = new(StringComparer.Ordinal)
-    {
-        "Ok", "Err", "Some", "None",
-        "List", "Map", "Set", "Option", "Result",
-        "String", "Int", "Float", "Bool",
-        "println", "print", "eprintln", "format",
-        "par_map", "fold", "map", "filter", "sum_by", "collect",
-        "size", "length", "len",
-        "Trace", "CString",
-    };
-
-    private static bool IsLikelyStdlibName(string name) => StdlibNames.Contains(name);
 
     // ----------------------------------------------------------- patterns
 
