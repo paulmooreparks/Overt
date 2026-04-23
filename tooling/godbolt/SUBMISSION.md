@@ -121,8 +121,17 @@ git push origin add-overt
    - **Repo:** https://github.com/paulmooreparks/Overt
    - **License:** Apache-2.0
    - **Release artifact:** https://github.com/paulmooreparks/Overt/releases/download/v0.1.0-preview/overt-0.1.0-preview-linux-x64.tar.xz
-   - **Tarball shape:** `overt-0.1.0-preview/bin/overt` (single-file
-     self-contained Linux x64 binary produced by `dotnet publish`)
+   - **Tarball layout:**
+     ```
+     overt-0.1.0-preview/
+       bin/overt                 (single-file self-contained Linux x64 CLI)
+       runtime/Overt.Runtime.dll (for downstream consumers compiling
+                                  the emitted C#; not loaded by the
+                                  CLI itself)
+       LICENSE, README.md, VERSION
+     ```
+     `check_exe`: `bin/overt --version`. The binary is self-sufficient;
+     no runtime installation needed on the farm.
    - **Companion PR:** compiler-explorer/compiler-explorer#<NUMBER>
      (to be filled in after that PR is opened)
 
