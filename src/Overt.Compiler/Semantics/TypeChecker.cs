@@ -848,11 +848,17 @@ public sealed class TypeChecker
                         // Per DESIGN.md §4's tie-breaker rule: annotations are
                         // required on every let to prevent silent re-inference
                         // when upstream types change and to keep each line
-                        // self-describing for agent RWRA.
-                        ReportErrorWithHelp("OV0314",
-                            "`let` requires an explicit type annotation",
-                            ls.Span,
-                            $"annotate the binding: `let {LetTargetName(ls.Target)}: <Type> = ...`");
+                        // self-describing for agent RWRA. Destructuring patterns
+                        // (tuple, record) are exempt — there's no tuple-type
+                        // syntax to annotate them with yet, and the binding's
+                        // components each carry their own type at the use site.
+                        if (ls.Target is IdentifierPattern)
+                        {
+                            ReportErrorWithHelp("OV0314",
+                                "`let` requires an explicit type annotation",
+                                ls.Span,
+                                $"annotate the binding: `let {LetTargetName(ls.Target)}: <Type> = ...`");
+                        }
                     }
                     else
                     {

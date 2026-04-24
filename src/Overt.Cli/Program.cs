@@ -286,7 +286,11 @@ static class Cli
         var mainMethod = moduleType.GetMethod("main", BindingFlags.Public | BindingFlags.Static);
         if (mainMethod is null)
         {
-            Console.Error.WriteLine("overt run: module has no `main` function");
+            Console.Error.WriteLine(
+                "overt run: module has no `main` function\n"
+                + "  help: this looks like a library module — it has no entry point to execute.\n"
+                + "        to typecheck it, run `overt --emit=typed <file.ov>`.\n"
+                + "        to make it runnable, add `fn main() !{io} -> Result<(), IoError> { ... }`.");
             return 1;
         }
         if (mainMethod.GetParameters().Length != 0)

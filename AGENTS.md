@@ -172,6 +172,11 @@ let _: Result<(), IoError> = println(s)  // correct — annotated discard
 let x = 42                               // OV0314
 ```
 
+**Exemption: destructuring patterns.** `let (a, b) = expr` and other
+pattern bindings are exempt from OV0314 — there's no tuple-type annotation
+syntax yet, and the individual bindings each carry their type at the use
+site. Plain-identifier `let` always requires the annotation.
+
 ---
 
 ## 4. Type aliases and refinements
