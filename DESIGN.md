@@ -846,6 +846,28 @@ Deferred until v1 works. Candidates when a concrete gap appears:
 - TypeScript (largest training corpus of any language; huge ecosystem reach)
 - Swift (cross-platform now via SwiftWasm and Swift-on-Linux)
 
+### Compiler host and emission target are independent axes
+
+A common source of confusion for people evaluating transpile-to-source languages: "if you add a Go backend, do you need a second compiler written in Go?" No. The axis of "what language the compiler is *written in*" is orthogonal to the axis of "what language the compiler *emits*."
+
+The Overt compiler is a C# program today. It runs on .NET. It consumes `.ov` source and produces `.cs` source; once the Go backend is complete it will also produce `.go` source. Neither backend requires the compiler to run in its target language's runtime. Someone targeting Go just needs .NET available to *run* the compiler; the output then runs on Go's native toolchain. This is the same pattern TypeScript itself uses: `tsc` is written in TypeScript, runs on Node, emits JavaScript that runs everywhere Node doesn't.
+
+Practical consequence: **new backends are libraries, not compilers.** A backend author doesn't reimplement the lexer, parser, resolver, or type-checker. They write a single project (today, a C# class library referencing `Overt.Compiler` as a package) that walks the AST + `TypeCheckResult` IR and emits target source. The language contract *is* the AST shape; everything else is Tier 1's job, done once, consumed by all backends.
+
+That scales to an ecosystem. Publishing `Overt.Compiler` as a NuGet package means backend projects can live in separate repositories entirely, each distributing its own package. A hypothetical `Overt.Backend.TypeScript` author contributes nothing to this repo; they publish `Overt.Backend.TypeScript` (depends on `Overt.Compiler`), and Overt users consume it via `PackageReference` alongside `Overt.Build`. The core repo owns the language; the ecosystem owns its reach.
+
+### Self-hosting as a deferred goal
+
+A language rewritten in itself (Rust in Rust, Go in Go, Swift in Swift, TypeScript in TypeScript) earns three things:
+
+1. **Dogfooding at scale.** The compiler is the most complex program any language will ever need to express. If Overt can express its own compiler naturally, that's stronger evidence for language quality than any synthetic benchmark.
+2. **Stress-testing idioms.** Every weak corner of the language surfaces under compiler-level load. Patterns that were acceptable in small examples become unacceptable when repeated 10,000 times in a real codebase; self-hosting exposes them.
+3. **Backends written in Overt.** Once self-hosted, new backend authors benefit from Overt's RWRA properties for the code they write. The ecosystem multiplier is that *writing a backend* becomes an agent-authored task in the same ergonomic zone as writing any Overt program.
+
+Self-hosting is not a v1 goal. It's the Rust / Go / Swift / TypeScript trajectory — you do it once the language stabilizes, not before. The prerequisite isn't any specific feature; it's *confidence* that the language's shape won't churn under you during the rewrite. That confidence comes from real usage.
+
+What's load-bearing architecturally *today* is the tier split above, not self-hosting. Backends are cheap because Tier 1 is doing the work. Self-hosting validates the language later; it doesn't gate backend development now.
+
 ### Debug mapping and the anti-hack defense
 
 A transpile-to-source backend has one sharp failure mode that a direct-to-IL backend doesn't: the generated source looks like source. If it lives in the project tree, someone will open it, find a bug, fix it there, and ship. The generator runs on the next build, the fix vanishes, and the bug recurs. This has happened in real codebases.
