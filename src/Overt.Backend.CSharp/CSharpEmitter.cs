@@ -74,8 +74,21 @@ public sealed class CSharpEmitter
     /// </summary>
     private readonly Dictionary<SourceSpan, string> _hoistMap = new();
 
+    /// <summary>
+    /// Maps an <c>if</c>/<c>match</c> subtree's span to a pre-emitted local name
+    /// that holds its value. Populated when the statement-level let-lowering
+    /// lifts a nested conditional that contains a <c>?</c> site — the nested
+    /// if/match can't be hoisted inline (branches would evaluate eagerly), so
+    /// we pre-compute it with the same stmt-lowered shape and substitute the
+    /// local at the original site during expression emission.
+    /// </summary>
+    private readonly Dictionary<SourceSpan, string> _liftedConditionals = new();
+
     /// <summary>Unique-name counter for hoisted <c>?</c> temporaries.</summary>
     private int _propagateCounter;
+
+    /// <summary>Unique-name counter for lifted nested if/match temporaries.</summary>
+    private int _liftCounter;
 
     /// <summary>
     /// Enclosing function's declared return type, set by <see cref="EmitFunction"/>.
@@ -963,6 +976,12 @@ public sealed class CSharpEmitter
                 // TryEmitStmtLoweredLet for the eligible shapes.
                 if (TryEmitStmtLoweredLet(ls)) break;
 
+                // `?` buried inside an if/match that's nested inside a call
+                // arg / record field / etc. can't hoist in place (branches
+                // shouldn't force). Pre-emit each such conditional as a local,
+                // then emit the let normally with the original sites substituted.
+                LiftNestedConditionals(CollectLiftableNestedConditionals(ls.Initializer));
+
                 EmitHoistsForExpression(ls.Initializer);
                 _w.Write("var ");
                 EmitPatternForBinding(ls.Target);
@@ -973,6 +992,9 @@ public sealed class CSharpEmitter
 
             case AssignmentStmt asn:
                 if (TryEmitStmtLoweredAssign(asn)) break;
+
+                LiftNestedConditionals(CollectLiftableNestedConditionals(asn.Value));
+
                 EmitHoistsForExpression(asn.Value);
                 _w.Write(EscapeId(asn.Name));
                 _w.Write(" = ");
@@ -1033,6 +1055,136 @@ public sealed class CSharpEmitter
         // We know the LHS name exists; assign into it directly.
         AssignInto(EscapeId(asn.Name), asn.Value, UnknownType.Instance);
         return true;
+    }
+
+    /// <summary>Pre-emit each liftable nested conditional as a locally-scoped
+    /// temp, filling in <see cref="_liftedConditionals"/> so the subsequent
+    /// expression emission substitutes the temp name at the original span.</summary>
+    private void LiftNestedConditionals(List<Expression> liftables)
+    {
+        foreach (var lifted in liftables)
+        {
+            var type = TypeOf(lifted);
+            var tempName = $"__lift_{_liftCounter++}";
+            _w.Write(CSharpTypeDisplay(type));
+            _w.WriteLine($" {tempName};");
+            AssignInto(tempName, lifted, type);
+            _liftedConditionals[lifted.Span] = tempName;
+        }
+    }
+
+    /// <summary>Find <c>if</c>/<c>match</c> subtrees that (a) contain a
+    /// propagating <c>?</c> site and (b) are nested inside another expression
+    /// (not the statement-level root). Those are the cases the regular
+    /// expression emitter would have to fall back to <c>.Unwrap()</c> for —
+    /// lifting them into pre-computed locals lets the <c>?</c> inside each
+    /// branch get the proper early-return treatment.
+    ///
+    /// Siblings are collected independently; a liftable conditional's own
+    /// branches are NOT recursed into because they'll be emitted via
+    /// <see cref="AssignInto"/> when we lower the lifted form (which itself
+    /// invokes the same helpers and handles any further nesting).</summary>
+    private static List<Expression> CollectLiftableNestedConditionals(Expression topLevel)
+    {
+        var results = new List<Expression>();
+
+        void Visit(Expression e, bool isRoot)
+        {
+            switch (e)
+            {
+                case IfExpr ie:
+                    if (!isRoot && ContainsPropagate(ie))
+                    {
+                        results.Add(ie);
+                        // Don't cross into branches — they'll emit via stmt-lowering.
+                        Visit(ie.Condition, false);
+                        return;
+                    }
+                    // Either top-level (handled by NeedsStmtLowering path) or
+                    // propagate-free (no lifting needed). Keep walking subexprs.
+                    Visit(ie.Condition, false);
+                    foreach (var stmt in ie.Then.Statements) VisitStmt(stmt);
+                    if (ie.Then.TrailingExpression is { } tt) Visit(tt, false);
+                    if (ie.Else is { } elseBlock)
+                    {
+                        foreach (var stmt in elseBlock.Statements) VisitStmt(stmt);
+                        if (elseBlock.TrailingExpression is { } et) Visit(et, false);
+                    }
+                    break;
+
+                case MatchExpr me:
+                    if (!isRoot && ContainsPropagate(me))
+                    {
+                        results.Add(me);
+                        Visit(me.Scrutinee, false);
+                        return;
+                    }
+                    Visit(me.Scrutinee, false);
+                    foreach (var arm in me.Arms) Visit(arm.Body, false);
+                    break;
+
+                case CallExpr c:
+                    Visit(c.Callee, false);
+                    foreach (var arg in c.Arguments) Visit(arg.Value, false);
+                    break;
+
+                case BinaryExpr be:
+                    Visit(be.Left, false);
+                    Visit(be.Right, false);
+                    break;
+
+                case UnaryExpr ue:
+                    Visit(ue.Operand, false);
+                    break;
+
+                case PropagateExpr pr:
+                    Visit(pr.Operand, false);
+                    break;
+
+                case FieldAccessExpr fa:
+                    Visit(fa.Target, false);
+                    break;
+
+                case RecordLiteralExpr rl:
+                    foreach (var f in rl.Fields) Visit(f.Value, false);
+                    break;
+
+                case WithExpr we:
+                    Visit(we.Target, false);
+                    foreach (var u in we.Updates) Visit(u.Value, false);
+                    break;
+
+                case TupleExpr te:
+                    foreach (var el in te.Elements) Visit(el, false);
+                    break;
+
+                case InterpolatedStringExpr isx:
+                    foreach (var p in isx.Parts)
+                    {
+                        if (p is StringInterpolationPart ip) Visit(ip.Expression, false);
+                    }
+                    break;
+
+                // Other forms (blocks, parallel, race, unsafe, trace, loops,
+                // identifiers, literals) either have their own evaluation
+                // scope or no subexpressions to contribute liftables.
+                default:
+                    break;
+            }
+        }
+
+        void VisitStmt(Statement s)
+        {
+            switch (s)
+            {
+                case LetStmt ls: Visit(ls.Initializer, false); break;
+                case AssignmentStmt asn: Visit(asn.Value, false); break;
+                case ExpressionStmt es: Visit(es.Expression, false); break;
+            }
+        }
+
+        Visit(topLevel, isRoot: true);
+        return results;
     }
 
     /// <summary>True when <paramref name="e"/> is directly an if or match whose
@@ -1637,6 +1789,11 @@ public sealed class CSharpEmitter
                 break;
 
             case IfExpr ie:
+                if (_liftedConditionals.TryGetValue(ie.Span, out var liftedIfName))
+                {
+                    _w.Write(liftedIfName);
+                    break;
+                }
                 EmitIf(ie);
                 break;
 
@@ -1697,6 +1854,11 @@ public sealed class CSharpEmitter
                 break;
 
             case MatchExpr me:
+                if (_liftedConditionals.TryGetValue(me.Span, out var liftedMatchName))
+                {
+                    _w.Write(liftedMatchName);
+                    break;
+                }
                 EmitMatch(me);
                 break;
 

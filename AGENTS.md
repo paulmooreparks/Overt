@@ -394,10 +394,12 @@ Requires the `let` to have a type annotation and a single identifier target
 (not tuple destructuring); both arms have the hoist applied independently
 so only the chosen branch's operand evaluates.
 
-`?` in other conditionally-evaluated positions — nested deep inside a call
-argument within an if-arm, say — may still fall back to `.Unwrap()`. If
-you're in doubt, bind the `?` to a let first, then use that in the larger
-expression.
+When an `if`/`match` that contains `?` is itself nested inside another
+expression position (call arg, record field, tuple element, etc.), the
+emitter now lifts that conditional into a pre-computed local via the same
+stmt-lowering shape — `let x: T = consume(if cond { foo()? } else { ... })`
+evaluates the if first into a temp, the `?` propagates as a value, and
+only then calls `consume`.
 
 ---
 
@@ -691,11 +693,6 @@ fn strlen(s: String) -> Int {
   multi-file work, run `overt fmt` per file.
 - **FFI calls at runtime.** `extern` compiles; invocation throws.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
-- **`?` nested deep inside a call argument within an if/match arm used as a value.**
-  Direct `if { foo()? }` in a let initializer works (stmt-level lowering).
-  Buried in a call like `foo(if cond { bar()? } else { baz })` it may fall
-  back to `.Unwrap()` which throws. Lift the `?` into a let if you need
-  guaranteed propagation.
 - **`f64` literal patterns in `match`.** Parse OK but don't fire — float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.

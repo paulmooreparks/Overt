@@ -791,6 +791,62 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Propagate_NestedInCallArg_HoistsProperly_OnOkPath()
+    {
+        // `?` inside an if-arm inside a call argument used to fall back to
+        // .Unwrap() — which would throw on Err rather than propagating as
+        // a value. The lifted-conditional path pre-computes the if/match into
+        // a temp via the same stmt-lowering shape `?` needs, so the early
+        // return wires up correctly.
+        const string src = """
+            module propnest_ok
+
+            fn get_val(flag: Bool) -> Result<Int, IoError> {
+                if flag { Ok(42) } else { Err(IoError { narrative = "bad" }) }
+            }
+
+            fn consume(n: Int) -> Int { n * 2 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let x: Int = consume(if true { get_val(true)? } else { 100 })
+                println("x = ${x}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "propnest_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("x = 84", stdout);
+    }
+
+    [Fact]
+    public void Transpiled_Propagate_NestedInCallArg_PropagatesErr_NotThrows()
+    {
+        // Counterpart: if the `?` hits an Err, it must return Err from main —
+        // NOT throw. This is the bug the .Unwrap() fallback had.
+        const string src = """
+            module propnest_err
+
+            fn get_val(flag: Bool) -> Result<Int, IoError> {
+                if flag { Ok(42) } else { Err(IoError { narrative = "explicit-fail" }) }
+            }
+
+            fn consume(n: Int) -> Int { n * 2 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Int = consume(if true { get_val(false)? } else { 100 })
+                Ok(())
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "propnest_err");
+        Assert.NotNull(result);
+        // IsOk should be false — the Err propagated as a value, no exception.
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Transpiled_ExternCsharp_GenericMethodViaAngleBracketBindsTarget()
     {
         // Generic BCL methods (like JsonSerializer.Deserialize<T>) work today
