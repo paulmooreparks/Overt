@@ -847,6 +847,65 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Propagate_TwoLevelsDeep_HoistsProperly_OnOkPath()
+    {
+        // Outer if-arm contains a call whose arg is an inner if containing `?`.
+        // The inner lift emits INSIDE the outer if's lowered branch body — so
+        // the `?` has a straight path to the enclosing fn's early return.
+        const string src = """
+            module twolevel_ok
+
+            fn get_val(flag: Bool) -> Result<Int, IoError> {
+                if flag { Ok(42) } else { Err(IoError { narrative = "bad" }) }
+            }
+
+            fn consume(n: Int) -> Int { n * 2 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let x: Int = if true {
+                    consume(if true { get_val(true)? } else { 100 })
+                } else {
+                    0
+                }
+                println("x = ${x}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "twolevel_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("x = 84", stdout);
+    }
+
+    [Fact]
+    public void Transpiled_Propagate_TwoLevelsDeep_PropagatesErr_NotThrows()
+    {
+        const string src = """
+            module twolevel_err
+
+            fn get_val(flag: Bool) -> Result<Int, IoError> {
+                if flag { Ok(42) } else { Err(IoError { narrative = "explicit-fail" }) }
+            }
+
+            fn consume(n: Int) -> Int { n * 2 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Int = if true {
+                    consume(if true { get_val(false)? } else { 100 })
+                } else {
+                    0
+                }
+                Ok(())
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "twolevel_err");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Transpiled_ExternCsharp_GenericMethodViaAngleBracketBindsTarget()
     {
         // Generic BCL methods (like JsonSerializer.Deserialize<T>) work today

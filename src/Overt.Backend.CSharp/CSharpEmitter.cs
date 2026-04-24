@@ -1295,7 +1295,11 @@ public sealed class CSharpEmitter
                 break;
 
             default:
-                // Plain expression leaf — hoist any top-level `?` then assign.
+                // Plain expression leaf — handle any nested conditional-with-`?`
+                // the same way the statement-level path does, hoist any top-level
+                // `?`, then assign. The lift runs first so lifted sites end up in
+                // _liftedConditionals before EmitExpression walks the subtree.
+                LiftNestedConditionals(CollectLiftableNestedConditionals(e));
                 EmitHoistsForExpression(e);
                 _w.Write(target);
                 _w.Write(" = ");
