@@ -1,0 +1,155 @@
+KeywordModule(module) @ 1:1..1:7
+Identifier(async_example) @ 1:8..1:21
+KeywordExtern(extern) @ 9:1..9:7
+LineComment(// Task-returning BCL methods bind directly with `Task<T>` as the return) @ 3:1..3:73
+LineComment(// type; `.await` is postfix, same shape as `?`, and extracts T.) @ 4:1..4:65
+LineComment(// Functions that use `.await` must carry `async` in their effect row;) @ 5:1..5:71
+LineComment(// they emit as C# `async Task<ReturnType>` and their callers see) @ 6:1..6:66
+LineComment(// `Task<T>` at the call site (so they, too, must `.await` or propagate).) @ 7:1..7:74
+StringLiteral("csharp") @ 9:8..9:16
+KeywordFn(fn) @ 9:17..9:19
+Identifier(ready) @ 9:20..9:25
+LeftParen(() @ 9:25..9:26
+Identifier(value) @ 9:26..9:31
+Colon(:) @ 9:31..9:32
+Identifier(Int) @ 9:33..9:36
+RightParen()) @ 9:36..9:37
+Arrow(->) @ 9:38..9:40
+Identifier(Task) @ 9:41..9:45
+Less(<) @ 9:45..9:46
+Identifier(Int) @ 9:46..9:49
+Greater(>) @ 9:49..9:50
+Identifier(binds) @ 10:5..10:10
+StringLiteral("System.Threading.Tasks.Task.FromResult<int>") @ 10:11..10:56
+KeywordExtern(extern) @ 12:1..12:7
+StringLiteral("csharp") @ 12:8..12:16
+KeywordFn(fn) @ 12:17..12:19
+Identifier(delay_ms) @ 12:20..12:28
+LeftParen(() @ 12:28..12:29
+Identifier(milliseconds) @ 12:29..12:41
+Colon(:) @ 12:41..12:42
+Identifier(Int) @ 12:43..12:46
+RightParen()) @ 12:46..12:47
+Arrow(->) @ 12:48..12:50
+Identifier(Task) @ 12:51..12:55
+Less(<) @ 12:55..12:56
+Identifier(Int) @ 12:56..12:59
+Greater(>) @ 12:59..12:60
+Identifier(binds) @ 13:5..13:10
+StringLiteral("System.Threading.Tasks.Task.FromResult<int>") @ 13:11..13:56
+KeywordFn(fn) @ 19:1..19:3
+LineComment(// placeholder: same shape) @ 13:58..13:84
+LineComment(// Async fn: uses `.await`, so it emits as `async Task<Int>`.) @ 15:1..15:62
+LineComment(// The declared return type `-> Int` is what callers semantically) @ 16:1..16:66
+LineComment(// receive after `.await`; under the hood, the C# signature is) @ 17:1..17:63
+LineComment(// `async Task<int>`.) @ 18:1..18:22
+Identifier(double_remote) @ 19:4..19:17
+LeftParen(() @ 19:17..19:18
+Identifier(n) @ 19:18..19:19
+Colon(:) @ 19:19..19:20
+Identifier(Int) @ 19:21..19:24
+RightParen()) @ 19:24..19:25
+Bang(!) @ 19:26..19:27
+LeftBrace({) @ 19:27..19:28
+Identifier(async) @ 19:28..19:33
+Comma(,) @ 19:33..19:34
+Identifier(io) @ 19:35..19:37
+RightBrace(}) @ 19:37..19:38
+Arrow(->) @ 19:39..19:41
+Identifier(Int) @ 19:42..19:45
+LeftBrace({) @ 19:46..19:47
+KeywordLet(let) @ 20:5..20:8
+Identifier(raw) @ 20:9..20:12
+Colon(:) @ 20:12..20:13
+Identifier(Int) @ 20:14..20:17
+Equals(=) @ 20:18..20:19
+Identifier(ready) @ 20:20..20:25
+LeftParen(() @ 20:25..20:26
+Identifier(n) @ 20:26..20:27
+RightParen()) @ 20:27..20:28
+Dot(.) @ 20:28..20:29
+KeywordAwait(await) @ 20:29..20:34
+Identifier(raw) @ 21:5..21:8
+Star(*) @ 21:9..21:10
+IntegerLiteral(2) @ 21:11..21:12
+RightBrace(}) @ 22:1..22:2
+KeywordFn(fn) @ 26:1..26:3
+LineComment(// Caller awaits again: `double_remote(21)` is `Task<Int>` at this call) @ 24:1..24:72
+LineComment(// site, so `.await` extracts `42`.) @ 25:1..25:36
+Identifier(main) @ 26:4..26:8
+LeftParen(() @ 26:8..26:9
+RightParen()) @ 26:9..26:10
+Bang(!) @ 26:11..26:12
+LeftBrace({) @ 26:12..26:13
+Identifier(async) @ 26:13..26:18
+Comma(,) @ 26:18..26:19
+Identifier(io) @ 26:20..26:22
+RightBrace(}) @ 26:22..26:23
+Arrow(->) @ 26:24..26:26
+Identifier(Result) @ 26:27..26:33
+Less(<) @ 26:33..26:34
+LeftParen(() @ 26:34..26:35
+RightParen()) @ 26:35..26:36
+Comma(,) @ 26:36..26:37
+Identifier(IoError) @ 26:38..26:45
+Greater(>) @ 26:45..26:46
+LeftBrace({) @ 26:47..26:48
+KeywordLet(let) @ 27:5..27:8
+Identifier(doubled) @ 27:9..27:16
+Colon(:) @ 27:16..27:17
+Identifier(Int) @ 27:18..27:21
+Equals(=) @ 27:22..27:23
+Identifier(double_remote) @ 27:24..27:37
+LeftParen(() @ 27:37..27:38
+IntegerLiteral(21) @ 27:38..27:40
+RightParen()) @ 27:40..27:41
+Dot(.) @ 27:41..27:42
+KeywordAwait(await) @ 27:42..27:47
+Identifier(println) @ 28:5..28:12
+LeftParen(() @ 28:12..28:13
+StringHead("doubled = ) @ 28:13..28:24
+InterpolationStart(${) @ 28:24..28:26
+Identifier(doubled) @ 28:26..28:33
+InterpolationEnd(}) @ 28:33..28:34
+StringTail(") @ 28:34..28:35
+RightParen()) @ 28:35..28:36
+Question(?) @ 28:36..28:37
+KeywordLet(let) @ 33:5..33:8
+LineComment(// Stored-and-awaited-later: tasks are values. `ready(...)` returns) @ 30:5..30:72
+LineComment(// Task<Int> without blocking; `.await` pulls the value out when we) @ 31:5..31:72
+LineComment(// actually need it.) @ 32:5..32:25
+Identifier(pending) @ 33:9..33:16
+Colon(:) @ 33:16..33:17
+Identifier(Task) @ 33:18..33:22
+Less(<) @ 33:22..33:23
+Identifier(Int) @ 33:23..33:26
+Greater(>) @ 33:26..33:27
+Equals(=) @ 33:28..33:29
+Identifier(ready) @ 33:30..33:35
+LeftParen(() @ 33:35..33:36
+IntegerLiteral(100) @ 33:36..33:39
+RightParen()) @ 33:39..33:40
+KeywordLet(let) @ 34:5..34:8
+Identifier(value) @ 34:9..34:14
+Colon(:) @ 34:14..34:15
+Identifier(Int) @ 34:16..34:19
+Equals(=) @ 34:20..34:21
+Identifier(pending) @ 34:22..34:29
+Dot(.) @ 34:29..34:30
+KeywordAwait(await) @ 34:30..34:35
+Identifier(println) @ 35:5..35:12
+LeftParen(() @ 35:12..35:13
+StringHead("value = ) @ 35:13..35:22
+InterpolationStart(${) @ 35:22..35:24
+Identifier(value) @ 35:24..35:29
+InterpolationEnd(}) @ 35:29..35:30
+StringTail(") @ 35:30..35:31
+RightParen()) @ 35:31..35:32
+Question(?) @ 35:32..35:33
+Identifier(Ok) @ 37:5..37:7
+LeftParen(() @ 37:7..37:8
+LeftParen(() @ 37:8..37:9
+RightParen()) @ 37:9..37:10
+RightParen()) @ 37:10..37:11
+RightBrace(}) @ 38:1..38:2
+EndOfFile() @ 39:1..39:1

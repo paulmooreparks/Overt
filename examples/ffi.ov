@@ -9,6 +9,22 @@ module ffi_example
 extern "csharp" fn file_exists(path: String) !{io} -> Bool
     binds "System.IO.File.Exists"
 
+// Opaque types + the three extern shapes. The `extern type` line makes
+// `StringBuilder` visible as an Overt nominal type; `ctor fn` binds a
+// constructor; `instance fn` binds a method whose first parameter is
+// the receiver (`self`). Binds targets are always dotted paths — the
+// kind keyword selects the call shape, not the target string.
+extern "csharp" type StringBuilder binds "System.Text.StringBuilder"
+
+extern "csharp" ctor fn sb_new() -> StringBuilder
+    binds "System.Text.StringBuilder"
+
+extern "csharp" instance fn sb_append(self: StringBuilder, s: String) -> StringBuilder
+    binds "System.Text.StringBuilder.Append"
+
+extern "csharp" instance fn sb_to_string(self: StringBuilder) -> String
+    binds "System.Text.StringBuilder.ToString"
+
 // Import a Go function. Go's (value, ok) pattern becomes Option.
 extern "go" fn env_value(key: String) !{io} -> Option<String>
     binds "os.LookupEnv"
@@ -37,6 +53,12 @@ fn main() !{io} -> Result<(), IoError> {
     }?
 
     println("length of \"hello\" = ${strlen("hello")}")?
+
+    // Opaque-type flow: construct, chain instance methods, extract.
+    let b1: StringBuilder = sb_new()
+    let b2: StringBuilder = sb_append(self = b1, s = "hello ")
+    let b3: StringBuilder = sb_append(self = b2, s = "world")
+    println("built: ${sb_to_string(b3)}")?
 
     Ok(())
 }

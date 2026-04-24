@@ -126,6 +126,7 @@ public class CSharpCompileCheckTests
     [InlineData("trace.ov")]
     [InlineData("arith_eval.ov")]
     [InlineData("json.ov")]
+    [InlineData("async.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);

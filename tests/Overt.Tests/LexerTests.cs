@@ -281,6 +281,7 @@ public class LexerTests
     /// in the environment to regenerate the golden files after an intentional change.
     /// </summary>
     [Theory]
+    [InlineData("async.ov")]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("effects.ov")]

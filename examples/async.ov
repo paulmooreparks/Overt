@@ -1,0 +1,38 @@
+module async_example
+
+// Task-returning BCL methods bind directly with `Task<T>` as the return
+// type; `.await` is postfix, same shape as `?`, and extracts T.
+// Functions that use `.await` must carry `async` in their effect row;
+// they emit as C# `async Task<ReturnType>` and their callers see
+// `Task<T>` at the call site (so they, too, must `.await` or propagate).
+
+extern "csharp" fn ready(value: Int) -> Task<Int>
+    binds "System.Threading.Tasks.Task.FromResult<int>"
+
+extern "csharp" fn delay_ms(milliseconds: Int) -> Task<Int>
+    binds "System.Threading.Tasks.Task.FromResult<int>"  // placeholder: same shape
+
+// Async fn: uses `.await`, so it emits as `async Task<Int>`.
+// The declared return type `-> Int` is what callers semantically
+// receive after `.await`; under the hood, the C# signature is
+// `async Task<int>`.
+fn double_remote(n: Int) !{async, io} -> Int {
+    let raw: Int = ready(n).await
+    raw * 2
+}
+
+// Caller awaits again: `double_remote(21)` is `Task<Int>` at this call
+// site, so `.await` extracts `42`.
+fn main() !{async, io} -> Result<(), IoError> {
+    let doubled: Int = double_remote(21).await
+    println("doubled = ${doubled}")?
+
+    // Stored-and-awaited-later: tasks are values. `ready(...)` returns
+    // Task<Int> without blocking; `.await` pulls the value out when we
+    // actually need it.
+    let pending: Task<Int> = ready(100)
+    let value: Int = pending.await
+    println("value = ${value}")?
+
+    Ok(())
+}
