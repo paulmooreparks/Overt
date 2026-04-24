@@ -223,6 +223,13 @@ public sealed class CSharpEmitter
             _w.WriteLine();
         }
 
+        // Non-generic refinement aliases still lower to C# using-aliases (no
+        // coercion point), so their runtime checks live in a sibling helper
+        // class. The emitter wraps boundary expressions in
+        // `__Refinements.{Alias}__Check(...)`; the bodies evaluate the
+        // predicate and throw RefinementViolation on failure.
+        EmitRefinementChecks(module);
+
         foreach (var decl in module.Declarations
             .Where(d => d is not TypeAliasDecl and not UseDecl))
         {
@@ -379,6 +386,52 @@ public sealed class CSharpEmitter
         _w.Write($"using {t.Name} = ");
         EmitType(t.Target);
         _w.WriteLine(";");
+    }
+
+    /// <summary>Emit a <c>__Refinements</c> static class holding a <c>{Alias}__Check</c>
+    /// method for each non-generic refinement alias that carries a predicate.
+    /// The method evaluates the predicate against its argument, throws
+    /// <see cref="Overt.Runtime.RefinementViolation"/> on failure, otherwise
+    /// returns the value untouched. Generic refinements don't participate —
+    /// they check inside their wrapper's implicit operator.</summary>
+    private void EmitRefinementChecks(ModuleDecl module)
+    {
+        var refinedAliases = module.Declarations
+            .OfType<TypeAliasDecl>()
+            .Where(t => t.Predicate is not null && t.TypeParameters.Length == 0)
+            .ToArray();
+        if (refinedAliases.Length == 0) return;
+
+        _w.WriteLine("internal static class __Refinements");
+        _w.WriteLine("{");
+        using (_w.Indent())
+        {
+            foreach (var t in refinedAliases)
+            {
+                var innerType = CSharpTypeDisplay(LowerType(t.Target));
+                var predText = FormatPredicateText(t.Predicate!);
+                _w.WriteLine($"public static {innerType} {t.Name}__Check({innerType} self)");
+                _w.WriteLine("{");
+                using (_w.Indent())
+                {
+                    _w.Write("if (!(");
+                    EmitExpressionBody(t.Predicate!);
+                    _w.WriteLine("))");
+                    _w.WriteLine("{");
+                    using (_w.Indent())
+                    {
+                        _w.WriteLine(
+                            $"throw new global::Overt.Runtime.RefinementViolation("
+                            + $"\"{t.Name}\", \"{EscapeCsharpString(predText)}\", self);");
+                    }
+                    _w.WriteLine("}");
+                    _w.WriteLine("return self;");
+                }
+                _w.WriteLine("}");
+            }
+        }
+        _w.WriteLine("}");
+        _w.WriteLine();
     }
 
     /// <summary>Render a refinement predicate as its Overt source spelling for
@@ -1472,6 +1525,25 @@ public sealed class CSharpEmitter
     // -------------------------------------------------------- expressions
 
     private void EmitExpression(Expression expr)
+    {
+        // Refinement-boundary wrapping: when the type checker has flagged this
+        // expression's span as flowing into a non-generic refinement whose
+        // predicate it couldn't decide at compile time, wrap the emission in
+        // `{Alias}__Check(...)` — a synthesized helper that runs the predicate
+        // and throws RefinementViolation on failure.
+        if (_types?.RefinementBoundaries is { } boundaries
+            && boundaries.TryGetValue(expr.Span, out var aliasName))
+        {
+            _w.Write($"__Refinements.{aliasName}__Check(");
+            EmitExpressionBody(expr);
+            _w.Write(")");
+            return;
+        }
+
+        EmitExpressionBody(expr);
+    }
+
+    private void EmitExpressionBody(Expression expr)
     {
         switch (expr)
         {

@@ -201,14 +201,14 @@ Generic aliases are nominal, not transparent:
 type NonEmpty<T> = List<T> where size(self) > 0
 ```
 
-**Runtime enforcement.** For generic refinements, every value crossing
-into the wrapper runs the predicate; failure throws
-`Overt.Runtime.RefinementViolation` carrying the alias name, predicate
-source, and offending value. This catches undecidable-at-compile-time
-cases like `size(self) > 0`. Non-generic refinements
-(`type Age = Int where ...`) still rely on OV0311 for literals;
-non-literal values flowing into them are **not** runtime-checked yet —
-that plumbing lands in a follow-up.
+**Runtime enforcement.** Every value crossing into a refinement runs
+the predicate; failure throws `Overt.Runtime.RefinementViolation`
+carrying the alias name, predicate source, and offending value. Generic
+refinements check in the wrapper's implicit operator; non-generic
+refinements check through a synthesized `__Refinements.{Alias}__Check`
+helper the emitter wraps around boundary expressions (call args,
+record-field inits, let initializers). Statically-proven-safe literal
+values (decidable fragment → `true`) skip the runtime check.
 
 ---
 
@@ -674,12 +674,11 @@ fn strlen(s: String) -> Int {
   Buried in a call like `foo(if cond { bar()? } else { baz })` it may fall
   back to `.Unwrap()` which throws. Lift the `?` into a let if you need
   guaranteed propagation.
-- **Non-generic refinement runtime checks.** Generic refinements run the
-  predicate at coercion via the wrapper's implicit operator and throw
-  `RefinementViolation` on failure. Non-generic refinements
-  (`type Age = Int where ...`) lower to a C# using-alias so there's no
-  coercion point yet; literal crossings are caught at compile time by
-  OV0311, but non-literal values flowing in are not runtime-checked.
+- **Return-value refinement checks.** Boundary-wrapping fires at call
+  args, let initializers, and record field inits. A refinement violation
+  in a function's return expression is not currently detected at runtime;
+  add a call-site binding if you need the guarantee (`let r: Refined = f(x)`
+  triggers the let-boundary check).
 - **`f64` literal patterns in `match`.** Parse OK but don't fire — float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.

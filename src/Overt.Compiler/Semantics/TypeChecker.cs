@@ -31,6 +31,12 @@ public sealed class TypeChecker
     private readonly Dictionary<Symbol, TypeRef> _symbolTypes = new();
     private readonly Dictionary<SourceSpan, TypeRef> _expressionTypes = new();
     private readonly List<Diagnostic> _diagnostics = new();
+    // Boundary expressions that need a runtime refinement check: maps the
+    // expression's span to the refinement alias name. Populated by
+    // CheckRefinementAtBoundary for non-generic aliases whose predicate can't
+    // be decided at compile time. The emitter wraps each such expression in
+    // `{Alias}__Check(...)`.
+    private readonly Dictionary<SourceSpan, string> _refinementBoundaries = new();
 
     /// <summary>
     /// Call spans whose arity and argument types should NOT be checked — the call
@@ -91,7 +97,8 @@ public sealed class TypeChecker
             module,
             checker._symbolTypes.ToImmutableDictionary(),
             checker._expressionTypes.ToImmutableDictionary(),
-            checker._diagnostics.ToImmutableArray());
+            checker._diagnostics.ToImmutableArray(),
+            checker._refinementBoundaries.ToImmutableDictionary());
     }
 
     // -------------------------------------------------------------- module
@@ -1337,20 +1344,34 @@ public sealed class TypeChecker
         if (alias.Predicate is null) return;
 
         var selfValue = RefinementEvaluator.TryExtractLiteral(value);
-        if (selfValue is null) return;
+        var evalResult = selfValue is null
+            ? null
+            : RefinementEvaluator.Evaluate(alias.Predicate, selfValue);
 
-        var result = RefinementEvaluator.Evaluate(alias.Predicate, selfValue);
-        if (result != false) return; // null = undecidable, true = satisfied
+        if (evalResult == false)
+        {
+            // Statically provable violation — OV0311 at compile time.
+            var predicateText = FormatPredicate(alias.Predicate);
+            var d = new Diagnostic(
+                DiagnosticSeverity.Error,
+                "OV0311",
+                $"{boundaryDescription}: value does not satisfy refinement predicate on `{alias.Name}`",
+                value.Span)
+                .WithHelp($"values of type `{alias.Name}` must satisfy: {predicateText}")
+                .WithNoteAt(alias.Span, $"refinement `{alias.Name}` is declared here");
+            _diagnostics.Add(d);
+            return;
+        }
 
-        var predicateText = FormatPredicate(alias.Predicate);
-        var d = new Diagnostic(
-            DiagnosticSeverity.Error,
-            "OV0311",
-            $"{boundaryDescription}: value does not satisfy refinement predicate on `{alias.Name}`",
-            value.Span)
-            .WithHelp($"values of type `{alias.Name}` must satisfy: {predicateText}")
-            .WithNoteAt(alias.Span, $"refinement `{alias.Name}` is declared here");
-        _diagnostics.Add(d);
+        if (evalResult == true) return; // statically proven safe — no runtime check
+
+        // Undecidable or non-literal: schedule a runtime check. Only for
+        // non-generic refinements — generic ones already check inside their
+        // wrapper's implicit operator (see CSharpEmitter.EmitTypeAlias).
+        if (alias.TypeParameters.Length == 0)
+        {
+            _refinementBoundaries[value.Span] = alias.Name;
+        }
     }
 
     /// <summary>
@@ -1416,4 +1437,5 @@ public sealed record TypeCheckResult(
     ModuleDecl Module,
     ImmutableDictionary<Symbol, TypeRef> SymbolTypes,
     ImmutableDictionary<SourceSpan, TypeRef> ExpressionTypes,
-    ImmutableArray<Diagnostic> Diagnostics);
+    ImmutableArray<Diagnostic> Diagnostics,
+    ImmutableDictionary<SourceSpan, string>? RefinementBoundaries = null);

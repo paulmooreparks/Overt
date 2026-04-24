@@ -205,13 +205,15 @@ must carry. Full analysis is in the session transcript; the short list:
 - **H7. `|>?` vs `|>`** — same prefix, different semantics. Moot if H1
   reclassifies pipes as expert idiom; no standalone action.
 - **H8. Refinement-predicate silent deferral** when undecidable.
-  **Partially resolved 2026-04-24.** Generic refinements now throw
-  `RefinementViolation` at the wrapper's implicit operator when the
-  predicate fails. Non-generic refinements (`type Age = Int where ...`)
-  still lower to a using-alias with no coercion point — OV0311 covers
-  literals but non-literal boundaries remain unchecked. Follow-up:
-  switch non-generic refinements to a wrapper shape (or emit a per-site
-  `Check` helper) so every coercion runs the predicate.
+  **Resolved 2026-04-24.** Generic refinements throw `RefinementViolation`
+  at the wrapper's implicit operator. Non-generic refinements route
+  through synthesized `__Refinements.{Alias}__Check` helpers that the
+  emitter wraps around boundary expressions (call args, let initializers,
+  record field inits). Statically-proven-safe literal crossings skip the
+  wrap; undecidable and non-literal crossings always run the predicate.
+  Open: return-position checks — a refinement violation hidden in a
+  function's return expression isn't caught until the caller binds the
+  value at a recognized boundary.
 - **H9. Block-as-expression trailing value** is implicit per-block. The
   Rust/ML tradition thinks this earns its keep; hold for validation.
 

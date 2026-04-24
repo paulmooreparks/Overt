@@ -667,6 +667,62 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_NonGenericRefinement_RuntimeViolation_ThrowsOnBadValue()
+    {
+        // Non-generic refinements (`type Age = Int where ...`) lower to a
+        // C# using-alias with no coercion boundary, so runtime checks live
+        // in a synthesized `__Refinements.Age__Check` helper that the
+        // emitter wraps around boundary expressions — here, the `n` passed
+        // into `take(a: Age)`. A value outside the predicate range should
+        // throw RefinementViolation at the call site.
+        const string src = """
+            module ref_nongen_e2e
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn take(a: Age) -> Age { a }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = 999
+                let _: Age = take(n)
+                Ok(())
+            }
+            """;
+
+        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => CompileAndRun(src, "ref_nongen_e2e_bad"));
+        var inner = Assert.IsType<Overt.Runtime.RefinementViolation>(ex.InnerException);
+        Assert.Equal("Age", inner.AliasName);
+        Assert.Contains("0 <= self", inner.PredicateText);
+        Assert.Equal(999, inner.OffendingValue);
+    }
+
+    [Fact]
+    public void Transpiled_NonGenericRefinement_ValidValue_Passes()
+    {
+        // Counterpart: a value inside the predicate range flows through
+        // `Age__Check` and returns unchanged.
+        const string src = """
+            module ref_nongen_e2e_ok
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn take(a: Age) -> Age { a }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = 42
+                let _: Age = take(n)
+                Ok(())
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "ref_nongen_e2e_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Transpiled_GenericRefinement_SatisfiedPredicate_Passes()
     {
         // Counterpart: a non-empty list passes the predicate and the wrapper
