@@ -18,7 +18,7 @@ fn enable_feature_a(config: Config) -> Config {
 // Without it (and without shadowing), this would need config_1, config_2, config_3 —
 // the numbered-suffix antipattern the design explicitly rejects.
 fn configure(use_a: Bool, use_b: Bool) -> Config {
-    let mut config = default_config()
+    let mut config: Config = default_config()
     if use_a {
         config = config with { enable_a = true }
     }
@@ -31,8 +31,8 @@ fn configure(use_a: Bool, use_b: Bool) -> Config {
 // `let mut` for scalar accumulators in a while loop.
 // (Collection reductions should use `fold`/`sum_by` instead — see §10.)
 fn sum_first_n(n: Int) -> Int {
-    let mut total = 0
-    let mut i     = 1
+    let mut total: Int = 0
+    let mut i:     Int = 1
     while i <= n {
         total = total + i
         i     = i + 1
