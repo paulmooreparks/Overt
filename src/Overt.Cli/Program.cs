@@ -796,6 +796,12 @@ static class Cli
         ["OV0160"] = "AGENTS.md §2 (declarations — uniqueness)",
         ["OV0161"] = "AGENTS.md §7 (let mut)",
         ["OV0162"] = "AGENTS.md §6 (match arms)",
+        ["OV0163"] = "AGENTS.md §2 (use declarations — selective imports or alias)",
+        ["OV0164"] = "AGENTS.md §2 (modules — circular imports)",
+        ["OV0165"] = "AGENTS.md §2 (modules — cannot read entry file)",
+        ["OV0166"] = "AGENTS.md §2 (modules — cannot read imported module)",
+        ["OV0167"] = "AGENTS.md §2 (modules — module not found in search path)",
+        ["OV0168"] = "AGENTS.md §2 (modules — imported symbol not exported)",
         ["OV0169"] = "AGENTS.md §2 (every file starts with `module <name>`)",
         ["OV0170"] = "AGENTS.md §7 (no semicolons; newlines separate statements)",
 
