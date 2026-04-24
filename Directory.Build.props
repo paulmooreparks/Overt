@@ -39,7 +39,7 @@
        the version string. -->
   <PropertyGroup>
     <Product>Overt</Product>
-    <Company>Overt contributors</Company>
+    <Company>Paul Moore Parks</Company>
     <Copyright>Copyright (c) Paul Moore Parks</Copyright>
     <AssemblyVersion Condition="'$(OvertVersionBase)' != ''">$(OvertVersionBase).0.0</AssemblyVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>

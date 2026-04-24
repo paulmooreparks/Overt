@@ -30,7 +30,7 @@
          VERSION file). `dotnet pack` composes it with the prerelease suffix
          the caller passes. The package-consumption test uses a per-run
          suffix to dodge NuGet's global-package cache. -->
-    <Authors>Overt contributors</Authors>
+    <Authors>Paul Moore Parks</Authors>
     <Description>MSBuild integration for the Overt language: compile `.ov` files alongside `.cs` in a .csproj via OvertCompile items. Import the targets by PackageReference and drop `.ov` files into the project.</Description>
     <PackageTags>overt;msbuild;transpiler;codegen</PackageTags>
     <PackageIcon>icon.png</PackageIcon>

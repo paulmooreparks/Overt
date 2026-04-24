@@ -38,7 +38,7 @@
          VERSION file). `dotnet pack` composes it with the prerelease suffix
          the caller passes. The tool-install e2e test uses a per-run suffix
          to dodge the NuGet global-package cache. -->
-    <Authors>Overt contributors</Authors>
+    <Authors>Paul Moore Parks</Authors>
     <Description>The Overt language CLI: `overt run`, `overt fmt`, `overt bind`, and emit-stage inspection for `.ov` files.</Description>
     <PackageTags>overt;language;transpiler;cli</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
