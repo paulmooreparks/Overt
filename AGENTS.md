@@ -1,9 +1,9 @@
-# AGENTS.md — writing Overt
+# AGENTS.md: Writing Overt
 
 This file tells an LLM how to write working Overt code *today*. Load it into
 context at the start of any session that will author or modify `.ov` files.
 
-It is not rationale — that lives in `DESIGN.md`. Each section here shows the
+It is not rationale; that lives in `DESIGN.md`. Each section here shows the
 **one canonical form** for a construct (no alternatives, no history) and the
 diagnostic you'll see if you miswrite it.
 
@@ -30,7 +30,7 @@ actually work:
   consecutive `let` statements with visible inputs and outputs are easier
   for you to modify correctly than one pipe chain where each arrow hides a
   splice and an unwrap. Pipes exist in Overt but are an expert idiom, not
-  the canonical form — see §10's guidance.
+  the canonical form; see §10's guidance.
 
 - **Redundant type annotations are valuable.** `let n: Int = ...` beats
   `let n = ...` even when the compiler could infer. The annotation is a
@@ -63,7 +63,7 @@ Rules on display:
 - `main` takes no args and returns `Result<(), IoError>`. The process exits 0
   on `Ok`, 1 on `Err`.
 - `!{io}` declares the effect row; any function performing I/O must list `io`.
-- `println(...)` returns `Result<(), IoError>` — errors are values, not
+- `println(...)` returns `Result<(), IoError>`, because errors are values, not
   exceptions. The `?` propagates `Err` as an early return.
 - `Ok(())` constructs the success value explicitly. There is no implicit
   return; the last expression of a block is the value if it isn't a statement.
@@ -81,10 +81,10 @@ overt --emit=csharp hello.ov    # dumps the transpiled C# to stdout
 A module is one `.ov` file. Cross-file imports come in two shapes:
 
 ```overt
-// Selective — imported names are in scope unqualified.
+// Selective: imported names are in scope unqualified.
 use pathutil.{path_combine}
 
-// Aliased — module's symbols accessed via `alias.name`.
+// Aliased: the module's symbols are accessed via `alias.name`.
 use stdlib.http.client as http
 ```
 
@@ -94,20 +94,20 @@ use stdlib.http.client as http
   `stdlib/http/client.ov` declares `module stdlib.http.client`.
 - Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want
   (selective form) or alias the module (`as`).
-- Selective + alias together isn't supported — pick one.
+- Selective + alias together isn't supported; pick one.
 - `overt run` resolves the full module graph. Other emit modes
   (`--emit=csharp`, etc.) operate on a single file only and will fail on
   files with `use` declarations.
 
 Top-level declarations:
-- `fn <name>(...) ...` — function
-- `record <Name> { field: Type, ... }` — product type, immutable
-- `enum <Name> { Variant, Variant { field: Type }, ... }` — sum type
-- `type <Name> = <Type> where <pred>` — type alias, optionally refined
-- `extern "c" fn <name>(...) -> <Type>` — FFI declaration (body throws at
+- `fn <name>(...) ...`: function
+- `record <Name> { field: Type, ... }`: product type, immutable
+- `enum <Name> { Variant, Variant { field: Type }, ... }`: sum type
+- `type <Name> = <Type> where <pred>`: type alias, optionally refined
+- `extern "c" fn <name>(...) -> <Type>`: FFI declaration (body throws at
   runtime; binding is unimplemented)
 
-Declaration order does not matter — forward references within a file are
+Declaration order does not matter; forward references within a file are
 fine.
 
 ---
@@ -118,11 +118,11 @@ Primitives: `Int` (32-bit, `int`), `Int64` (64-bit, `long`), `Float` (64-bit,
 `double`), `Bool`, `String`, `()` (unit).
 
 Generic stdlib types:
-- `Result<T, E>` — success or failure
-- `Option<T>` — present or absent
-- `List<T>` — ordered immutable collection
+- `Result<T, E>`: success or failure
+- `Option<T>`: present or absent
+- `List<T>`: ordered immutable collection
 
-Records — immutable, constructed with `{ field = value, ... }`:
+Records are immutable, constructed with `{ field = value, ... }`:
 
 ```overt
 record User {
@@ -134,7 +134,7 @@ record User {
 let u = User { id = 1, name = "ada", active = true }
 ```
 
-Enums — closed sums, fully-qualified variant references:
+Enums are closed sums, with fully-qualified variant references:
 
 ```overt
 enum Status {
@@ -168,12 +168,12 @@ context still knows what each binding is.
 ```overt
 let x: Int = 42                          // correct
 let mut counter: Int = 0                 // correct
-let _: Result<(), IoError> = println(s)  // correct — annotated discard
+let _: Result<(), IoError> = println(s)  // correct, annotated discard
 let x = 42                               // OV0314
 ```
 
 **Exemption: destructuring patterns.** `let (a, b) = expr` and other
-pattern bindings are exempt from OV0314 — there's no tuple-type annotation
+pattern bindings are exempt from OV0314; there's no tuple-type annotation
 syntax yet, and the individual bindings each carry their type at the use
 site. Plain-identifier `let` always requires the annotation.
 
@@ -181,7 +181,7 @@ site. Plain-identifier `let` always requires the annotation.
 
 ## 4. Type aliases and refinements
 
-Non-generic aliases are transparent for equality — `Age` and `Int` compare
+Non-generic aliases are transparent for equality. `Age` and `Int` compare
 equal, distinguished only by a refinement predicate:
 
 ```overt
@@ -224,7 +224,7 @@ fn maybe_fetch(id: Int) !{io, async} -> Result<User, IoError> { ... }
 
 Core effects: `io`, `async`, `inference`, `fails`.
 
-Effect rows are **covering, not minimal** — if a function performs effect `X`,
+Effect rows are **covering, not minimal**. If a function performs effect `X`,
 `X` must appear in its row. Missing effects are **OV0310**. There is no
 effect polymorphism notation in source today; the compiler approximates
 effect-variable propagation through function-typed arguments.
@@ -245,7 +245,7 @@ if cond { println("ok")? }
 Both arms must produce the same type when there's an else. If else is absent,
 the body must be `()`.
 
-### match — exhaustive
+### match: exhaustive
 
 ```overt
 match status {
@@ -254,7 +254,7 @@ match status {
     Status.Delivered => "done",
 }
 
-// Literal patterns on Int / Float / Bool / String — need a `_` arm.
+// Literal patterns on Int / Float / Bool / String need a `_` arm.
 match n {
     0  => "zero",
     1  => "one",
@@ -285,7 +285,7 @@ wildcards (`(_, B.P)`) expand to all variants at that position. Tuples
 that include a non-enum element (e.g. `Int`) skip the check since the
 pattern space is infinite.
 
-### with — record update
+### with: record update
 
 ```overt
 let updated = u with { active = false }
@@ -314,7 +314,7 @@ previous newline or `;` (both accepted).
 ```overt
 let x: Int = 42               // immutable binding
 let mut counter = 0           // mutable rebinding of a single name
-counter = counter + 1         // assignment — only valid on `let mut`
+counter = counter + 1         // assignment; only valid on `let mut`
 break                         // only inside a loop body
 continue                      // only inside a loop body
 ```
@@ -331,12 +331,12 @@ the `None` stdlib symbol).
 ## 8. Control flow
 
 ```overt
-// Collection iteration — must be a List<T>
+// Collection iteration; must be a List<T>
 for each x in xs {
     println("got ${x}")?
 }
 
-// Infinite loop — exits via break
+// Infinite loop; exits via break
 let mut n = 0
 loop {
     if n == 3 { break }
@@ -370,7 +370,7 @@ fn doubled(s: String) -> Result<Int, ParseError> {
 
 The `?` operator works only when the enclosing function returns
 `Result<_, E>` with a matching `E`. An ignored `Result<_, _>` in statement
-position is **OV0307** — every `Result` must be consumed via `?`,
+position is **OV0307**: every `Result` must be consumed via `?`,
 `let _ = ...`, or `match`.
 
 ### Pipe-propagate
@@ -397,16 +397,16 @@ so only the chosen branch's operand evaluates.
 When an `if`/`match` that contains `?` is itself nested inside another
 expression position (call arg, record field, tuple element, etc.), the
 emitter now lifts that conditional into a pre-computed local via the same
-stmt-lowering shape — `let x: T = consume(if cond { foo()? } else { ... })`
+stmt-lowering shape. `let x: T = consume(if cond { foo()? } else { ... })`
 evaluates the if first into a temp, the `?` propagates as a value, and
 only then calls `consume`.
 
-### .await — async at the extern boundary
+### .await: async at the extern boundary
 
 Overt binds to `Task<T>`-returning BCL methods (`File.ReadAllTextAsync`,
 `HttpClient.GetStringAsync`, etc.) by spelling the return type as
 `Task<T>` in the extern signature. The postfix `.await` operator extracts
-`T` from `Task<T>` — same shape as `?` for `Result<T, E>`. Functions that
+`T` from `Task<T>`, the same shape as `?` for `Result<T, E>`. Functions that
 use `.await` must carry `async` in their effect row:
 
 ```overt
@@ -422,8 +422,8 @@ fn load(path: String) !{async, io} -> Result<Int, IoError> {
 Any fn whose body uses `.await` emits as C# `async Task<ReturnType>`;
 its callers see `Task<ReturnType>` as the call-site type and must `.await`
 to extract. Fns carrying `async` for other reasons (`par_map`, `parallel`,
-`race` — they run things concurrently but return sync values) don't trip
-this rewrite — the compiler keys off `.await` presence in the body, not
+`race`, which run things concurrently but return sync values) don't trip
+this rewrite; the compiler keys off `.await` presence in the body, not
 on the effect row alone.
 
 **OV0317** fires if `.await` is applied to a non-`Task<T>` value. The
@@ -463,7 +463,7 @@ unwrap) that you must mentally simulate at each step. For the common
 "do step A, then step B, then step C" shape, prefer named `let` bindings:
 
 ```overt
-// Canonical for agent RWRA — each step explicit, no implicit operations.
+// Canonical for agent RWRA: each step explicit, no implicit operations.
 let filtered: List<Int> = filter(xs, is_even)
 let squared:  List<Int> = map(filtered, square)
 let total:    Int       = fold(squared, seed = 0, step = add)
@@ -566,7 +566,7 @@ by original index on failure; order of the output list matches the input.
 Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
 ```
 
-A `trace { ... }` block is a pass-through today — no events are actually
+A `trace { ... }` block is a pass-through today; no events are actually
 emitted. Subscribe works, but you won't see anything.
 
 ### Blessed stdlib (auto-discovered)
@@ -589,7 +589,7 @@ fn main() !{io} -> Result<(), IoError> {
 **Per-back-end, not portable.** Stdlib lives under `stdlib/<backend>/*`.
 Today only `stdlib/csharp/*` exists (the only back end emitting code).
 When Go and TypeScript back ends arrive, `stdlib/go/*` and `stdlib/ts/*`
-sit beside it — each with its own facades bound to that back end's native
+sit beside it, each with its own facades bound to that back end's native
 ecosystem. There is no stdlib shared across back ends. Agents
 retargeting a program to another back end rewrite it; humans shouldn't
 be trying to write Overt that straddles back ends by hand. The same split applies
@@ -600,21 +600,21 @@ DESIGN.md §19 and §20 for the rationale.
 
 Currently shipped (all under `stdlib.csharp.system.*`, mirroring .NET's
 own `System.*` namespaces):
-- `stdlib.csharp.system.io.path` — pure string manipulation
-- `stdlib.csharp.system.io.file` — file I/O (Result-wrapped)
-- `stdlib.csharp.system.math` — pure math
-- `stdlib.csharp.system.environment` — env vars, system info
-- `stdlib.csharp.system.guid` — GUID utilities
-- `stdlib.csharp.system.convert` — type conversions
-- `stdlib.csharp.system.console` — console I/O
+- `stdlib.csharp.system.io.path`: pure string manipulation
+- `stdlib.csharp.system.io.file`: file I/O (Result-wrapped)
+- `stdlib.csharp.system.math`: pure math
+- `stdlib.csharp.system.environment`: env vars, system info
+- `stdlib.csharp.system.guid`: GUID utilities
+- `stdlib.csharp.system.convert`: type conversions
+- `stdlib.csharp.system.console`: console I/O
 
 These are regenerated by running `overt bind --type <CLR type>
 --module <module path> --output stdlib/<path>.ov`. See `overt bind --help`.
 
-### FFI — C# extern bindings
+### FFI: C# extern bindings
 
 `extern "csharp" [kind] fn` binds a host-language member. The optional
-kind keyword — `instance` or `ctor` — selects the call shape; without one,
+kind keyword (`instance` or `ctor`) selects the call shape; without one,
 the extern is static. The binds target is always a dotted path; it never
 encodes the shape. Grammar:
 
@@ -632,7 +632,7 @@ extern "csharp" fn path_combine(a: String, b: String) -> String
 extern "csharp" fn machine_name() !{io} -> String
     binds "System.Environment.MachineName"
 
-// Effectful — Result return causes the extern runtime to wrap exceptions
+// Effectful; the Result return causes the extern runtime to wrap exceptions
 // as Err(IoError { narrative = <exception message> }).
 extern "csharp" fn read_all_text(path: String) !{io, fails} -> Result<String, IoError>
     binds "System.IO.File.ReadAllText"
@@ -662,10 +662,10 @@ extern "csharp" instance fn sb_to_string(self: StringBuilder) -> String
 
 `instance fn` requires `self` as the first parameter (OV0315 otherwise);
 the emitter drops it from the argument list and uses it as the C# call
-receiver: `self.Append(s)`. `ctor fn` requires a return type — the
-constructed type (OV0316 otherwise) — and emits `new T(args)`.
+receiver: `self.Append(s)`. `ctor fn` requires a return type (the
+constructed type, OV0316 otherwise) and emits `new T(args)`.
 
-`overt bind` generates all of the above automatically for public types —
+`overt bind` generates all of the above automatically for public types,
 constructors, static members, and instance methods get emitted in one pass
 with the correct kind keywords.
 
@@ -720,9 +720,9 @@ static methods. Effect rows come from a curated namespace table (pure for
 generator can't map cleanly (spans, arrays, custom types) emit as
 `// skipped` comments.
 
-### FFI — C extern bindings
+### FFI: C extern bindings
 
-`extern "c" fn` parses but is **not wired at runtime yet** — P/Invoke
+`extern "c" fn` parses but is **not wired at runtime yet**; P/Invoke
 integration is a later milestone. For now, use a C# extern as an
 intermediary (declare a C# static method that calls the C function, bind to
 that).
@@ -742,7 +742,7 @@ fn strlen(s: String) -> Int {
 
 - Two-space indent. Not indentation-significant (C-family braces).
 - Identifiers: `snake_case` for values and functions, `PascalCase` for types,
-  `SCREAMING_SNAKE_CASE` nowhere in particular — Overt doesn't have
+  `SCREAMING_SNAKE_CASE` nowhere in particular, because Overt doesn't have
   constants distinct from `let`.
 - Record and variant field names are lowercase: `IoError { narrative = "..." }`,
   not `Narrative`.
@@ -760,7 +760,7 @@ fn strlen(s: String) -> Int {
   multi-file work, run `overt fmt` per file.
 - **FFI calls at runtime.** `extern` compiles; invocation throws.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
-- **`f64` literal patterns in `match`.** Parse OK but don't fire — float
+- **`f64` literal patterns in `match`.** Parse OK but don't fire, because float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.
 - **Module-system-aware package management.** No `import`, no `cargo`-style
@@ -808,7 +808,7 @@ reference. Codes are stable.
 | OV0313 | type | `for each` on non-`List` | convert to a `List<T>` first |
 | OV0314 | type | `let` without type annotation | add `: <Type>` after the binder |
 | OV0315 | resolve | `extern instance fn` without `self` first parameter | add `self: <Type>` as the first parameter |
-| OV0316 | resolve | `extern ctor fn` without return type | add `-> <Type>` — the constructed type |
+| OV0316 | resolve | `extern ctor fn` without return type | add `-> <Type>`, the constructed type |
 | OV0317 | type | `.await` on a non-`Task<T>` value | await a Task-returning expression |
 
 ---
