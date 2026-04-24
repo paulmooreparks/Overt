@@ -1,6 +1,6 @@
-<img src="https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot.png" alt="Overt mascot" align="right" width="180">
-
 # Overt
+
+![Overt mascot](https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot-240.png)
 
 **Overt** is an agent-first programming language, written and maintained primarily by LLM agents with humans in a review and audit role. Every effect, error, dispatch, mutation, and piece of state is *overt*: visible at the call or declaration site, never concealed. Overt transpiles to readable source in a host language (C# today, Go planned).
 
