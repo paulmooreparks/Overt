@@ -31,7 +31,7 @@ produces signal.
 - No nuget.org publish until the landing story exists. Publishing is
   a one-way door on the package name and version line; first visitors
   to a bare package page will bounce. Gated behind Phase 2.
-- No Go backend, no formatter, no LSP as prerequisites. Those ship if
+- No Go back end, no formatter, no LSP as prerequisites. Those ship if
   demand surfaces; they aren't launch-blocking.
 - No exhaustive language reference / spec document. DESIGN.md exists;
   AGENTS.md is the working reference. A formal spec is a post-traction

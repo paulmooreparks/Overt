@@ -8,7 +8,7 @@ It is not rationale — that lives in `DESIGN.md`. Each section here shows the
 diagnostic you'll see if you miswrite it.
 
 Status as of commit tip: 359 tests; `overt run` executes transpiled programs
-via in-memory Roslyn. The C# backend is primary; Go is scaffolded only.
+via in-memory Roslyn. The C# back end is primary; Go is scaffolded only.
 
 ---
 
@@ -586,15 +586,15 @@ fn main() !{io} -> Result<(), IoError> {
 }
 ```
 
-**Per-backend, not portable.** Stdlib lives under `stdlib/<backend>/*`.
-Today only `stdlib/csharp/*` exists (the only backend emitting code).
-When Go and TypeScript backends arrive, `stdlib/go/*` and `stdlib/ts/*`
-sit beside it — each with its own facades bound to that backend's native
-ecosystem. There is no portable-across-backends stdlib. Agents
-retargeting a program to another backend rewrite it; humans shouldn't
-be trying to write cross-backend Overt by hand. The same split applies
+**Per-back-end, not portable.** Stdlib lives under `stdlib/<backend>/*`.
+Today only `stdlib/csharp/*` exists (the only back end emitting code).
+When Go and TypeScript back ends arrive, `stdlib/go/*` and `stdlib/ts/*`
+sit beside it — each with its own facades bound to that back end's native
+ecosystem. There is no stdlib shared across back ends. Agents
+retargeting a program to another back end rewrite it; humans shouldn't
+be trying to write Overt that straddles back ends by hand. The same split applies
 to tooling: `overt bind`, `overt run`, debug mapping, and host-source
-inspection are all per-backend. `overt fmt` and the Overt-level emit
+inspection are all per-back-end. `overt fmt` and the Overt-level emit
 stages (`tokens`, `ast`, `resolved`, `typed`) are shared. See
 DESIGN.md §19 and §20 for the rationale.
 

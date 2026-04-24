@@ -54,7 +54,7 @@ That transpiles, compiles, and executes `hello.ov` in one pass, printing `Hello,
 
 A .NET global tool (`dotnet tool install --global Overt`) is packaged and tested but not yet published to nuget.org; see [`ROLLOUT.md`](ROLLOUT.md) for when that ships.
 
-Using Overt from an existing C# project is a `<PackageReference>` away — see [AGENTS.md §11](AGENTS.md#11-building-with-msbuild-c-backend) and the working sample at [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
+Using Overt from an existing C# project is a `<PackageReference>` away — see [AGENTS.md §11](AGENTS.md#11-building-with-msbuild-c-back-end) and the working sample at [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 
 ---
 
@@ -79,7 +79,7 @@ A few of the decisions that define the language. Full rationale in [`DESIGN.md`]
 
 ## Architecture
 
-Two-tier split: language-level work is shared across all backends; anything that touches host artifacts is per-backend.
+Two-tier split: language-level work is shared across all back ends; anything that touches host artifacts is per-back-end.
 
 ```mermaid
 flowchart TB
@@ -102,7 +102,7 @@ flowchart TB
     tier1 -->|AST| tier2
 ```
 
-See [`DESIGN.md`](DESIGN.md) §19 (stdlib is per-backend, not portable) and §20 (tooling-tier split) for rationale.
+See [`DESIGN.md`](DESIGN.md) §19 (stdlib is per-back-end, not portable) and §20 (tooling-tier split) for rationale.
 
 ## Repository layout
 
@@ -127,10 +127,10 @@ src/
   Overt.Compiler/                   Tier 1: lexer, parser, resolver, type-checker, formatter
     Modules/                          Module-graph resolution for cross-file `use`
   Overt.Backend.CSharp/             Tier 2: C# emitter, BindGenerator, extern runtime wiring
-  Overt.Backend.Go/                 Tier 2: Go backend (scaffold; no emission yet)
+  Overt.Backend.Go/                 Tier 2: Go back end (scaffold; no emission yet)
   Overt.Build/                      MSBuild integration: OvertTranspileTask + targets + NuGet packaging
   Overt.Cli/                        Thin dispatcher: `run`, `fmt`, `bind`, `--emit=<stage>`
-  Overt.Runtime/                    Runtime prelude for transpiled programs (C# backend)
+  Overt.Runtime/                    Runtime prelude for transpiled programs (C# back end)
 tests/
   Overt.Tests/                      xUnit suite (lexer goldens, emitter compile-checks, e2e tool install)
   Overt.EndToEnd/                   Roslyn compile + exec harness for hello.ov
@@ -227,13 +227,13 @@ The compiler pipeline, with the test coverage that pins each stage:
 
 From [`DESIGN.md §20`](DESIGN.md):
 
-1. **Backend-independent frontend.** Lex / parse / resolve / type-check / format / module graph / diagnostics live in `Overt.Compiler` and never learn which backend will consume the AST.
-2. **Per-backend everything else.** Each `Overt.Backend.<Host>` owns its emitter, runtime, binding generator (`overt bind`), runner (`overt run`), debug mapping, and package-ecosystem interop.
+1. **Back-end-independent front end.** Lex / parse / resolve / type-check / format / module graph / diagnostics live in `Overt.Compiler` and never learn which back end will consume the AST.
+2. **Per-back-end everything else.** Each `Overt.Backend.<Host>` owns its emitter, runtime, binding generator (`overt bind`), runner (`overt run`), debug mapping, and package-ecosystem interop.
 3. **C# emission primary** (Roslyn, emitting C# source text — not IL).
 4. **Go emission as conformance target** to keep the split honest; CI only, not a parallel implementation effort.
-5. **Portability, if ever needed, is its own backend** — a purpose-designed portable stdlib and emitter, opted into explicitly. See §19.
+5. **Portability, if ever needed, is its own back end** — a purpose-designed portable stdlib and emitter, opted into explicitly. See §19.
 
-The compiler host language is **C#**, chosen for iteration speed given the primary author's background and the fact that the C# backend depends on Roslyn APIs anyway.
+The compiler host language is **C#**, chosen for iteration speed given the primary author's background and the fact that the C# back end depends on Roslyn APIs anyway.
 
 ---
 
@@ -246,7 +246,7 @@ Working end-to-end on C#:
 - **Stdlib.** Facades under `stdlib/csharp/system.*` for path, file, console, environment, math, convert, DateTime, TimeSpan, Guid, StringBuilder, Uri — generated from reflection via `overt bind`, auto-discovered by the CLI. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/json.ov`](examples/json.ov).
 - **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens, ast, resolved, typed, csharp). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
 - **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs are produced and tested; neither is published to nuget.org yet ([`ROLLOUT.md`](ROLLOUT.md) Phase 2).
-- **Not yet.** Go backend emission, LSP server, cross-file module system beyond the current in-repo graph, self-hosted compiler — all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).
+- **Not yet.** Go back-end emission, LSP server, cross-file module system beyond the current in-repo graph, self-hosted compiler — all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).
 
 ---
 

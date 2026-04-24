@@ -352,7 +352,7 @@ Most classical UB sources are already eliminated structurally by decisions made 
 |---|---|
 | Null dereference | Non-nullable by default; nullability is `Option<T>` and must be matched (§3, this section). |
 | Out-of-bounds index | No literal integer indexing (§13). Iteration, branded indices, or proven-index only. |
-| Use-after-free | No manual memory management; backends are garbage-collected. No raw pointers in safe code. |
+| Use-after-free | No manual memory management; back ends are garbage-collected. No raw pointers in safe code. |
 | Data races | No shared mutable state (§3, §10). Task groups pass values, not references. |
 | Uninitialized reads | No zero values. Every `let` must initialize. |
 | Strict-aliasing violation | No raw pointers in safe code; no concept applies. |
@@ -531,7 +531,7 @@ Not redundancy — different semantic purposes. The formatter-enforced style (§
 
 **Decision: errors are values, never exceptions.**
 
-Exceptions fail the "visible at the call site" test catastrophically — an agent cannot see what might throw without reading the whole transitive call tree, and forgotten catches are a dominant failure mode. The source language has no exception construct. (The C# backend may use exceptions internally during codegen for specific interop cases; that is not visible to the source author.)
+Exceptions fail the "visible at the call site" test catastrophically — an agent cannot see what might throw without reading the whole transitive call tree, and forgotten catches are a dominant failure mode. The source language has no exception construct. (The C# back end may use exceptions internally during codegen for specific interop cases; that is not visible to the source author.)
 
 **Structure:**
 
@@ -601,7 +601,7 @@ let enriched = users |>? par_map(enrich)
 
 This is the decision most likely to be surprising, so the performance story must be explicit. Hardware executes indexed loads either way — the question is whether the *source language* forces index arithmetic into the agent's hands, or whether the compiler infers it. Source-level index-free does not mean runtime-level index-free.
 
-**Tier 1 — default (95% of real code):** named iteration and transformation. `for each`, `fold`, `map`, `filter`, `first`, `last`, `chunks`, `windows`, `zip`, `scan`. Zero-cost abstractions: lower to indexed loops in emission. Modern AOT compilers (NativeAOT, Go's SSA backend) eliminate iterator abstractions in hot loops.
+**Tier 1 — default (95% of real code):** named iteration and transformation. `for each`, `fold`, `map`, `filter`, `first`, `last`, `chunks`, `windows`, `zip`, `scan`. Zero-cost abstractions: lower to indexed loops in emission. Modern AOT compilers (NativeAOT, Go's SSA back end) eliminate iterator abstractions in hot loops.
 
 **Tier 2 — typed indices for random access:** when genuine O(1) lookup is required (hash map, array-backed lookup table), use a branded `Index<Collection>` type. The index is validated at construction, not at every use, so the hot path is a single bounds-elidable load. Ergonomics of "I have a key, give me the value" without the failure mode of "the third element."
 
@@ -653,7 +653,7 @@ The source language has no runtime reflection. Rationale:
 
 The legitimate use cases (serialization, builder patterns, "walk every field of a type") are solved at compile time via `derive` — see below. The generated code is visible, statically checked, and debuggable.
 
-.NET libraries that use reflection internally continue to work; that is a backend interop concern, not a surface-language concern.
+.NET libraries that use reflection internally continue to work; that is a back-end interop concern, not a surface-language concern.
 
 ### C++ templates — no
 
@@ -684,11 +684,11 @@ v1 derive set (finalized):
 
 **`Clone` is deliberately excluded.** Records are structurally immutable (§10), and there's no shared mutable state, so "explicit deep copy" is not a meaningful operation distinct from "use the value." **`Default` is also excluded** because §9 bans zero values — any "default" must be constructed explicitly via a named factory function, which is a deliberate authoring choice, not a derive.
 
-The set is extended by the stdlib and backend teams, not by users. A future version may allow user-defined derives; v1 keeps it fixed.
+The set is extended by the stdlib and back-end teams, not by users. A future version may allow user-defined derives; v1 keeps it fixed.
 
-### Source generators (backend-side)
+### Source generators (back-end-side)
 
-The C# backend may implement derives via Roslyn source generators; the Go backend emits methods directly. Users never see source generators — they are a codegen implementation detail.
+The C# back end may implement derives via Roslyn source generators; the Go back end emits methods directly. Users never see source generators — they are a codegen implementation detail.
 
 ### If code generation beyond derives is needed
 
@@ -766,7 +766,7 @@ C FFI is strategically enormous: every OS exposes syscalls through a C ABI, ever
 But C is weaker than either C# or Go, so the surface needs extra machinery:
 
 - **`unsafe` keyword.** Every `extern "c"` declaration is prefixed with `unsafe`. Call sites that invoke unsafe functions directly must sit inside an `unsafe { ... }` block. Wrap in a safe Overt function immediately — from then on, the rest of the codebase only sees the safe wrapper.
-- **`from "libname"` clause** on every `extern "c"` — names the shared library, resolved per-OS (`.so` / `.dll` / `.dylib`). Lowers to `[DllImport]` on the C# backend, cgo on the Go backend.
+- **`from "libname"` clause** on every `extern "c"` — names the shared library, resolved per-OS (`.so` / `.dll` / `.dylib`). Lowers to `[DllImport]` on the C# back end, cgo on the Go back end.
 - **`CString`** — byte-sequence-with-encoding type, distinct from Overt `String`. Conversions across the C boundary are always explicit; strings never auto-marshal.
 - **`Ptr<T>`** — raw pointer type. The Overt GC does not track it. Explicitly opts out of memory safety for interop purposes.
 - **`@repr("c")` attribute** on records whose layout must be C-compatible. Without it, the compiler is free to reorder fields or adjust padding.
@@ -787,8 +787,8 @@ Three questions that were deferred in early FFI design, now settled.
 
 **Generics across the FFI boundary.**
 
-- *On the C# and Go backends:* generic `extern` functions are **allowed**. The compiler monomorphizes per use site. Nested generics (`List<User>`) are permitted when both backends naturally support the type.
-- *On the C backend:* generic `extern` functions are **disallowed**. C has no generics; type erasure defeats the type system. Authors write type-specific bindings. Nested generics across the C boundary are permitted only when the inner type is primitive (`List<Int>` — marshals as pointer + length; `List<User>` — requires an explicit flat representation).
+- *On the C# and Go back ends:* generic `extern` functions are **allowed**. The compiler monomorphizes per use site. Nested generics (`List<User>`) are permitted when both back ends naturally support the type.
+- *On the C back end:* generic `extern` functions are **disallowed**. C has no generics; type erasure defeats the type system. Authors write type-specific bindings. Nested generics across the C boundary are permitted only when the inner type is primitive (`List<Int>` — marshals as pointer + length; `List<User>` — requires an explicit flat representation).
 
 **Callbacks from C into Overt.** C function pointers pointing at Overt functions are permitted under strict constraints:
 
@@ -848,13 +848,13 @@ Deferred until v1 works. Candidates when a concrete gap appears:
 
 ### Compiler host and emission target are independent axes
 
-A common source of confusion for people evaluating transpile-to-source languages: "if you add a Go backend, do you need a second compiler written in Go?" No. The axis of "what language the compiler is *written in*" is orthogonal to the axis of "what language the compiler *emits*."
+A common source of confusion for people evaluating transpile-to-source languages: "if you add a Go back end, do you need a second compiler written in Go?" No. The axis of "what language the compiler is *written in*" is orthogonal to the axis of "what language the compiler *emits*."
 
-The Overt compiler is a C# program today. It runs on .NET. It consumes `.ov` source and produces `.cs` source; once the Go backend is complete it will also produce `.go` source. Neither backend requires the compiler to run in its target language's runtime. Someone targeting Go just needs .NET available to *run* the compiler; the output then runs on Go's native toolchain. This is the same pattern TypeScript itself uses: `tsc` is written in TypeScript, runs on Node, emits JavaScript that runs everywhere Node doesn't.
+The Overt compiler is a C# program today. It runs on .NET. It consumes `.ov` source and produces `.cs` source; once the Go back end is complete it will also produce `.go` source. Neither back end requires the compiler to run in its target language's runtime. Someone targeting Go just needs .NET available to *run* the compiler; the output then runs on Go's native toolchain. This is the same pattern TypeScript itself uses: `tsc` is written in TypeScript, runs on Node, emits JavaScript that runs everywhere Node doesn't.
 
-Practical consequence: **new backends are libraries, not compilers.** A backend author doesn't reimplement the lexer, parser, resolver, or type-checker. They write a single project (today, a C# class library referencing `Overt.Compiler` as a package) that walks the AST + `TypeCheckResult` IR and emits target source. The language contract *is* the AST shape; everything else is Tier 1's job, done once, consumed by all backends.
+Practical consequence: **new back ends are libraries, not compilers.** A back-end author doesn't reimplement the lexer, parser, resolver, or type-checker. They write a single project (today, a C# class library referencing `Overt.Compiler` as a package) that walks the AST + `TypeCheckResult` IR and emits target source. The language contract *is* the AST shape; everything else is Tier 1's job, done once, consumed by all back ends.
 
-That scales to an ecosystem. Publishing `Overt.Compiler` as a NuGet package means backend projects can live in separate repositories entirely, each distributing its own package. A hypothetical `Overt.Backend.TypeScript` author contributes nothing to this repo; they publish `Overt.Backend.TypeScript` (depends on `Overt.Compiler`), and Overt users consume it via `PackageReference` alongside `Overt.Build`. The core repo owns the language; the ecosystem owns its reach.
+That scales to an ecosystem. Publishing `Overt.Compiler` as a NuGet package means back end projects can live in separate repositories entirely, each distributing its own package. A hypothetical `Overt.Backend.TypeScript` author contributes nothing to this repo; they publish `Overt.Backend.TypeScript` (depends on `Overt.Compiler`), and Overt users consume it via `PackageReference` alongside `Overt.Build`. The core repo owns the language; the ecosystem owns its reach.
 
 ### Self-hosting as a deferred goal
 
@@ -862,36 +862,36 @@ A language rewritten in itself (Rust in Rust, Go in Go, Swift in Swift, TypeScri
 
 1. **Dogfooding at scale.** The compiler is the most complex program any language will ever need to express. If Overt can express its own compiler naturally, that's stronger evidence for language quality than any synthetic benchmark.
 2. **Stress-testing idioms.** Every weak corner of the language surfaces under compiler-level load. Patterns that were acceptable in small examples become unacceptable when repeated 10,000 times in a real codebase; self-hosting exposes them.
-3. **Backends written in Overt.** Once self-hosted, new backend authors benefit from Overt's RWRA properties for the code they write. The ecosystem multiplier is that *writing a backend* becomes an agent-authored task in the same ergonomic zone as writing any Overt program.
+3. **Backends written in Overt.** Once self-hosted, new back-end authors benefit from Overt's RWRA properties for the code they write. The ecosystem multiplier is that *writing a back end* becomes an agent-authored task in the same ergonomic zone as writing any Overt program.
 
 Self-hosting is not a v1 goal. It's the Rust / Go / Swift / TypeScript trajectory — you do it once the language stabilizes, not before. The prerequisite isn't any specific feature; it's *confidence* that the language's shape won't churn under you during the rewrite. That confidence comes from real usage.
 
-What's load-bearing architecturally *today* is the tier split above, not self-hosting. Backends are cheap because Tier 1 is doing the work. Self-hosting validates the language later; it doesn't gate backend development now.
+What's load-bearing architecturally *today* is the tier split above, not self-hosting. Backends are cheap because Tier 1 is doing the work. Self-hosting validates the language later; it doesn't gate back-end development now.
 
 ### Source emission vs. direct IL: when this reverses
 
 The four reasons to transpile-to-source given at the top of §18 don't all age equally. A reassessment, recorded here so the choice isn't locked by inertia:
 
-- **Debuggable output.** Now supplied by the `#line` → portable-PDB mapping, not by the C# output being human-readable. An IL backend emitting its own PDB would be equally debuggable. *This reason no longer differentiates.*
+- **Debuggable output.** Now supplied by the `#line` → portable-PDB mapping, not by the C# output being human-readable. An IL back end emitting its own PDB would be equally debuggable. *This reason no longer differentiates.*
 - **Readable emission.** Has degraded as language features have landed. The `__q_N` / `__qv_N` temps from `?` hoisting, the `(Func<T>)(() => { ... })()` IIFE for block-as-expression, the explicit cast noise around refinements — the emitted C# is *inspectable* but not *readable* in the aspirational sense the original justification implied. The anti-hack defense argues this is somewhat a feature (generated code *should* look structurally inferior to Overt source), but the erosion is real. *This reason is weakened.*
 - **Full inheritance of target runtime.** IL emission targeting .NET inherits the exact same runtime — GC, BCL, FFI, ecosystem. Roslyn's job is IL emission; we'd just be doing it ourselves. *This reason is neutral between source and IL.*
-- **Fast iteration.** Text generation remains materially cheaper than IL emission. A parallel IL backend realistically costs 3–6 months of specialized work (ECMA-335 metadata encoding, async state-machine rewriting, generic instantiation, portable PDB generation from scratch — roughly 4,000–5,000 lines of emitter code versus CSharpEmitter's current ~2,700). During which no language features ship. *This reason still applies, strongly.*
+- **Fast iteration.** Text generation remains materially cheaper than IL emission. A parallel IL back end realistically costs 3–6 months of specialized work (ECMA-335 metadata encoding, async state-machine rewriting, generic instantiation, portable PDB generation from scratch — roughly 4,000–5,000 lines of emitter code versus CSharpEmitter's current ~2,700). During which no language features ship. *This reason still applies, strongly.*
 
 Scorecard: one reason strongly intact (iteration speed), one neutral (runtime), two weakened (debugging, readability).
 
-**When to reverse the decision.** An IL backend becomes the right call when two conditions hold simultaneously:
+**When to reverse the decision.** An IL back end becomes the right call when two conditions hold simultaneously:
 
 1. **Feature set stability** — no new language constructs for 6+ months. Today we're the opposite; language-affecting changes land every session.
 2. **A concrete, measured ceiling** — either a performance problem (benchmarks show Overt-emitted C# materially under-performs hand-written C# for a realistic workload) or a specific language feature genuinely unreachable from C# output. Neither exists today. Speculation about optimizer hostility (IIFE closure allocation, `Result.IsOk` virtual dispatch, temp-local register pressure) is plausible but unmeasured.
 
-Until both hold, the calculus favors staying on source emission. When both hold, the IL backend is a tier-2 rewrite of `Overt.Backend.CSharp` into `Overt.Backend.IL`, sharing the tier-1 frontend. The source emitter stays forever as a diagnostic tool (`overt --emit=csharp`) regardless of which backend is default.
+Until both hold, the calculus favors staying on source emission. When both hold, the IL back end is a tier-2 rewrite of `Overt.Backend.CSharp` into `Overt.Backend.IL`, sharing the tier-1 frontend. The source emitter stays forever as a diagnostic tool (`overt --emit=csharp`) regardless of which back end is default.
 
 **Prerequisites for that decision, independent of whether it's ever made:**
 
 - A benchmark harness across 3–5 representative Overt programs, to measure rather than speculate about performance.
 - An emitter cleanup pass on the current C# output, tightening the patterns that read worst today (`?` hoist temps, IIFE blocks, temp naming). Lands regardless — improves readability, reduces the slice of optimizer-hostility we can actually see.
 
-These two live on the roadmap as independent of the IL-backend decision; they improve the current product and also gather the evidence any future IL-backend decision would need.
+These two live on the roadmap as independent of the IL-back-end decision; they improve the current product and also gather the evidence any future IL-back-end decision would need.
 
 ### Design principle: don't bend Overt to fit C#
 
@@ -904,12 +904,12 @@ The specific failure mode to watch — because it has already surfaced during Ov
 In practice:
 
 - When considering a new language feature, ask first: *what serves agent-RWRA?* Only then: *how does C# express it?* Not the other way around.
-- If an Overt construct doesn't map cleanly to C#, that's an emitter problem, not a language problem. Escape hatches include helper types in `Overt.Runtime`, less-idiomatic C# output, or — in the extreme — revisiting the transpile-target decision (see the IL-backend gate above). The escape ladder ends at "emit IL directly," not at "weaken the language."
-- If a feature is genuinely unreachable from C# output, that's evidence for the IL backend, not against the feature.
+- If an Overt construct doesn't map cleanly to C#, that's an emitter problem, not a language problem. Escape hatches include helper types in `Overt.Runtime`, less-idiomatic C# output, or — in the extreme — revisiting the transpile-target decision (see the IL-back-end gate above). The escape ladder ends at "emit IL directly," not at "weaken the language."
+- If a feature is genuinely unreachable from C# output, that's evidence for the IL back end, not against the feature.
 
-The dividends of transpile-to-source accrue in two directions. Short-term: C# emission lets us ship a working compiler fast. Long-term: the *experience* of transpiling teaches us what's hard to lower to an imperative runtime — knowledge we'll need for the JavaScript / TypeScript / Go backends, where no such freedom exists. Making Overt a first-class .NET language with minimal dependencies (direct IL emission) is a reachable endgame; making Overt "a dialect of C#" is an endgame we explicitly reject.
+The dividends of transpile-to-source accrue in two directions. Short-term: C# emission lets us ship a working compiler fast. Long-term: the *experience* of transpiling teaches us what's hard to lower to an imperative runtime — knowledge we'll need for the JavaScript / TypeScript / Go back ends, where no such freedom exists. Making Overt a first-class .NET language with minimal dependencies (direct IL emission) is a reachable endgame; making Overt "a dialect of C#" is an endgame we explicitly reject.
 
-A transpile-to-source backend has one sharp failure mode that a direct-to-IL backend doesn't: the generated source looks like source. If it lives in the project tree, someone will open it, find a bug, fix it there, and ship. The generator runs on the next build, the fix vanishes, and the bug recurs. This has happened in real codebases.
+A transpile-to-source back end has one sharp failure mode that a direct-to-IL back end doesn't: the generated source looks like source. If it lives in the project tree, someone will open it, find a bug, fix it there, and ship. The generator runs on the next build, the fix vanishes, and the bug recurs. This has happened in real codebases.
 
 The defense is to make the generated code **structurally inferior** to the Overt source for every workflow an agent or engineer might use, so editing it is never the cheaper option:
 
@@ -947,9 +947,9 @@ The principle: anything that has a clear canonical implementation in the .NET or
 
 ### Rejected options (with reasoning)
 
-- **LLVM as a backend.** LLVM is an IR target, not a transpile target. It gives you an optimizer and native codegen but *no runtime* — no GC, no stdlib, no async, no FFI beyond C ABI. Every LLVM-targeting language (Rust, Swift, Zig, Julia) built or borrowed all of that, and the runtime is the dominant cost. Multi-year project with a team. Also loses the "readable emission" property that makes agent debugging tractable. Not appropriate until a concrete target neither C# nor Go can reach.
-- **Rust as a backend.** Best WASM story in the industry, but the borrow checker is genuinely LLM-hostile — agents bounce off lifetime errors more than any other language error. Slow compiles punish agent iteration. Good language, wrong choice for agent-first.
-- **Parallel multi-backend from day one, all equal.** Empirically a graveyard: Haxe, Nim, Scala.js-outside-JVM. Winners pick one blessed primary and treat others as escape hatches.
+- **LLVM as a back end.** LLVM is an IR target, not a transpile target. It gives you an optimizer and native codegen but *no runtime* — no GC, no stdlib, no async, no FFI beyond C ABI. Every LLVM-targeting language (Rust, Swift, Zig, Julia) built or borrowed all of that, and the runtime is the dominant cost. Multi-year project with a team. Also loses the "readable emission" property that makes agent debugging tractable. Not appropriate until a concrete target neither C# nor Go can reach.
+- **Rust as a back end.** Best WASM story in the industry, but the borrow checker is genuinely LLM-hostile — agents bounce off lifetime errors more than any other language error. Slow compiles punish agent iteration. Good language, wrong choice for agent-first.
+- **Parallel multi-back-end from day one, all equal.** Empirically a graveyard: Haxe, Nim, Scala.js-outside-JVM. Winners pick one blessed primary and treat others as escape hatches.
 - **Dropping structured programming.** CFG shape helps any reasoner. Training priors reinforce it. Dropping would hurt agents, not help.
 
 ---
@@ -965,24 +965,24 @@ Source organization inside a project. Most is already committed (§7 — `module
 - **Re-exports.** A module may re-export symbols from another module it imports, exposing them under its own name. Idiomatic pattern for organizing a stdlib façade.
 - **Circular dependencies are forbidden.** The compiler enforces a strict acyclic import graph. Breaking a cycle requires extracting the shared part into a third, separately-imported module.
 
-### Stdlib strategy: per-backend is primary, not portable
+### Stdlib strategy: per-back-end is primary, not portable
 
-The stdlib is organized **per backend**, not as a platform-neutral abstraction.
+The stdlib is organized **per back end**, not as a platform-neutral abstraction.
 
-- **Primary story.** Each backend has its own curated stdlib subtree with facades that bind directly to that backend's host ecosystem. `stdlib.csharp.system.io.path` binds to .NET's `System.IO.Path`; a future `stdlib.go.os` would bind to Go's `os` package; `stdlib.ts.fs` to Node's `fs`. A program that writes `use stdlib.csharp.*` is explicitly a .NET program — not one that happens to run on .NET today and might port tomorrow.
+- **Primary story.** Each back end has its own curated stdlib subtree with facades that bind directly to that back end's host ecosystem. `stdlib.csharp.system.io.path` binds to .NET's `System.IO.Path`; a future `stdlib.go.os` would bind to Go's `os` package; `stdlib.ts.fs` to Node's `fs`. A program that writes `use stdlib.csharp.*` is explicitly a .NET program — not one that happens to run on .NET today and might port tomorrow.
 - **Naming inside each subtree mirrors the host.** .NET facades use .NET's `System.*` structure; Go facades will use Go's package names; TS facades will use Node's module names. Agents writing C# Overt see C# idioms; agents writing Go Overt see Go idioms. No translation layer and no synthetic neutral names for agents to guess at.
-- **No portable stdlib in the language core.** Not as a fallback, not as a convenience. If an Overt program needs to run on two backends, the answer is **agent-driven retargeting**: ask the agent to rewrite the program against the other backend's stdlib. That's cheap for agents in ways it is not cheap for humans, and it preserves our ability to not design a leaky abstraction.
-- **If portability matters, build it as a backend.** A future *portable backend* — a separately-designed stdlib engineered around portable semantics, paired with its own emitter — becomes one of the backend choices. Users who opt into that backend pay the portability tax up front and get the write-once-run-anywhere story; users who don't opt in never pay for it. The choice is explicit, and the portable stdlib is a peer of the per-backend ones, not a layer above them.
+- **No portable stdlib in the language core.** Not as a fallback, not as a convenience. If an Overt program needs to run on two back ends, the answer is **agent-driven retargeting**: ask the agent to rewrite the program against the other back end's stdlib. That's cheap for agents in ways it is not cheap for humans, and it preserves our ability to not design a leaky abstraction.
+- **If portability matters, build it as a back end.** A future *portable back end* — a separately-designed stdlib engineered around portable semantics, paired with its own emitter — becomes one of the back-end choices. Users who opt into that back end pay the portability tax up front and get the write-once-run-anywhere story; users who don't opt in never pay for it. The choice is explicit, and the portable stdlib is a peer of the per-back-end ones, not a layer above them.
 
-This inverts the typical cross-backend design (portable core + per-platform escape hatches). The reason: human-language portability pays for itself because rewriting across runtimes is expensive for humans. That economic assumption is false for agents. Overt doesn't need to pay taxes that exist only because of human costs.
+This inverts the typical cross-back-end design (portable core + per-platform escape hatches). The reason: human-language portability pays for itself because rewriting across runtimes is expensive for humans. That economic assumption is false for agents. Overt doesn't need to pay taxes that exist only because of human costs.
 
 ### Packaging
 
 A package is a shippable unit of Overt code: a directory of source files plus a manifest declaring metadata and dependencies.
 
-**Strategic direction: Overt runs its own registry, with first-class interop against host registries.** The alternative — piggybacking on NuGet + Go modules only — forces Overt dependencies to be expressed differently per backend and prevents Overt from becoming a first-class ecosystem. Running our own registry is the cost of independence; interop with host registries is the win that keeps us compatible.
+**Strategic direction: Overt runs its own registry, with first-class interop against host registries.** The alternative — piggybacking on NuGet + Go modules only — forces Overt dependencies to be expressed differently per back end and prevents Overt from becoming a first-class ecosystem. Running our own registry is the cost of independence; interop with host registries is the win that keeps us compatible.
 
-**Manifest declares dependencies by source.** Overt-native dependencies resolve via the Overt registry; host-ecosystem dependencies resolve via NuGet (C# backend) or Go modules (Go backend). The manifest distinguishes them explicitly so the build system knows which resolver to route each through.
+**Manifest declares dependencies by source.** Overt-native dependencies resolve via the Overt registry; host-ecosystem dependencies resolve via NuGet (C# back end) or Go modules (Go back end). The manifest distinguishes them explicitly so the build system knows which resolver to route each through.
 
 **Versioning: semver.** Standard major.minor.patch. Elm's approach — tooling that enforces semver correctness by comparing API diffs on publish — is noted as a candidate evolution, not committed for v1.
 
@@ -1006,7 +1006,7 @@ version = "0.3.1"
 stdlib     = "1.x"
 overt_http = "2.4.0"
 
-# Host-ecosystem dependencies, resolved per backend
+# Host-ecosystem dependencies, resolved per back end
 [dependencies.csharp]
 "System.Text.Json" = "8.0.0"
 
@@ -1022,21 +1022,21 @@ The exact format (TOML vs. Overt-native syntax) is tactical and not decided here
 
 Practices that keep dual-target honest without doubling implementation work:
 
-1. **Write the semantics spec before either backend exists**, runtime-neutrally. No "this means `IEnumerable<T>`" — state what it *means*, then show how each backend implements it.
-2. **Single canonical test suite from day one** — small programs with expected observable behavior. Both backends must pass. Go codegen can be stubbed for weeks; the tests exist and fail loudly the moment Go diverges from C#.
+1. **Write the semantics spec before either back end exists**, runtime-neutrally. No "this means `IEnumerable<T>`" — state what it *means*, then show how each back end implements it.
+2. **Single canonical test suite from day one** — small programs with expected observable behavior. Both back ends must pass. Go codegen can be stubbed for weeks; the tests exist and fail loudly the moment Go diverges from C#.
 3. **C# primary for iteration speed** — friction kills compiler projects; go with familiarity.
 4. **Go in CI as conformance only**, not a parallel implementation effort.
 5. **Frontend is ~80% of the work.** Parser, type checker, IR, diagnostics. Backends are comparatively cheap once the IR is right.
 
-### Tooling tiers: backend-independent vs. per-backend
+### Tooling tiers: back-end-independent vs. per-back-end
 
-The stdlib decision in §19 — per-backend, not portable — cascades through the tooling. Every tool either operates on Overt source/AST alone, or it touches host artifacts. The division is strict and there is no "middle layer":
+The stdlib decision in §19 — per-back-end, not portable — cascades through the tooling. Every tool either operates on Overt source/AST alone, or it touches host artifacts. The division is strict and there is no "middle layer":
 
 ```mermaid
 flowchart TB
     src["<b>Overt source</b><br/><code>.ov</code> files"]
 
-    subgraph tier1 ["<b>Tier 1 — backend-independent</b> · <code>Overt.Compiler</code>"]
+    subgraph tier1 ["<b>Tier 1 — back-end-independent</b> · <code>Overt.Compiler</code>"]
         direction TB
         pipe["Lex · Parse · Resolve · Type-check"]
         shared["Formatter (<code>overt fmt</code>) · Module graph<br/>OV-code diagnostics · LSP protocol<br/>--emit=tokens / ast / resolved / typed"]
@@ -1044,7 +1044,7 @@ flowchart TB
 
     ast["<b>AST + type annotations</b>"]
 
-    subgraph tier2 ["<b>Tier 2 — per-backend</b> · <code>Overt.Backend.*</code>"]
+    subgraph tier2 ["<b>Tier 2 — per-back-end</b> · <code>Overt.Backend.*</code>"]
         direction LR
         subgraph cs ["<code>Overt.Backend.CSharp</code> (today)"]
             cs1["Emitter (.cs)<br/>Overt.Runtime (.NET)<br/>BindGenerator (Roslyn)<br/>Runner (in-memory Roslyn)<br/>#line + portable PDB<br/>NuGet interop"]
@@ -1065,9 +1065,9 @@ flowchart TB
     tier2 --> host
 ```
 
-Read the diagram top-to-bottom: source flows through shared frontend machinery into a typed AST; from there each backend owns its full pipeline to host artifacts. Nothing in Tier 1 knows which backend will consume the AST; nothing in a Tier 2 backend touches Tier 1 except by consuming its output. Adding a new backend means adding a new column at the bottom — no changes above.
+Read the diagram top-to-bottom: source flows through shared frontend machinery into a typed AST; from there each back end owns its full pipeline to host artifacts. Nothing in Tier 1 knows which back end will consume the AST; nothing in a Tier 2 back end touches Tier 1 except by consuming its output. Adding a new back end means adding a new column at the bottom — no changes above.
 
-**Tier 1: backend-independent.** Anything that works on `.ov` source or the AST without producing or consuming host output.
+**Tier 1: back-end-independent.** Anything that works on `.ov` source or the AST without producing or consuming host output.
 
 - Lexer, parser, name resolver, type checker (`Overt.Compiler`)
 - Formatter (`overt fmt`)
@@ -1076,9 +1076,9 @@ Read the diagram top-to-bottom: source flows through shared frontend machinery i
 - `overt --emit=tokens` / `--emit=ast` / `--emit=resolved` / `--emit=typed`
 - LSP protocol and hover/go-to-def *within Overt source*
 
-One implementation, shared across all backends.
+One implementation, shared across all back ends.
 
-**Tier 2: per-backend.** Anything that touches or produces host artifacts. Every backend ships its own implementation of each of these:
+**Tier 2: per-back-end.** Anything that touches or produces host artifacts. Every back end ships its own implementation of each of these:
 
 - Emitter (source text for its target language)
 - Runtime library (the small prelude shipped alongside compiled programs)
@@ -1089,18 +1089,18 @@ One implementation, shared across all backends.
 - Package-system interop (NuGet for .NET; Go modules; vcpkg or Conan for C/C++; npm for TS)
 - LSP features that need host-side information (jumping into a Roslyn symbol for a C# extern; into a Go package doc; into a Win32 header)
 
-Each backend lives in its own project: `Overt.Backend.CSharp`, `Overt.Backend.Go`, a hypothetical `Overt.Backend.Cpp`. Cross-cutting code does not sit in `Overt.Cli` — the CLI is a thin dispatcher that routes to the right backend based on what the user is compiling. A consequence: `overt bind` will eventually grow a `--platform` selector (today it defaults to C# because that's the only backend). The backend owns its binding-generation strategy end-to-end; the CLI just hands it the arguments.
+Each back end lives in its own project: `Overt.Backend.CSharp`, `Overt.Backend.Go`, a hypothetical `Overt.Backend.Cpp`. Cross-cutting code does not sit in `Overt.Cli` — the CLI is a thin dispatcher that routes to the right back end based on what the user is compiling. A consequence: `overt bind` will eventually grow a `--platform` selector (today it defaults to C# because that's the only back end). The back end owns its binding-generation strategy end-to-end; the CLI just hands it the arguments.
 
-**A concrete test case: a hypothetical classic-Win32 C/C++ backend.** This is a clean worked example because Win32 is as far from .NET as any target we'd plausibly add.
+**A concrete test case: a hypothetical classic-Win32 C/C++ back end.** This is a clean worked example because Win32 is as far from .NET as any target we'd plausibly add.
 
 - **Emitter.** `Overt.Backend.Cpp` emits C++ source. Handles calling conventions (`__stdcall` for WinAPI), COM interfaces, HRESULT-as-Result conversion.
-- **Runtime.** A header-only C++ library defining `Unit`, `Result<T, E>`, `Option<T>`, `List<T>` with C++ concepts and move semantics. Or alternatively, emit these inline as generated types. Runtime decision lives with the backend.
+- **Runtime.** A header-only C++ library defining `Unit`, `Result<T, E>`, `Option<T>`, `List<T>` with C++ concepts and move semantics. Or alternatively, emit these inline as generated types. Runtime decision lives with the back end.
 - **Binding generator.** libclang-based. Parses Windows SDK headers, emits Overt facades for WinAPI functions. Handles preprocessor macros, `HRESULT`, `LPCSTR` vs `LPCWSTR`. Stdlib subtree becomes `stdlib/cpp/winapi/*` with facades for specific subsystems (user32, kernel32, shell32).
 - **Runner.** Invokes `cl.exe` (MSVC) or `clang++`; links against the runtime; runs the resulting binary. Captures stdout/stderr for test harnesses.
 - **Debug mapping.** `#line` directives in emitted `.cpp` (same syntax as C#, different tooling); PDB for MSVC, split DWARF for clang. The Overt compiler emits the directives; the host toolchain produces the debug format.
 - **Package system.** vcpkg or Conan interop — the manifest declares C++ dependencies, the build resolves them before invoking the compiler.
 
-What's *shared* in this exercise? Lex, parse, resolve, type-check, format, OV-code diagnostics, module resolution, LSP protocol. The same implementation as C# and Go. The frontend never learned that Win32 exists; it produces an AST and hands it to the backend. This is the payoff of keeping Tier 1 pure.
+What's *shared* in this exercise? Lex, parse, resolve, type-check, format, OV-code diagnostics, module resolution, LSP protocol. The same implementation as C# and Go. The frontend never learned that Win32 exists; it produces an AST and hands it to the back end. This is the payoff of keeping Tier 1 pure.
 
 ### Compiler host language
 
@@ -1108,8 +1108,8 @@ The Overt compiler itself is written in **C# on .NET 9**. Committed on 2026-04-2
 
 Rationale:
 
-- **Iteration speed over language-theoretic fit.** The author has 26 years of C# experience. The principle in item 3 above — "friction kills compiler projects; go with familiarity" — applies with extra force to the compiler itself, not only the primary backend.
-- **Backend affinity.** The C# backend depends on the Roslyn APIs. Hosting the compiler in .NET makes the backend an in-process API call rather than an external toolchain invocation.
+- **Iteration speed over language-theoretic fit.** The author has 26 years of C# experience. The principle in item 3 above — "friction kills compiler projects; go with familiarity" — applies with extra force to the compiler itself, not only the primary back end.
+- **Back-end affinity.** The C# back end depends on the Roslyn APIs. Hosting the compiler in .NET makes the back end an in-process API call rather than an external toolchain invocation.
 - **Modern C# covers the IR shape.** Sealed record hierarchies + `switch` expressions approximate sum types well enough for compiler work. Not as clean as OCaml or Rust, not painful enough to justify a less familiar host language.
 
 Rejected alternatives: Go (weaker sum types hurt compiler internals more than the simpler distribution story helps); Rust / OCaml / F# (better theoretical fit, but add a stack axis with no adoption payoff for a solo early-stage project); self-hosting (cannot be the bootstrap). Self-hosting remains a legitimate long-term goal once the compiler is stable.
@@ -1223,7 +1223,7 @@ Single maintainer, pre-adoption, thin real-world usage. That is itself a data po
 
 Answered by sections 5–21 and no longer open: surface syntax direction, type system ambition, concrete error model, `?` propagation operator, iteration model, whether traces are first-class, `record`/`enum` keywords, task-group syntax, reflection/templates/macros, language name (Overt), file extension (`.ov`), mutation model (§10), `with` expression syntax (§10), call syntax — pipes (`|>` / `|>?`) and no method-call (§7), effect-row algebra (explicit everywhere, row-polymorphic via type variables, §7), foreign function interface (§17), `inference` as a core effect (§7), `race` all-fail semantics (`RaceAllFailed<E>`, §12), trace block semantics (explicit scoping, `TraceEvent` sum type, zero-cost empty, §14), refinement type syntax (`T where <predicate>`, §8), v1 derive set finalized (§15), standard library scope (focused core plus FFI, §18), provenance/taint (deferred past v1; library-first if it ships at all), formatting rules and `@agent` / `@review` comment conventions (§21), executable natural-language specs (declined — not in scope; same reasoning as the no-threading disposition for comment tags), module system and packaging (§19 — hierarchical paths, no wildcards, own registry + interop, semver, MVS resolution), FFI sub-questions (§17 — async via sync-wrapper only, generics for C#/Go only, C callbacks restricted to top-level `pub fn` with empty effect row).
 
-**No open design questions remain for v1.** All substantive decisions are committed. Items flagged as "deferred past v1" throughout the document (binary package distribution, Elm-style semver enforcement, stateful closures as C callbacks, stdlib async-adapter toolkit, direct Overt→WASM backend, `Ptr<T>` advanced patterns, adjacent-rationale files) are known future-work candidates, not gating open questions.
+**No open design questions remain for v1.** All substantive decisions are committed. Items flagged as "deferred past v1" throughout the document (binary package distribution, Elm-style semver enforcement, stateful closures as C callbacks, stdlib async-adapter toolkit, direct Overt→WASM back end, `Ptr<T>` advanced patterns, adjacent-rationale files) are known future-work candidates, not gating open questions.
 
 ---
 
@@ -1260,7 +1260,7 @@ Non-language work that matters for adoption but sits outside the language spec i
 - **Branded index** — a typed index (`Index<Collection>`) validated at construction rather than at every use (§13, tier 2).
 - **Causal chain** — the linked sequence of errors showing cause-of-cause-of-cause, as opposed to a stack trace showing caller-of-caller-of-caller.
 - **Causal trace** — execution log showing what values were derived from what, as opposed to a call stack showing what function called what.
-- **Conformance target** — a backend kept alive primarily to validate that the IR is runtime-neutral, not because it's intended for production use at v1.
+- **Conformance target** — a back end kept alive primarily to validate that the IR is runtime-neutral, not because it's intended for production use at v1.
 - **`CString`** — byte-sequence-with-encoding type, distinct from Overt `String`. Used only for C FFI (§17); conversions across the C boundary are always explicit.
 - **Derive** — a stdlib-provided annotation (`@derive(...)`) that generates boilerplate methods at compile time. Fixed set; no user-defined derives in v1.
 - **Effect row** — the set of effects (`async`, `io`, `inference`, `fails`) declared in a function signature, so the caller can see what the function may do without reading its body. Declared explicitly on every function; row-polymorphic via effect-row type variables (§7).

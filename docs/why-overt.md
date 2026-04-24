@@ -10,7 +10,7 @@ AI agents have varying levels of success with different programming
 languages, and part of the problem is that programming languages are
 designed around humans and their many foibles. Short names, implicit
 effects, positional arguments, exceptions that unwind invisibly,
-reflection, macros. All of these are accommodations for *human*
+reflection, and macros are all accommodations for *human*
 cognitive limits: small working memory, strong pattern-matching,
 and strong causal intuition. The syntax gets terser because the reader
 is expected to fill in context from training, convention, and nearby
@@ -25,7 +25,7 @@ transitively to find all of this out costs real tokens of attention and
 introduces mistakes. Languages designed for humans hide exactly this
 information.
 
-I had an idea. If I were going to design a language for an
+One afternoon, I had an idea. If I were going to design a language for an
 audience that reads, writes, and reasons about code differently from
 a human, what would it look like? Since I was going to be working
 with an LLM anyway, what better collaborator to ask than an LLM?
@@ -172,8 +172,8 @@ Two observations make this the right architecture rather than a
 shortcut:
 
 **The compiler host and the emission target are independent axes.**
-The compiler is a C# program today. It runs on .NET, It emits `.cs`
-today, and it will emit `.go` in the future. Nothing about targeting Go requires
+The compiler is a C# program today. It runs on .NET, emits `.cs`
+today, and will emit `.go` in the future. Nothing about targeting Go requires
 the compiler to *run on* Go's toolchain. Someone targeting Go just
 needs .NET installed to run the compiler; the output runs on Go's
 toolchain. Same pattern TypeScript uses: `tsc` is written in
