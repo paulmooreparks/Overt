@@ -1,40 +1,42 @@
 # Why Overt
 
 I've shaved some yaks in my career, but this is the emperor yak shave:
-a new programming language, targeted at AI coding agents. Let me tell
-you how I got here and why I think it matters.
+a new programming language called Overt, targeted at AI coding agents.
+Let me tell you how I got here and why I think it matters.
 
-## The problem
+## The Problem
 
 AI agents have varying levels of success with different programming
 languages, and part of the problem is that programming languages are
 designed around humans and their many foibles. Short names, implicit
 effects, positional arguments, exceptions that unwind invisibly,
 reflection, macros. All of these are accommodations for *human*
-cognitive limits. Small working memory, strong pattern-matching,
-strong causal intuition. The syntax gets terser because the reader
+cognitive limits: small working memory, strong pattern-matching,
+and strong causal intuition. The syntax gets terser because the reader
 is expected to fill in context from training, convention, and nearby
 code.
 
-LLMs have a different profile. Large context window, pattern-matching
+LLMs have a different profile. They have a large context window and pattern-matching
 as strong as a good human's, but causal tracking across calls is
 genuinely weak. An agent reading a function needs to know *at the
 call site* what can fail, what I/O might happen, what types flow
-through, whether the result needs to be handled. Following the call
-transitively to find out costs real tokens of attention and
+through, and whether the function's result needs to be handled. Following the call
+transitively to find all of this out costs real tokens of attention and
 introduces mistakes. Languages designed for humans hide exactly this
 information.
 
-So, I had an idea. If I were going to design a language for an
+I had an idea. If I were going to design a language for an
 audience that reads, writes, and reasons about code differently from
 a human, what would it look like? Since I was going to be working
-with an LLM anyway, what better collaborator to ask?
+with an LLM anyway, what better collaborator to ask than an LLM?
 
 In the space of a couple of evenings and one very, very early
-morning, Claude and I produced a compiler with a .NET back end.
-A Go back end is next.
+morning, Claude and I produced a working compiler for Overt with a
+.NET back end, and a Go back end is next. The rest of this document
+describes the language that came out of those sessions and the
+reasoning behind its shape.
 
-## The inversion
+## The Inversion
 
 Overt takes the usual tradeoffs and flips them:
 
@@ -50,11 +52,11 @@ Overt takes the usual tradeoffs and flips them:
   to do each task. Pattern-matching is much stronger when there's
   only one pattern.
 
-The target point on the language-design curve: *optimized for the
-agent, tolerable for the auditor.* A different point than any
-existing language.
+The target point on the language-design curve is *optimized for the
+agent, tolerable for the auditor.* That places Overt at a different
+point than any existing language occupies.
 
-## Humans can read it, but humans are not the audience
+## Humans Can Read It, but Humans Are Not the Audience
 
 This is the thing that trips people up when they first read the
 repo, so let me say it plainly: humans can read Overt, and I expect
@@ -64,10 +66,10 @@ to make human authorship more comfortable at the expense of agent
 clarity.
 
 Overt does away with ambiguity and sugar syntax. There is only one
-way to do any given task. No undefined behavior. No implicit
-exceptions. No method-call syntax overloading dots. Effect rows on
-every function. The compiler rejects code that omits a type
-annotation on a `let`. That's intentional: every one of those
+way to do any given task. There is no undefined behavior, no
+invisible exception unwinding, and no method-call syntax overloading
+dots. Effect rows are declared on every function. The compiler
+rejects code that omits a type annotation on a `let`. That's intentional: every one of those
 rejections is somewhere an agent would otherwise have to *guess*
 from context, and guessing is where the wrong answers happen.
 
@@ -77,11 +79,11 @@ tells you everything you'd need to ask of it (effects, error type,
 return). You don't need to read the body to know what it can do to
 the system around it.
 
-## How this shows up in practice
+## How This Shows Up in Practice
 
-A few of the decisions, with the motivation attached to each.
+Here are a few of the decisions, with the motivation attached to each.
 
-### Errors are values, always
+### Errors Are Values, Always
 
 Exceptions fail the "visible at the call site" test catastrophically.
 An agent reading `parse(text)` has no idea whether it might throw,
@@ -101,7 +103,7 @@ at the call site says "propagate the error if it happens." It's
 visible, with no hidden control flow. An agent reading these two functions can
 reason about the error paths without following any other call.
 
-### Effect rows are mandatory
+### Effect Rows Are Mandatory
 
 Every function declares what effects it performs: `!{io}`,
 `!{async}`, `!{inference}`, `!{fails}`. That row is visible on every
@@ -117,7 +119,7 @@ An agent reading the caller knows immediately whether `log` can be
 called from a pure function. The compiler enforces this
 structurally (OV0310). It's not a guideline.
 
-### The compiler writes error messages for the agent
+### The Compiler Writes Error Messages for the Agent
 
 When Overt rejects a program, the diagnostic names the rule and
 points at exactly where in the docs to read more:
@@ -133,20 +135,21 @@ The fix is in the message. No "check the docs" round-trip, because
 the docs pointer *is in the error.* (Come to think of it, maybe programming
 languages for humans should do this too.)
 
-## Overt is a .NET application. Or a Go application. Or...
+## Overt Is a .NET Application. Or a Go Application. Or...
 
 Here's the part that surprises people: when I show them a working
 Overt program, they assume it's running on some Overt VM. It isn't.
-It's a .NET application. Not "has a lot in common with .NET because
-that's what the compiler is written in." It *is* a .NET application.
+It's a .NET application. I don't mean that it has a lot in common
+with .NET because that's what the compiler is written in; I mean it
+*is* a .NET application.
 It compiles to IL, debugs in Visual Studio against the original `.ov`
 source, imports NuGet packages, publishes via `dotnet publish`,
 participates in the `dotnet` build graph through MSBuild.
 
 When the Go back end ships, an Overt program targeting Go *is* a Go
-application. It'll use `go mod`, link Go libraries, produce tiny
-static binaries. Same for TypeScript, Rust, Zig, Swift, whatever
-comes after.
+application. It'll use `go mod`, link Go libraries, and produce tiny
+static binaries. The same applies to TypeScript, Rust, Zig, Swift, or
+whatever comes after.
 
 **When you choose Overt for a project, you choose the language your
 agent writes. You also choose the back-end language and platform that
@@ -163,7 +166,7 @@ even mix languages and platforms: Go for the web back end, TypeScript
 for the web front end, and the agent can use a single language for
 both.
 
-## Why "transpile to a host language" is right, not a workaround
+## Why "Transpile to a Host Language" Is Right, Not a Workaround
 
 Two observations make this the right architecture rather than a
 shortcut:
@@ -186,18 +189,18 @@ is shared across every backend.
 targeting .NET inherits the GC, BCL, async/await, NativeAOT, Blazor
 WASM, and every NuGet package ever published. A Go-targeted Overt
 program will inherit goroutines, channels, the Go module ecosystem,
-fast cold starts. I don't need to build my own stdlib for the normal
-things. I bind to the target's, through explicit typed FFI. Agents
-get to use their training priors about `System.Text.Json` directly;
-there's no "Overt JSON" that subtly differs.
+and fast cold starts. I don't need to build my own stdlib for the
+normal things; I bind to the target's stdlib through explicit, typed
+FFI. Agents get to use their training priors about `System.Text.Json`
+directly, and there's no "Overt JSON" that subtly differs from it.
 
 Eventually there'll be a portable back end for Overt, but before
 then there'll be many back ends that are all easier for AI to read,
 write, and reason about (RWRA) because of Overt.
 
-## What Overt is not
+## What Overt Is Not
 
-A few things to get out of the way:
+Here are a few things to get out of the way:
 
 - **It's not a replacement for languages experienced engineers write
   by hand.** If you're a strong C# developer writing a
@@ -216,7 +219,7 @@ A few things to get out of the way:
   beyond the in-repo graph, no self-hosted compiler, no Go emission.
   The roadmap lives in [`CARRYOVER.md`](../CARRYOVER.md).
 
-## What I know vs. what I'm hypothesizing
+## What I Know vs. What I'm Hypothesizing
 
 I'd rather be honest about this up front than hit someone with a
 surprise later.
@@ -246,9 +249,10 @@ surprise later.
   pleasant-to-author, but how much faster the audit is than reading
   idiomatic Python, I haven't measured.
 
-The path to validation is usage. Which brings us to:
+The path to validation is usage, which brings us to the next
+section.
 
-## Try it
+## Try It
 
 The [README](../README.md) has a quick-try: clone the repo, run one
 command, and you're executing an Overt program through the full
