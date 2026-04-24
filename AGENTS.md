@@ -529,6 +529,50 @@ path) is demonstrated in [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 
 ---
 
+## 11.5. Platform passthrough: `@csharp("...")`
+
+Target-specific metadata (test-framework markers, serialization hints,
+DI markers, routing, etc.) is reachable via `@csharp("...")` on a
+function declaration. The string content is emitted opaquely as a C#
+attribute `[...]` on the generated method. Overt does no semantic check
+on the content; the C# compiler is the only validator.
+
+```overt
+@csharp("Fact")
+fn test_parse_empty() -> Bool {
+    true
+}
+
+@csharp("Theory")
+@csharp("InlineData(1)")
+@csharp("InlineData(2)")
+fn test_each(n: Int) -> Int {
+    n
+}
+
+@csharp("JsonPropertyName(\"name\")")
+fn field_name() -> String {
+    "name"
+}
+```
+
+Each `@csharp(...)` becomes one `[...]` attribute, emitted on its own
+line before the method signature. Stack them by writing multiple
+`@csharp` attributes. Use `\"` to escape embedded quotes in the string.
+
+**Scope in v1**: function declarations only. Attributes on records,
+record fields, enum variants, and type aliases are not yet supported;
+use `@csharp` on free functions while that scope is expanded in a
+future release. Non-`@csharp` attributes on `fn` (e.g. `@derive`) are
+still rejected by **OV0157**; `@derive` applies only to records and
+enums.
+
+**`@go("...")` and other backends**: not yet implemented. The passthrough
+escape hatch is scoped per-target; when the Go backend comes online,
+its attribute vocabulary will live under its own prefix.
+
+---
+
 ## 12. Stdlib surface (runnable subset)
 
 ### Result / Option

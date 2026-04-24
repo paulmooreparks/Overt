@@ -126,4 +126,51 @@ public class CSharpEmitterTests
         Assert.Contains("namespace Overt.Generated.", csharp);
         Assert.Contains("#nullable enable", csharp);
     }
+
+    [Fact]
+    public void Emit_CSharpAttribute_OnFn_EmitsAsAttributeBeforeMethod()
+    {
+        var source = """
+            module m
+            @csharp("Fact")
+            fn test_something() -> Int { 1 }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[Fact]", csharp);
+        // The attribute must appear before the method signature, not inside it.
+        var attrIdx = csharp.IndexOf("[Fact]", StringComparison.Ordinal);
+        var methodIdx = csharp.IndexOf("test_something", StringComparison.Ordinal);
+        Assert.True(attrIdx >= 0 && methodIdx >= 0, "attribute and method must both appear");
+        Assert.True(attrIdx < methodIdx, "attribute must appear before the method signature");
+    }
+
+    [Fact]
+    public void Emit_MultipleCSharpAttributes_OnFn_EmitsEach()
+    {
+        var source = """
+            module m
+            @csharp("Theory")
+            @csharp("InlineData(1)")
+            @csharp("InlineData(2)")
+            fn test_each(n: Int) -> Int { n }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[Theory]", csharp);
+        Assert.Contains("[InlineData(1)]", csharp);
+        Assert.Contains("[InlineData(2)]", csharp);
+    }
+
+    [Fact]
+    public void Emit_CSharpAttribute_WithEscapedQuote_DecodesCorrectly()
+    {
+        // Escape sequences in the attribute string must reach the emitter literal,
+        // so `[JsonPropertyName("name")]` shows up with its quotes intact.
+        var source = """
+            module m
+            @csharp("JsonPropertyName(\"name\")")
+            fn getter() -> Int { 1 }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[JsonPropertyName(\"name\")]", csharp);
+    }
 }

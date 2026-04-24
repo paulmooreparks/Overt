@@ -127,13 +127,17 @@ public sealed class Parser
 
         if (Check(TokenKind.KeywordFn))
         {
-            if (attributes.Length > 0)
+            // Only @csharp attributes are meaningful on fn; @derive targets types.
+            foreach (var attr in attributes)
             {
-                ReportError("OV0157",
-                    "attributes on `fn` declarations are not supported in v1",
-                    attributes[0].Span);
+                if (attr.Name != "csharp")
+                {
+                    ReportError("OV0157",
+                        $"attribute `@{attr.Name}` on `fn` declarations is not supported; only `@csharp(\"...\")` attributes pass through to the emitted C# method",
+                        attr.Span);
+                }
             }
-            return ParseFunctionDecl();
+            return ParseFunctionDecl(attributes);
         }
         if (Check(TokenKind.KeywordRecord))
         {
@@ -342,28 +346,81 @@ public sealed class Parser
         var nameToken = Expect(TokenKind.Identifier, "attribute name");
 
         var arguments = ImmutableArray<string>.Empty;
+        string? stringArgument = null;
         var endPos = nameToken.Span.End;
         if (Match(TokenKind.LeftParen))
         {
-            var args = ImmutableArray.CreateBuilder<string>();
-            if (!Check(TokenKind.RightParen))
+            if (nameToken.Lexeme == "csharp")
             {
-                args.Add(Expect(TokenKind.Identifier, "attribute argument").Lexeme);
-                while (Match(TokenKind.Comma))
+                // @csharp("<raw attribute content>"): exactly one string literal arg.
+                // The string is emitted opaquely as `[<content>]` on the generated
+                // C# member; Overt performs no semantic check on the content.
+                var lit = Expect(TokenKind.StringLiteral, "C# attribute content as a string literal");
+                stringArgument = DecodeStringLiteral(lit.Lexeme);
+            }
+            else
+            {
+                var args = ImmutableArray.CreateBuilder<string>();
+                if (!Check(TokenKind.RightParen))
                 {
-                    if (Check(TokenKind.RightParen))
-                    {
-                        break;
-                    }
                     args.Add(Expect(TokenKind.Identifier, "attribute argument").Lexeme);
+                    while (Match(TokenKind.Comma))
+                    {
+                        if (Check(TokenKind.RightParen))
+                        {
+                            break;
+                        }
+                        args.Add(Expect(TokenKind.Identifier, "attribute argument").Lexeme);
+                    }
                 }
+                arguments = args.ToImmutable();
             }
             var closing = Expect(TokenKind.RightParen, "attribute arguments");
-            arguments = args.ToImmutable();
             endPos = closing.Span.End;
         }
 
-        return new Annotation(nameToken.Lexeme, arguments, new SourceSpan(at.Span.Start, endPos));
+        return new Annotation(nameToken.Lexeme, arguments, stringArgument, new SourceSpan(at.Span.Start, endPos));
+    }
+
+    /// <summary>
+    /// Strip the surrounding quotes and resolve backslash escapes on a
+    /// string-literal token lexeme. Keeps only the escapes we already need
+    /// (\" \\ \n \t \r). Overt's string literal grammar is richer elsewhere
+    /// but attribute strings have been narrow enough so far that this minimal
+    /// decoder suffices.
+    /// </summary>
+    private static string DecodeStringLiteral(string lexeme)
+    {
+        // lexeme is the raw source text including the surrounding quotes.
+        if (lexeme.Length < 2 || lexeme[0] != '"' || lexeme[^1] != '"')
+        {
+            return lexeme;
+        }
+        var inner = lexeme.Substring(1, lexeme.Length - 2);
+        var sb = new System.Text.StringBuilder(inner.Length);
+        for (var i = 0; i < inner.Length; i++)
+        {
+            var c = inner[i];
+            if (c == '\\' && i + 1 < inner.Length)
+            {
+                var next = inner[i + 1];
+                sb.Append(next switch
+                {
+                    '"' => '"',
+                    '\\' => '\\',
+                    'n' => '\n',
+                    't' => '\t',
+                    'r' => '\r',
+                    _ => next,
+                });
+                i++;
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
     }
 
     private RecordDecl ParseRecordDecl(ImmutableArray<Annotation> attributes)
@@ -468,9 +525,13 @@ public sealed class Parser
             new SourceSpan(nameToken.Span.Start, type.Span.End));
     }
 
-    private FunctionDecl ParseFunctionDecl()
+    private FunctionDecl ParseFunctionDecl(ImmutableArray<Annotation> attributes = default)
     {
-        var startPos = Current.Span.Start;
+        if (attributes.IsDefault)
+        {
+            attributes = ImmutableArray<Annotation>.Empty;
+        }
+        var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         Expect(TokenKind.KeywordFn, "function declaration");
         var nameToken = Expect(TokenKind.Identifier, "function name");
 
@@ -504,6 +565,7 @@ public sealed class Parser
             effects,
             returnType,
             body,
+            attributes,
             new SourceSpan(startPos, body.Span.End));
     }
 

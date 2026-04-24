@@ -27,6 +27,7 @@ public sealed record FunctionDecl(
     EffectRow? Effects,
     TypeExpr? ReturnType,
     BlockExpr Body,
+    ImmutableArray<Annotation> Annotations,
     SourceSpan Span) : Declaration(Span);
 
 /// <summary>
@@ -152,14 +153,24 @@ public sealed record EnumVariant(
     SourceSpan Span) : SyntaxNode(Span);
 
 /// <summary>
-/// An annotation attached to a declaration: <c>@name(arg, arg, ...)</c>. V1 uses attributes
-/// only for <c>@derive</c>, which takes a list of identifier arguments naming stdlib
-/// derive kinds (Debug, Clone, etc — DESIGN.md §15). Arguments are stored as raw
-/// identifier strings and interpreted by later passes.
+/// An annotation attached to a declaration: <c>@name(arg, arg, ...)</c>. Two shapes
+/// exist in v1:
+/// <list type="bullet">
+///   <item><c>@derive(Debug, Display, ...)</c>: identifier-only arguments naming
+///     stdlib derive kinds (DESIGN.md §15). Populated into <see cref="Arguments"/>.</item>
+///   <item><c>@csharp("Fact")</c>, <c>@csharp("JsonPropertyName(\"name\")")</c>:
+///     a single string literal carrying raw C# attribute content. Populated into
+///     <see cref="StringArgument"/>. Emitted opaquely by the C# back end as
+///     <c>[<i>content</i>]</c> on the generated member. No semantic check at the
+///     Overt level; the target backend owns the attribute vocabulary.</item>
+/// </list>
+/// Exactly one of <see cref="Arguments"/> or <see cref="StringArgument"/> is
+/// populated; the other is empty / null.
 /// </summary>
 public sealed record Annotation(
     string Name,
     ImmutableArray<string> Arguments,
+    string? StringArgument,
     SourceSpan Span) : SyntaxNode(Span);
 
 public sealed record Parameter(

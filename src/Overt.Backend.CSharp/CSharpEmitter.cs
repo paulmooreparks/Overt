@@ -489,6 +489,7 @@ public sealed class CSharpEmitter
     private void EmitFunction(FunctionDecl fn)
     {
         EmitEffectRowComment(fn.Effects);
+        EmitCSharpAttributes(fn.Annotations);
         EmitLineDirective(fn.Span);
 
         // Functions whose body uses `.await` emit as C# `async Task<ReturnType>`.
@@ -2494,6 +2495,28 @@ public sealed class CSharpEmitter
     {
         if (row is null || row.Effects.Length == 0) return;
         _w.WriteLine($"// !{{{string.Join(", ", row.Effects)}}}");
+    }
+
+    /// <summary>
+    /// Emit <c>@csharp("...")</c> attributes as raw C# <c>[...]</c> attributes on
+    /// a separate line each, immediately before the member. The string content is
+    /// passed through opaquely: Overt performs no semantic check; the target
+    /// platform's attribute grammar is the user's responsibility.
+    /// </summary>
+    private void EmitCSharpAttributes(ImmutableArray<Annotation> annotations)
+    {
+        if (annotations.IsDefaultOrEmpty)
+        {
+            return;
+        }
+        foreach (var ann in annotations)
+        {
+            if (ann.Name != "csharp" || ann.StringArgument is null)
+            {
+                continue;
+            }
+            _w.WriteLine($"[{ann.StringArgument}]");
+        }
     }
 
     private static string PascalCase(string snake)
