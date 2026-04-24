@@ -317,10 +317,15 @@ public sealed class CSharpEmitter
         // C# using-aliases can't be generic and can't carry predicates. Generic or
         // refinement aliases lower to wrapper records instead; non-generic plain aliases
         // stay as using-directives so primitive aliases don't pay for a wrapping type.
-        if (t.Predicate is not null)
+        //
+        // Non-generic refinements lower to a using-alias today and so have no coercion
+        // boundary to check at; literal violations are caught by OV0311 at compile
+        // time, and non-literal violations aren't enforced at runtime yet.
+        if (t.Predicate is not null && t.TypeParameters.Length == 0)
         {
-            _w.Write($"// TODO: refinement `{t.Name}`: where-predicate dropped");
-            _w.WriteLine();
+            _w.WriteLine(
+                $"// TODO: non-generic refinement `{t.Name}`: runtime check for "
+                + "non-literal values not yet wired (OV0311 covers literal boundaries)");
         }
 
         if (t.TypeParameters.Length > 0)
@@ -332,11 +337,40 @@ public sealed class CSharpEmitter
             _w.WriteLine("{");
             using (_w.Indent())
             {
-                // Implicit conversion from the inner type into the wrapper so refinement
-                // aliases accept a bare value wherever they're required. The predicate
-                // would be enforced here once the type checker emits runtime assertions.
-                _w.WriteLine(
-                    $"public static implicit operator {t.Name}<{typeParams}>({innerType} inner) => new(inner);");
+                if (t.Predicate is { } predicate)
+                {
+                    // Predicate references `self`; the parameter is named `self` so
+                    // the inline emission of the predicate expression substitutes
+                    // correctly. Throws RefinementViolation on failure; callers see
+                    // the aliased name, the predicate source, and the offending value.
+                    var predText = FormatPredicateText(predicate);
+                    _w.WriteLine(
+                        $"public static implicit operator {t.Name}<{typeParams}>({innerType} self)");
+                    _w.WriteLine("{");
+                    using (_w.Indent())
+                    {
+                        _w.Write("if (!(");
+                        EmitExpression(predicate);
+                        _w.WriteLine("))");
+                        _w.WriteLine("{");
+                        using (_w.Indent())
+                        {
+                            _w.WriteLine(
+                                $"throw new global::Overt.Runtime.RefinementViolation("
+                                + $"\"{t.Name}\", \"{EscapeCsharpString(predText)}\", self);");
+                        }
+                        _w.WriteLine("}");
+                        _w.WriteLine("return new(self);");
+                    }
+                    _w.WriteLine("}");
+                }
+                else
+                {
+                    // Implicit conversion from the inner type into the wrapper so plain
+                    // generic aliases accept a bare value wherever they're required.
+                    _w.WriteLine(
+                        $"public static implicit operator {t.Name}<{typeParams}>({innerType} inner) => new(inner);");
+                }
             }
             _w.WriteLine("}");
             return;
@@ -346,6 +380,45 @@ public sealed class CSharpEmitter
         EmitType(t.Target);
         _w.WriteLine(";");
     }
+
+    /// <summary>Render a refinement predicate as its Overt source spelling for
+    /// inclusion in RefinementViolation messages. Mirrors TypeChecker.FormatPredicate
+    /// but kept local so the emitter doesn't reach into TypeChecker internals.</summary>
+    private static string FormatPredicateText(Expression e) => e switch
+    {
+        BinaryExpr be =>
+            $"{FormatPredicateText(be.Left)} {FormatPredicateBinOp(be.Op)} {FormatPredicateText(be.Right)}",
+        UnaryExpr { Op: UnaryOp.Negate } ue => $"-{FormatPredicateText(ue.Operand)}",
+        UnaryExpr { Op: UnaryOp.LogicalNot } ue => $"!{FormatPredicateText(ue.Operand)}",
+        IdentifierExpr id => id.Name,
+        IntegerLiteralExpr i => i.Lexeme,
+        FloatLiteralExpr f => f.Lexeme,
+        BooleanLiteralExpr b => b.Value ? "true" : "false",
+        CallExpr c => FormatPredicateText(c.Callee) + "("
+            + string.Join(", ", c.Arguments.Select(a => FormatPredicateText(a.Value))) + ")",
+        _ => "...",
+    };
+
+    private static string FormatPredicateBinOp(BinaryOp op) => op switch
+    {
+        BinaryOp.LogicalAnd => "&&",
+        BinaryOp.LogicalOr => "||",
+        BinaryOp.Equal => "==",
+        BinaryOp.NotEqual => "!=",
+        BinaryOp.Less => "<",
+        BinaryOp.LessEqual => "<=",
+        BinaryOp.Greater => ">",
+        BinaryOp.GreaterEqual => ">=",
+        BinaryOp.Add => "+",
+        BinaryOp.Subtract => "-",
+        BinaryOp.Multiply => "*",
+        BinaryOp.Divide => "/",
+        BinaryOp.Modulo => "%",
+        _ => "?",
+    };
+
+    private static string EscapeCsharpString(string s)
+        => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
     private void EmitFunction(FunctionDecl fn)
     {

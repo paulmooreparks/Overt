@@ -628,6 +628,75 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_GenericRefinement_RuntimeViolation_ThrowsOnEmptyList()
+    {
+        // `NonEmpty<T>` has `size(self) > 0` — an undecidable predicate that
+        // falls through the compile-time checker. The wrapper's implicit
+        // operator runs the predicate and throws RefinementViolation if the
+        // inbound List<T> is empty. Verifies the H8 runtime-assertion path.
+        //
+        // `check_non_empty` uses flow-narrowing: inside the `if size(raw) > 0`
+        // branch the checker narrows `List<Int>` to `NonEmpty<Int>`, so the
+        // `Ok(raw)` cast triggers the implicit operator. Calling it with an
+        // empty list defeats the narrowing and the runtime check fires.
+        const string src = """
+            module ref_e2e
+
+            type NonEmpty<T> = List<T> where size(self) > 0
+
+            @derive(Debug)
+            enum Bad { WasEmpty }
+
+            fn empty_ints() -> List<Int> { List.empty() }
+
+            fn force_wrap(xs: List<Int>) -> Result<NonEmpty<Int>, Bad> {
+                Ok(xs)
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Result<NonEmpty<Int>, Bad> = force_wrap(empty_ints())
+                Ok(())
+            }
+            """;
+
+        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => CompileAndRun(src, "ref_e2e_empty"));
+        var inner = Assert.IsType<Overt.Runtime.RefinementViolation>(ex.InnerException);
+        Assert.Equal("NonEmpty", inner.AliasName);
+        Assert.Contains("size(self) > 0", inner.PredicateText);
+    }
+
+    [Fact]
+    public void Transpiled_GenericRefinement_SatisfiedPredicate_Passes()
+    {
+        // Counterpart: a non-empty list passes the predicate and the wrapper
+        // is constructed without throwing.
+        const string src = """
+            module ref_e2e_ok
+
+            type NonEmpty<T> = List<T> where size(self) > 0
+
+            @derive(Debug)
+            enum Bad { WasEmpty }
+
+            fn force_wrap(xs: List<Int>) -> Result<NonEmpty<Int>, Bad> {
+                Ok(xs)
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let xs: List<Int> = List.singleton(42)
+                let _: Result<NonEmpty<Int>, Bad> = force_wrap(xs)
+                Ok(())
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "ref_e2e_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Transpiled_ExternCsharp_CallsBcl()
     {
         // Pure BCL static call through extern — should return the same string

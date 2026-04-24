@@ -110,6 +110,28 @@ public sealed record IoError(string narrative)
 }
 
 /// <summary>
+/// Thrown when a value flowing into a refinement-typed boundary fails the
+/// refinement's predicate at runtime. Compile-time checks (OV0311) catch
+/// literal violations; this covers the cases that compile-time evaluation
+/// can't decide — typically non-literal values or predicates that call
+/// functions (<c>size(self) &gt; 0</c>, etc.). See AGENTS.md §4.
+/// </summary>
+public sealed class RefinementViolation(string aliasName, string predicateText, object? offendingValue)
+    : Exception($"value {Repr(offendingValue)} does not satisfy refinement `{aliasName}` predicate: {predicateText}")
+{
+    public string AliasName { get; } = aliasName;
+    public string PredicateText { get; } = predicateText;
+    public object? OffendingValue { get; } = offendingValue;
+
+    private static string Repr(object? v) => v switch
+    {
+        null => "null",
+        string s => $"\"{s}\"",
+        _ => v.ToString() ?? "?",
+    };
+}
+
+/// <summary>
 /// Error variant returned by <c>race { ... }</c> when every branch fails. Carries the
 /// per-branch errors in source order (DESIGN.md §12). Placeholder — proper causal-chain
 /// wiring lands with the error-model milestone.

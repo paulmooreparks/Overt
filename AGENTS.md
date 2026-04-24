@@ -190,9 +190,7 @@ type Age = Int where 0 <= self && self <= 150
 
 Literal crossings into a refined type are checked at compile time in the
 decidable fragment (numeric / boolean / string comparisons, `&&`, `||`, `!`,
-`self` references). Predicates outside this fragment are silently deferred
-(runtime-assertion emission isn't wired yet; the emitted code does not
-currently check them at runtime).
+`self` references) via **OV0311**.
 
 **Don't write chained comparisons.** `0 <= self <= 150` is a parse error
 (non-associative comparison). Spell it `0 <= self && self <= 150`.
@@ -202,6 +200,15 @@ Generic aliases are nominal, not transparent:
 ```overt
 type NonEmpty<T> = List<T> where size(self) > 0
 ```
+
+**Runtime enforcement.** For generic refinements, every value crossing
+into the wrapper runs the predicate; failure throws
+`Overt.Runtime.RefinementViolation` carrying the alias name, predicate
+source, and offending value. This catches undecidable-at-compile-time
+cases like `size(self) > 0`. Non-generic refinements
+(`type Age = Int where ...`) still rely on OV0311 for literals;
+non-literal values flowing into them are **not** runtime-checked yet —
+that plumbing lands in a follow-up.
 
 ---
 
@@ -667,9 +674,12 @@ fn strlen(s: String) -> Int {
   Buried in a call like `foo(if cond { bar()? } else { baz })` it may fall
   back to `.Unwrap()` which throws. Lift the `?` into a let if you need
   guaranteed propagation.
-- **Conditional-context refinement runtime checks.** Decidable predicates
-  are checked at literal crossings; undecidable ones are silently deferred
-  (no runtime assertion emitted).
+- **Non-generic refinement runtime checks.** Generic refinements run the
+  predicate at coercion via the wrapper's implicit operator and throw
+  `RefinementViolation` on failure. Non-generic refinements
+  (`type Age = Int where ...`) lower to a C# using-alias so there's no
+  coercion point yet; literal crossings are caught at compile time by
+  OV0311, but non-literal values flowing in are not runtime-checked.
 - **`f64` literal patterns in `match`.** Parse OK but don't fire — float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.

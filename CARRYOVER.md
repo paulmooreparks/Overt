@@ -204,9 +204,14 @@ must carry. Full analysis is in the session transcript; the short list:
   Stray `;` now rejected with OV0170; newlines separate statements.
 - **H7. `|>?` vs `|>`** — same prefix, different semantics. Moot if H1
   reclassifies pipes as expert idiom; no standalone action.
-- **H8. Refinement-predicate silent deferral** when undecidable — same
-  class as H2. Already queued as "runtime-assertion emission"; raise
-  priority alongside H2.
+- **H8. Refinement-predicate silent deferral** when undecidable.
+  **Partially resolved 2026-04-24.** Generic refinements now throw
+  `RefinementViolation` at the wrapper's implicit operator when the
+  predicate fails. Non-generic refinements (`type Age = Int where ...`)
+  still lower to a using-alias with no coercion point — OV0311 covers
+  literals but non-literal boundaries remain unchecked. Follow-up:
+  switch non-generic refinements to a wrapper shape (or emit a per-site
+  `Check` helper) so every coercion runs the predicate.
 - **H9. Block-as-expression trailing value** is implicit per-block. The
   Rust/ML tradition thinks this earns its keep; hold for validation.
 
