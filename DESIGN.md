@@ -868,7 +868,46 @@ Self-hosting is not a v1 goal. It's the Rust / Go / Swift / TypeScript trajector
 
 What's load-bearing architecturally *today* is the tier split above, not self-hosting. Backends are cheap because Tier 1 is doing the work. Self-hosting validates the language later; it doesn't gate backend development now.
 
-### Debug mapping and the anti-hack defense
+### Source emission vs. direct IL: when this reverses
+
+The four reasons to transpile-to-source given at the top of §18 don't all age equally. A reassessment, recorded here so the choice isn't locked by inertia:
+
+- **Debuggable output.** Now supplied by the `#line` → portable-PDB mapping, not by the C# output being human-readable. An IL backend emitting its own PDB would be equally debuggable. *This reason no longer differentiates.*
+- **Readable emission.** Has degraded as language features have landed. The `__q_N` / `__qv_N` temps from `?` hoisting, the `(Func<T>)(() => { ... })()` IIFE for block-as-expression, the explicit cast noise around refinements — the emitted C# is *inspectable* but not *readable* in the aspirational sense the original justification implied. The anti-hack defense argues this is somewhat a feature (generated code *should* look structurally inferior to Overt source), but the erosion is real. *This reason is weakened.*
+- **Full inheritance of target runtime.** IL emission targeting .NET inherits the exact same runtime — GC, BCL, FFI, ecosystem. Roslyn's job is IL emission; we'd just be doing it ourselves. *This reason is neutral between source and IL.*
+- **Fast iteration.** Text generation remains materially cheaper than IL emission. A parallel IL backend realistically costs 3–6 months of specialized work (ECMA-335 metadata encoding, async state-machine rewriting, generic instantiation, portable PDB generation from scratch — roughly 4,000–5,000 lines of emitter code versus CSharpEmitter's current ~2,700). During which no language features ship. *This reason still applies, strongly.*
+
+Scorecard: one reason strongly intact (iteration speed), one neutral (runtime), two weakened (debugging, readability).
+
+**When to reverse the decision.** An IL backend becomes the right call when two conditions hold simultaneously:
+
+1. **Feature set stability** — no new language constructs for 6+ months. Today we're the opposite; language-affecting changes land every session.
+2. **A concrete, measured ceiling** — either a performance problem (benchmarks show Overt-emitted C# materially under-performs hand-written C# for a realistic workload) or a specific language feature genuinely unreachable from C# output. Neither exists today. Speculation about optimizer hostility (IIFE closure allocation, `Result.IsOk` virtual dispatch, temp-local register pressure) is plausible but unmeasured.
+
+Until both hold, the calculus favors staying on source emission. When both hold, the IL backend is a tier-2 rewrite of `Overt.Backend.CSharp` into `Overt.Backend.IL`, sharing the tier-1 frontend. The source emitter stays forever as a diagnostic tool (`overt --emit=csharp`) regardless of which backend is default.
+
+**Prerequisites for that decision, independent of whether it's ever made:**
+
+- A benchmark harness across 3–5 representative Overt programs, to measure rather than speculate about performance.
+- An emitter cleanup pass on the current C# output, tightening the patterns that read worst today (`?` hoist temps, IIFE blocks, temp naming). Lands regardless — improves readability, reduces the slice of optimizer-hostility we can actually see.
+
+These two live on the roadmap as independent of the IL-backend decision; they improve the current product and also gather the evidence any future IL-backend decision would need.
+
+### Design principle: don't bend Overt to fit C#
+
+Transpile-to-source is a v1 implementation choice, not a language-design choice. The distinction matters. As feature decisions come up there is a constant gravitational pull toward "what C# expresses easily" — because the reference implementation is already in C#, the primary author writes C# daily, and AI coding assistants (including the ones helping draft this document) default to C#-expressible constructs out of their own training bias. **Resist it.**
+
+Overt's target point on the language-design curve is agent-first. Every time a feature question gets answered with "what C# does" instead of "what agents best read and write," we've picked the wrong axis. The transpile target is a convenience for getting Overt running today; future targets (JavaScript, TypeScript, possibly Go) will not accommodate the same constructs C# does. Designing around the common subset of transpile targets surrenders the thesis.
+
+The specific failure mode to watch — because it has already surfaced during Overt's design — is **taking the path of least resistance because it matches C# (or human-language) habits.** That's the same meta-mistake the project was started to avoid: languages optimized for humans out of habit rather than out of reasoned preference for human constraints. C# is a human-first language. Fitting Overt to C# reintroduces the exact bias Overt exists to escape.
+
+In practice:
+
+- When considering a new language feature, ask first: *what serves agent-RWRA?* Only then: *how does C# express it?* Not the other way around.
+- If an Overt construct doesn't map cleanly to C#, that's an emitter problem, not a language problem. Escape hatches include helper types in `Overt.Runtime`, less-idiomatic C# output, or — in the extreme — revisiting the transpile-target decision (see the IL-backend gate above). The escape ladder ends at "emit IL directly," not at "weaken the language."
+- If a feature is genuinely unreachable from C# output, that's evidence for the IL backend, not against the feature.
+
+The dividends of transpile-to-source accrue in two directions. Short-term: C# emission lets us ship a working compiler fast. Long-term: the *experience* of transpiling teaches us what's hard to lower to an imperative runtime — knowledge we'll need for the JavaScript / TypeScript / Go backends, where no such freedom exists. Making Overt a first-class .NET language with minimal dependencies (direct IL emission) is a reachable endgame; making Overt "a dialect of C#" is an endgame we explicitly reject.
 
 A transpile-to-source backend has one sharp failure mode that a direct-to-IL backend doesn't: the generated source looks like source. If it lives in the project tree, someone will open it, find a bug, fix it there, and ship. The generator runs on the next build, the fix vanishes, and the bug recurs. This has happened in real codebases.
 
