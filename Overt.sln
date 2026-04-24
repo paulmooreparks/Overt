@@ -7,8 +7,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{5D20AA90-6969-D8BD-9DCD-8634F4692FDA}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Overt.Compiler", "src\Overt.Compiler\Overt.Compiler.csproj", "{2A83347C-CF6F-4AD6-BC24-374BA57C0EF9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Overt.Backend.CSharp", "src\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj", "{CAB736AE-98DE-4A33-8379-23319FFAB159}"
@@ -24,8 +22,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Overt.Tests", "tests\Overt.Tests\Overt.Tests.csproj", "{33F9B0B0-29CF-45CF-B3A1-02BB711EE5FE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Overt.EndToEnd", "tests\Overt.EndToEnd\Overt.EndToEnd.csproj", "{4B87E7BF-E52B-4CBC-B093-93F31BC246CF}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MsbuildSmoke", "samples\msbuild-smoke\MsbuildSmoke.csproj", "{02972194-1BB7-5BD9-2670-47E11F9A5DDB}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -65,10 +61,6 @@ Global
 		{4B87E7BF-E52B-4CBC-B093-93F31BC246CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4B87E7BF-E52B-4CBC-B093-93F31BC246CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4B87E7BF-E52B-4CBC-B093-93F31BC246CF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{02972194-1BB7-5BD9-2670-47E11F9A5DDB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{02972194-1BB7-5BD9-2670-47E11F9A5DDB}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{02972194-1BB7-5BD9-2670-47E11F9A5DDB}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{02972194-1BB7-5BD9-2670-47E11F9A5DDB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -82,6 +74,5 @@ Global
 		{4A54ABD0-EC60-495D-95F2-98973093CD7B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{33F9B0B0-29CF-45CF-B3A1-02BB711EE5FE} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{4B87E7BF-E52B-4CBC-B093-93F31BC246CF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
-		{02972194-1BB7-5BD9-2670-47E11F9A5DDB} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 	EndGlobalSection
 EndGlobal
