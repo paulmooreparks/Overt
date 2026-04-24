@@ -33,6 +33,7 @@
     <Authors>Overt contributors</Authors>
     <Description>MSBuild integration for the Overt language: compile `.ov` files alongside `.cs` in a .csproj via OvertCompile items. Import the targets by PackageReference and drop `.ov` files into the project.</Description>
     <PackageTags>overt;msbuild;transpiler;codegen</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
     <!-- Output artifacts go to NuGet-layout paths via the custom target
          below, not the default lib/; suppress the default output-as-lib
          behavior so we don't emit duplicates. -->
@@ -75,6 +76,11 @@
            Overt.Runtime's own build output (the ProjectReference above
            forces that build but we don't copy the DLL across). -->
       <_OvertPackageFile Include="..\Overt.Runtime\bin\$(Configuration)\net9.0\Overt.Runtime.dll" PackagePath="lib/net9.0/" />
+
+      <!-- Package icon displayed on nuget.org. Kept at the package root
+           per PackageIcon convention; sourced from the canonical
+           assets/icons/ folder. -->
+      <_OvertPackageFile Include="..\..\assets\icons\icon_128x128.png" PackagePath="icon.png" />
     </ItemGroup>
     <ItemGroup>
       <None Include="@(_OvertPackageFile)" Pack="true" PackagePath="%(_OvertPackageFile.PackagePath)" />

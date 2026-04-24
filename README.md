@@ -1,4 +1,14 @@
+<img src="assets/artwork/mascot.png" alt="Overt mascot" align="right" width="180">
+
 # Overt
+
+[![CI](https://img.shields.io/github/actions/workflow/status/paulmooreparks/Overt/ci.yml?branch=main&label=CI&logo=github)](https://github.com/paulmooreparks/Overt/actions/workflows/ci.yml)
+[![Overt on NuGet](https://img.shields.io/nuget/vpre/Overt?label=Overt&logo=nuget)](https://www.nuget.org/packages/Overt)
+[![Overt.Build on NuGet](https://img.shields.io/nuget/vpre/Overt.Build?label=Overt.Build&logo=nuget)](https://www.nuget.org/packages/Overt.Build)
+[![License](https://img.shields.io/github/license/paulmooreparks/Overt)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-9.0-512bd4?logo=dotnet)](https://dotnet.microsoft.com/)
+
+<img src="https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot.png" align="right" width="200" alt="Overt mascot">
 
 An **agent-first programming language**: written, read, and maintained primarily by LLM agents, with humans in a review and audit role. Transpiles to readable source in host languages (C# primary, Go secondary).
 

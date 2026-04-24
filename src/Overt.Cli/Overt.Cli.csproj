@@ -41,7 +41,18 @@
     <Authors>Overt contributors</Authors>
     <Description>The Overt language CLI: `overt run`, `overt fmt`, `overt bind`, and emit-stage inspection for `.ov` files.</Description>
     <PackageTags>overt;language;transpiler;cli</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
+
+  <!-- Icon displayed on nuget.org and in `dotnet tool` listings. Sourced
+       from the canonical 128x128 PNG under assets/icons; packed at the
+       root of the nupkg so PackageIcon finds it. -->
+  <ItemGroup>
+    <None Include="..\..\assets\icons\icon_128x128.png"
+          Pack="true"
+          PackagePath="icon.png"
+          Visible="false" />
+  </ItemGroup>
 
   <!-- Bundle the blessed stdlib next to the executable inside the tool
        package so `overt run` finds it via the same discovery walk
