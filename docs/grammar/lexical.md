@@ -1,4 +1,4 @@
-# Overt — Lexical Grammar
+# Overt: Lexical Grammar
 
 **Authoritative.** The lexer implementation under [`src/Overt.Compiler/Syntax/Lexer.cs`](../../src/Overt.Compiler/Syntax/Lexer.cs) is verified against this document via the test suite; divergence is a bug in one or the other.
 
@@ -12,7 +12,7 @@
 
 **Source files are UTF-8.** The lexer operates on the Unicode code-point sequence after decoding.
 
-**Identifier character set is ASCII-only for v1.** Unicode identifiers are deferred — the canonical-form ethos argues for reducing spelling variance (`α` vs `a`, confusable homoglyphs), and the agent training corpus is overwhelmingly ASCII. String literal contents are full Unicode.
+**Identifier character set is ASCII-only for v1.** Unicode identifiers are deferred: the canonical-form ethos argues for reducing spelling variance (`α` vs `a`, confusable homoglyphs), and the agent training corpus is overwhelmingly ASCII. String literal contents are full Unicode.
 
 ---
 
@@ -23,7 +23,7 @@ whitespace       = " " | "\t"
 line_terminator  = "\n" | "\r\n" | "\r"
 ```
 
-Whitespace and line terminators separate tokens and are otherwise **discarded** — they do not appear in the token stream. There is no significant indentation.
+Whitespace and line terminators separate tokens and are otherwise **discarded**: they do not appear in the token stream. There is no significant indentation.
 
 Line terminators are normalized for position tracking: `\r\n` and bare `\r` advance the line counter by one. Column counters reset to 1 after any line terminator.
 
@@ -37,7 +37,7 @@ Trailing whitespace on a line is legal but discouraged by the formatter.
 line_comment = "//" (any character except line_terminator)*
 ```
 
-Line comments run to the end of the line and are **discarded** — they do not appear in the token stream emitted to the parser.
+Line comments run to the end of the line and are **discarded**: they do not appear in the token stream emitted to the parser.
 
 > **Open:** block comments. Not in v1. The `@review:` / `@agent:` conventions (DESIGN.md §21) are line-comment based; no use case for block comments has surfaced.
 
@@ -64,7 +64,7 @@ return   trace    true     type     unsafe   use      where    while
 with
 ```
 
-> **Effect names are not keywords.** `io`, `async`, `inference` — the core effects declared in DESIGN.md §7 — lex as ordinary identifiers. The effect-row parser treats them no differently from effect-row type variables like `E`. This keeps them available as local variable names in ordinary code, and removes a special case from the lexer.
+> **Effect names are not keywords.** `io`, `async`, and `inference` (the core effects declared in DESIGN.md §7) lex as ordinary identifiers. The effect-row parser treats them no differently from effect-row type variables like `E`. This keeps them available as local variable names in ordinary code, and removes a special case from the lexer.
 
 > **Contextual keywords.** `as`, `each`, `from`, `in` lex as ordinary identifiers. They carry special meaning only in specific parser contexts (FFI binding, `for each` loops, `use` imports) and are otherwise available as field and variable names. This avoids conflicts like <c>record X { from: Y }</c> and allows natural words to be used freely.
 
@@ -95,9 +95,9 @@ binary_int     = binary_prefix binary_digit (binary_digit | "_")*
 integer_literal = hex_int | binary_int | decimal_int
 ```
 
-Underscores are legal anywhere after the first digit of the value and are **purely visual separators** — they do not appear in the semantic value. `1_000_000`, `1_000000`, and `1000000` denote the same integer. Leading underscores (`_1000`) are not permitted — that lexes as an identifier. Trailing underscores (`1000_`) are rejected with a diagnostic.
+Underscores are legal anywhere after the first digit of the value and are **purely visual separators**: they do not appear in the semantic value. `1_000_000`, `1_000000`, and `1000000` denote the same integer. Leading underscores (`_1000`) are not permitted; that lexes as an identifier. Trailing underscores (`1000_`) are rejected with a diagnostic.
 
-> **Deferred:** numeric type suffixes (`42u64`, `3.14f32`). Not in v1 — type inference at expression level handles this.
+> **Deferred:** numeric type suffixes (`42u64`, `3.14f32`). Not in v1; type inference at expression level handles this.
 
 ### 5.2 Float literals
 
@@ -107,11 +107,11 @@ float_literal =
   | decimal_int ("e" | "E") ("+" | "-")? decimal_int
 ```
 
-The fractional part is **required** when a decimal point is present — `3.` is not a float. Scientific notation without a fractional part (`6e23`) is permitted. Hex and binary float literals are not supported in v1.
+The fractional part is **required** when a decimal point is present, so `3.` is not a float. Scientific notation without a fractional part (`6e23`) is permitted. Hex and binary float literals are not supported in v1.
 
 Underscore rules from §5.1 apply to every digit run within a float literal.
 
-**Disambiguation with field access:** the lexer uses one-character lookahead after a decimal point. `42.foo` lexes as `IntegerLiteral(42)`, `Dot`, `Identifier("foo")` — the `.` is not consumed as part of the number because the character that follows is not a digit. `42.0` lexes as `FloatLiteral(42.0)`.
+**Disambiguation with field access:** the lexer uses one-character lookahead after a decimal point. `42.foo` lexes as `IntegerLiteral(42)`, `Dot`, `Identifier("foo")`, because the `.` is not consumed as part of the number when the character that follows is not a digit. `42.0` lexes as `FloatLiteral(42.0)`.
 
 ---
 
@@ -123,9 +123,9 @@ Strings are the most involved piece of the lexical grammar because interpolation
 
 **Default mode** is the top-level mode for source code. It tokenizes identifiers, keywords, numbers, punctuation, and opens strings.
 
-**String-body mode** is entered on `"` and exited on the matching closing `"`. Inside string-body mode, the lexer scans for literal characters, escape sequences, and interpolation triggers (`$name` or `${...}`) — nothing else.
+**String-body mode** is entered on `"` and exited on the matching closing `"`. Inside string-body mode, the lexer scans for literal characters, escape sequences, and interpolation triggers (`$name` or `${...}`), and nothing else.
 
-Interpolation **body** (the expression inside `${...}`) is lexed in **default mode** with a brace-depth counter. This means every token kind available in the rest of the language — including nested strings with their own interpolations — works inside `${...}` transparently.
+Interpolation **body** (the expression inside `${...}`) is lexed in **default mode** with a brace-depth counter. This means every token kind available in the rest of the language (including nested strings with their own interpolations) works inside `${...}` transparently.
 
 ### 6.2 Mode automaton
 
@@ -134,11 +134,11 @@ Stated as a state machine. The lexer maintains a stack of modes; the top element
 | State transition | Trigger | Action |
 |---|---|---|
 | Default → StringBody | `"` consumed in default mode | Push `StringBody`. Emit `StringHead` or `StringLiteral` depending on whether the string ends with an interpolation (see §6.3). |
-| StringBody → Default (interp) | `$IDENT` or `${` matched in string body | Push `Interpolation(braceDepth=0)` (only for `${`; for `$IDENT`, emit `Dollar` + `Identifier` and stay in string body is the naïve read — but see §6.3 for the actual token shape). |
+| StringBody → Default (interp) | `$IDENT` or `${` matched in string body | Push `Interpolation(braceDepth=0)` (only for `${`; for `$IDENT`, emit `Dollar` + `Identifier` and stay in string body is the naïve read, but see §6.3 for the actual token shape). |
 | Default (interp) → StringBody | Unmatched `}` while in `Interpolation` with `braceDepth == 0` | Pop `Interpolation`. Continue string body, emitting `StringMiddle` or `StringTail`. |
 | StringBody → Default (pop) | `"` consumed in string body | Pop `StringBody`. Emit `StringEnd` or final `StringLiteral` part. |
 
-Inside `Interpolation` mode, every `{` increments `braceDepth`, every `}` that does not match it decrements. Only a `}` with `braceDepth == 0` returns control to string-body mode. This is how `"${ record { x = 1 } |> f }"` works — the inner `{` / `}` pairs do not close the interpolation.
+Inside `Interpolation` mode, every `{` increments `braceDepth`, every `}` that does not match it decrements. Only a `}` with `braceDepth == 0` returns control to string-body mode. This is how `"${ record { x = 1 } |> f }"` works: the inner `{` / `}` pairs do not close the interpolation.
 
 ### 6.3 Token emission
 
@@ -146,10 +146,10 @@ For a string with **no** interpolations: one `StringLiteral` token containing th
 
 For a string with **one or more** interpolations, the string is fragmented into a sequence of tokens:
 
-- `StringHead` — opening `"` through the first `$` or `${`, exclusive. May be empty (`"${...`).
-- Interpolation tokens — `Dollar` + `Identifier` for `$name` form, or `InterpolationStart` + inner tokens + `InterpolationEnd` for `${...}` form.
-- `StringMiddle` — between two interpolations. May be empty. May appear zero or more times.
-- `StringTail` — last interpolation through closing `"`. May contain no literal text if the `"` immediately follows `}` (`...${x}"`).
+- `StringHead`: opening `"` through the first `$` or `${`, exclusive. May be empty (`"${...`).
+- Interpolation tokens: `Dollar` + `Identifier` for `$name` form, or `InterpolationStart` + inner tokens + `InterpolationEnd` for `${...}` form.
+- `StringMiddle`: between two interpolations. May be empty. May appear zero or more times.
+- `StringTail`: last interpolation through closing `"`. May contain no literal text if the `"` immediately follows `}` (`...${x}"`).
 
 **Worked examples:**
 
@@ -196,7 +196,7 @@ dollar_ident = "$" identifier
 interp_expr  = "${" (any tokens with brace-depth tracking) "}"
 ```
 
-**`$identifier` is strictly an identifier** — no dotted paths (`$user.name` interpolates `user` and leaves `.name` as literal text), no call syntax, no arithmetic. For anything richer, use `${...}`.
+**`$identifier` is strictly an identifier**: no dotted paths (`$user.name` interpolates `user` and leaves `.name` as literal text), no call syntax, no arithmetic. For anything richer, use `${...}`.
 
 Rationale: keeping `$IDENT` narrow eliminates any "where does the interpolation end" question. If an agent needs a pattern beyond a bare name, `${...}` makes the scope explicit.
 
@@ -213,11 +213,11 @@ escape =
   | "\\r"   // carriage return
   | "\\t"   // tab
   | "\\0"   // null
-  | "\\$"   // literal dollar sign — the ONLY way to put a `$` in a string
+  | "\\$"   // literal dollar sign; the ONLY way to put a `$` in a string
   | "\\u{" hex_digit+ "}"  // unicode code-point escape
 ```
 
-**`$` without an identifier or `{` following is an error.** There is no "fallback to literal" — the canonical form for a literal `$` is `\$`. A bare `$5` or `$ ` in a string body produces an `OV0003` diagnostic.
+**`$` without an identifier or `{` following is an error.** There is no "fallback to literal"; the canonical form for a literal `$` is `\$`. A bare `$5` or `$ ` in a string body produces an `OV0003` diagnostic.
 
 Raw strings (`r"..."`) are deferred.
 
@@ -296,17 +296,17 @@ The two-step lookahead on `|>?` is load-bearing. Parsing must see `|` followed b
 
 When a character begins more than one possible token, the lexer uses the following precedence (resolving maximal-munch across categories):
 
-1. Line comment (`//`) — beats `Slash` when followed by another `/`.
-2. Float literal — beats integer literal + `Dot` when the character after `.` is a digit.
-3. Multi-character punctuation — beats single-character punctuation at the same start.
-4. Keyword — beats identifier when the full identifier run matches a reserved word.
-5. Integer/float literal — no overlap with identifiers (numbers never start with an ident-start character).
+1. Line comment (`//`): beats `Slash` when followed by another `/`.
+2. Float literal: beats integer literal + `Dot` when the character after `.` is a digit.
+3. Multi-character punctuation: beats single-character punctuation at the same start.
+4. Keyword: beats identifier when the full identifier run matches a reserved word.
+5. Integer/float literal: no overlap with identifiers (numbers never start with an ident-start character).
 
 ---
 
 ## 9. Diagnostic codes
 
-The lexer emits these codes. They are committed contract — add new codes at the end, never renumber.
+The lexer emits these codes. They are committed contract; add new codes at the end, and never renumber.
 
 | Code | Meaning |
 |---|---|
@@ -329,9 +329,9 @@ The authoritative list of token kinds lives in [`TokenKind.cs`](../../src/Overt.
 ## 11. Not covered (deferred)
 
 - Block comments
-- Character literals (single-quoted single characters) — §9 / §13 use constructor-call forms, so no need has surfaced
-- Raw string literals (`r"..."`) — deferred until needed for regex-ish content
-- Byte string literals — no use case in v1
+- Character literals (single-quoted single characters): §9 / §13 use constructor-call forms, so no need has surfaced
+- Raw string literals (`r"..."`): deferred until needed for regex-ish content
+- Byte string literals: no use case in v1
 - Multi-line string literals (`"""..."""`)
 - Numeric type suffixes
 - Unicode identifiers
