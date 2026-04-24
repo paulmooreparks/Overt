@@ -4,11 +4,9 @@ An **agent-first programming language** — written, read, and maintained primar
 
 The name is the design philosophy: every effect, error, dispatch, mutation, and piece of state is *overt* — visible at the call or declaration site, never concealed from the reader.
 
-> **Status (April 2026):** working end-to-end on C#. An Overt program can transpile, compile, and *run* — including calling arbitrary BCL static methods / properties / fields via `extern "csharp"` — and the ecosystem scaffolding is in place: cross-file modules with dotted paths and aliasing, a blessed stdlib under `stdlib/csharp/*` auto-discovered by the CLI, a reflection-driven facade generator (`overt bind`), a canonical formatter (`overt fmt`, idempotent and comment-preserving), and an `overt run` that in-memory-compiles and invokes `Module.main()`. The type checker rejects 13 classes of error — type mismatches, ignored `Result`s, non-exhaustive match (incl. stdlib `Option`/`Result`), uncovered effect rows (incl. higher-order callbacks), refinement violations at literal boundaries, misplaced loop-control keywords, `for each` on non-`List`. Faithful `?` / `|>?` propagation lowers to early-returns, including inside `if` / `match` arms used as expression values (via statement-level restructuring). Full imperative control flow (`for each`, `loop`, `break`, `continue`, literal patterns in `match`). Every diagnostic auto-appends a `note: see AGENTS.md §N` pointer. 354 tests, covering lexer goldens, emitter compile-checks, formatter idempotence, multi-module graphs, end-to-end BCL calls, and more. Release engineering for Compiler Explorer is staged and waiting on a version tag. Go backend is scaffolded but not emitting.
-
 ---
 
-## Why another language?
+## Why agent-first?
 
 Every existing programming language is designed for humans. Short names, implicit effects, positional arguments, exceptions that unwind invisibly, and reflection are all accommodations for *human* cognitive limits — small working memory, strong pattern-matching, strong causal intuition.
 
@@ -38,7 +36,25 @@ Key shape rules on display, even in six lines:
 - **`println("...")?`** — the `?` operator propagates failure explicitly. No hidden unwinding.
 - **`Ok(())`** — success is constructed, not implicit.
 
-More examples under [`examples/`](examples/): task groups (`parallel`), fallback (`race`), immutable records with `let mut` rebinding and `with` for modified copies, pipe composition (`|>` / `|>?`), exhaustive pattern matching, refinement types, first-class causal traces, and FFI to C#, Go, and C.
+More examples under [`examples/`](examples/): task groups (`parallel`), fallback (`race`), immutable records with `let mut` rebinding and `with` for modified copies, pipe composition (`|>` / `|>?`), exhaustive pattern matching, refinement types, first-class causal traces, async I/O with `.await`, typed JSON roundtrip, and FFI to C#, Go, and C.
+
+---
+
+## Quick try
+
+Requires the .NET 9 SDK. Today, from a clone of this repo:
+
+```
+git clone https://github.com/paulmooreparks/Overt
+cd Overt
+dotnet run --project src/Overt.Cli -- run examples/hello.ov
+```
+
+That transpiles, compiles, and executes `hello.ov` in one pass, printing `Hello, LLM!`.
+
+A .NET global tool (`dotnet tool install --global Overt`) is packaged and tested but not yet published to nuget.org; see [`ROLLOUT.md`](ROLLOUT.md) for when that ships.
+
+Using Overt from an existing C# project is a `<PackageReference>` away — see [AGENTS.md §11](AGENTS.md#11-building-with-msbuild-c-backend) and the working sample at [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 
 ---
 
@@ -56,6 +72,8 @@ A few of the decisions that define the language. Full rationale in [`DESIGN.md`]
 - **One canonical form**, enforced by the formatter. No per-project or per-developer style config (§4, §21).
 - **Defined behavior, no UB** (§8). Integer overflow traps by default. Every classical UB source from C/C++ is designed out structurally.
 - **Runtime errors point at Overt source.** The C# emitter writes `#line` directives so exceptions, debuggers, and stack traces resolve to the original `.ov` file, not the generated `.cs`. Editing the generated code is structurally discouraged — see §18's debug-mapping subsection.
+- **Explicit async.** `Task<T>`-returning externs bind directly; postfix `.await` extracts the value, mirroring `?`. Fns that await emit as `async Task<T>` in C#; callers see `Task<T>` and unwrap at the site. The `async` effect in the row is the declaration; `.await` is the line-level marker.
+- **MSBuild integration.** `.ov` files compile alongside `.cs` in any csproj via a `<PackageReference>` to `Overt.Build` — no manual transpile step. Compile-time diagnostics surface in the IDE's error list like normal Csc errors.
 
 ---
 
@@ -92,27 +110,29 @@ See [`DESIGN.md`](DESIGN.md) §19 (stdlib is per-backend, not portable) and §20
 DESIGN.md                           Primary design document (source of truth)
 AGENTS.md                           Operational reference for agents writing Overt
 CARRYOVER.md                        Session handoff — next-session queue and locked decisions
+ROLLOUT.md                          Phased plan for taking Overt public
 docs/
   grammar/                          Authoritative lexical + precedence grammars
-  tooling/                          Compiler Explorer integration plan
 examples/                           Example programs — living test cases
+samples/
+  msbuild-smoke/                    C# project consuming .ov files via Overt.Build
 stdlib/
   csharp/                           Blessed BCL facades (auto-discovered by CLI)
     system/                           Mirrors .NET's System.* namespace structure
 tooling/
-  install.ps1                       Publish-and-install script for the `overt` CLI
+  install.ps1                       Publish-and-install script for the `overt` CLI (dev workflow)
   ov.ps1                            Dev-mode wrapper that targets the Debug build dir
-  godbolt/                          Compiler Explorer submission scaffolding
 vscode-extension/                   TextMate grammar + language config for .ov files
 src/
   Overt.Compiler/                   Tier 1: lexer, parser, resolver, type-checker, formatter
     Modules/                          Module-graph resolution for cross-file `use`
   Overt.Backend.CSharp/             Tier 2: C# emitter, BindGenerator, extern runtime wiring
   Overt.Backend.Go/                 Tier 2: Go backend (scaffold; no emission yet)
+  Overt.Build/                      MSBuild integration: OvertTranspileTask + targets + NuGet packaging
   Overt.Cli/                        Thin dispatcher: `run`, `fmt`, `bind`, `--emit=<stage>`
   Overt.Runtime/                    Runtime prelude for transpiled programs (C# backend)
 tests/
-  Overt.Tests/                      xUnit suite (354 tests)
+  Overt.Tests/                      xUnit suite (lexer goldens, emitter compile-checks, e2e tool install)
   Overt.EndToEnd/                   Roslyn compile + exec harness for hello.ov
 ```
 
@@ -195,10 +215,10 @@ overt bind --type System.DateTime --module stdlib.csharp.system.datetime \
 The compiler pipeline, with the test coverage that pins each stage:
 
 1. **Lex** (`Syntax/Lexer.cs`) — mode-stack lexer per [`docs/grammar/lexical.md`](docs/grammar/lexical.md). Token streams for every example are locked in golden files under [`tests/Overt.Tests/fixtures/golden/`](tests/Overt.Tests/fixtures/golden/).
-2. **Parse** (`Syntax/Parser.cs`) — recursive-descent, precedence per [`docs/grammar/precedence.md`](docs/grammar/precedence.md). All 12 examples produce zero parser diagnostics.
+2. **Parse** (`Syntax/Parser.cs`) — recursive-descent, precedence per [`docs/grammar/precedence.md`](docs/grammar/precedence.md). Every example parses clean.
 3. **Name-resolve** (`Semantics/NameResolver.cs`) — builds a symbol table, resolves identifier references (including module-qualified names like `List.empty` / `Trace.subscribe`), enforces `DESIGN.md §3`'s no-shadowing rule. Prelude symbols ([`Semantics/Stdlib.cs`](src/Overt.Compiler/Semantics/Stdlib.cs)) are ambient and shadowable. Did-you-mean suggestions via Levenshtein.
-4. **Type-check** (`Semantics/TypeChecker.cs`) — lowers the AST into a `TypeRef` IR, annotates every expression, and *validates* contracts. Enforces: argument/return/field/arm/condition/arity type correctness (OV0300–0306), ignored `Result` (OV0307), match exhaustiveness on user enums and stdlib `Option`/`Result` (OV0308), effect-row coverage including higher-order propagation and module-qualified calls (OV0310), and refinement-predicate decidability at literal boundaries (OV0311). Non-generic type aliases are transparent for equality; refinement predicates outside the decidable fragment are quietly deferred to runtime-assertion emission (not yet implemented).
-5. **Emit C#** (`Overt.Backend.CSharp/CSharpEmitter.cs`) — walks the AST with the type-checker's annotations and emits C# source text. Expected-type threading propagates target types into generic calls so constructs like `List.empty()`, `Ok(x)`, and variant-pattern matches lower without a full inference pass. `#line` directives map every statement and declaration back to the `.ov` source so PDBs point runtime errors at Overt.
+4. **Type-check** (`Semantics/TypeChecker.cs`) — lowers the AST into a `TypeRef` IR, annotates every expression, and *validates* contracts. Enforces argument / return / field / arm / condition / arity correctness (OV0300–0306), ignored `Result` (OV0307), match exhaustiveness on user enums, stdlib `Option` / `Result`, and tuples of enums (OV0308), effect-row coverage including higher-order propagation (OV0310), refinement-predicate violations at literal boundaries (OV0311), required `let` type annotations (OV0314), extern-kind shape (OV0315/16), and `.await` on a `Task<T>` (OV0317). Refinement predicates that are undecidable at compile time emit runtime checks at every boundary (call args, let initializers, record-field inits, return expressions).
+5. **Emit C#** (`Overt.Backend.CSharp/CSharpEmitter.cs`) — walks the annotated AST and emits C# source text. Expected-type threading propagates target types into generic calls so `List.empty()`, `Ok(x)`, and variant-pattern matches lower without a full inference pass. `#line` directives map every statement back to the `.ov` source; runtime errors resolve to Overt, not the generated C#.
 6. **Compile C#** (Roslyn) — verified by the test suite for every example.
 
 ---
@@ -214,6 +234,19 @@ From [`DESIGN.md §20`](DESIGN.md):
 5. **Portability, if ever needed, is its own backend** — a purpose-designed portable stdlib and emitter, opted into explicitly. See §19.
 
 The compiler host language is **C#**, chosen for iteration speed given the primary author's background and the fact that the C# backend depends on Roslyn APIs anyway.
+
+---
+
+## Status
+
+Working end-to-end on C#:
+
+- **Language.** Records, enums (including struct-like variants), pattern matching with cartesian-product exhaustiveness on tuples of enums, effect rows, refinement types with runtime-checked boundaries, immutable records with `with`-updates, `let mut` rebinding, full imperative control flow (`for each`, `while`, `loop`, `break`, `continue`, literal patterns), `?` and `|>?` propagation (including inside nested `if`/`match` arms), `.await` on `Task<T>` with async-effect fns emitting as `async Task<T>`.
+- **FFI.** `extern "csharp"` with three explicit kinds — static, `instance`, `ctor` — plus generic methods via angle-bracket binds targets (`Deserialize<MyType>`). Go and C placeholders parse and diagnose clearly; only C# executes today.
+- **Stdlib.** Facades under `stdlib/csharp/system.*` for path, file, console, environment, math, convert, DateTime, TimeSpan, Guid, StringBuilder, Uri — generated from reflection via `overt bind`, auto-discovered by the CLI. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/json.ov`](examples/json.ov).
+- **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens, ast, resolved, typed, csharp). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
+- **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs are produced and tested; neither is published to nuget.org yet ([`ROLLOUT.md`](ROLLOUT.md) Phase 2).
+- **Not yet.** Go backend emission, LSP server, cross-file module system beyond the current in-repo graph, self-hosted compiler — all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).
 
 ---
 
