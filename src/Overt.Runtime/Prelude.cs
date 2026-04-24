@@ -132,6 +132,21 @@ public sealed class RefinementViolation(string aliasName, string predicateText, 
 }
 
 /// <summary>
+/// Marker thrown by the emitted stub for an <c>extern</c> whose platform
+/// isn't wired up in the current runtime (e.g. <c>extern "go" fn ...</c>
+/// under the C# backend). The CLI recognizes this type specifically and
+/// reports a toolchain-limitation message in Overt vocabulary, rather
+/// than letting it surface as an "unhandled exception" — Overt programs
+/// don't have exceptions and the reader shouldn't see that word.
+/// </summary>
+public sealed class ExternPlatformNotImplemented(string platform, string externName)
+    : Exception($"extern platform '{platform}' is not wired up in this runtime (at extern `{externName}`)")
+{
+    public string Platform { get; } = platform;
+    public string ExternName { get; } = externName;
+}
+
+/// <summary>
 /// Error variant returned by <c>race { ... }</c> when every branch fails. Carries the
 /// per-branch errors in source order (DESIGN.md §12). Placeholder — proper causal-chain
 /// wiring lands with the error-model milestone.

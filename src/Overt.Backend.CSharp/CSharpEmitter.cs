@@ -644,9 +644,11 @@ public sealed class CSharpEmitter
     {
         if (x.Platform != "csharp")
         {
+            // Use the dedicated marker type so `overt run` can recognize the
+            // case and render it as a toolchain limitation rather than as an
+            // unhandled exception (Overt readers don't have that vocabulary).
             _w.WriteLine(
-                "throw new NotImplementedException("
-                + $"\"extern platform '{x.Platform}' not yet wired up\");");
+                $"throw new global::Overt.Runtime.ExternPlatformNotImplemented(\"{x.Platform}\", \"{x.Name}\");");
             return;
         }
 

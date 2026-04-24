@@ -322,8 +322,41 @@ static class Cli
         }
         catch (TargetInvocationException tie)
         {
-            Console.Error.WriteLine($"overt run: unhandled exception: {tie.InnerException?.Message ?? tie.Message}");
-            return 1;
+            // Reflection wraps anything the invoked fn throws. Unwrap so we
+            // diagnose in terms of the host-side cause, not the reflection
+            // plumbing. Frame in Overt vocabulary — programs don't have
+            // exceptions, so we don't use that word at the CLI boundary
+            // either.
+            var inner = tie.InnerException ?? tie;
+            switch (inner)
+            {
+                case Overt.Runtime.ExternPlatformNotImplemented pni:
+                    // Toolchain limitation: the program called an extern
+                    // bound to a platform the current runtime doesn't
+                    // implement. Not an error the Overt program can handle;
+                    // the program would need a different extern.
+                    Console.Error.WriteLine(
+                        $"overt run: extern `{pni.ExternName}` binds to platform "
+                        + $"'{pni.Platform}', which the C# backend's extern runtime "
+                        + "does not execute.");
+                    Console.Error.WriteLine(
+                        "  help: swap the extern for one bound to `\"csharp\"`, or "
+                        + "pick a different host backend when one ships.");
+                    return 1;
+
+                default:
+                    // Host-side code crossed the FFI boundary with a failure
+                    // that wasn't converted to a Result value. That's a
+                    // contract violation at the extern: its declared return
+                    // type has no shape to carry the failure.
+                    Console.Error.WriteLine(
+                        $"overt run: host failure at an extern boundary: {inner.Message}");
+                    Console.Error.WriteLine(
+                        "  help: declare the extern with `-> Result<T, IoError>` so the "
+                        + "runtime converts host failures to Err values instead of "
+                        + "letting them escape.");
+                    return 1;
+            }
         }
 
         // If main returns Result<_, _>, check IsOk. Ok → exit 0. Err → print + exit 1.
