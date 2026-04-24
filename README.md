@@ -7,6 +7,11 @@
 [![License](https://img.shields.io/github/license/paulmooreparks/Overt)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512bd4?logo=dotnet)](https://dotnet.microsoft.com/)
 
+> **Agents**: start at [INTEGRATE.md](INTEGRATE.md) for adding Overt to a
+> `.csproj`, then [AGENTS.md](AGENTS.md) for authoring `.ov`. Both ship
+> inside the NuGet packages; [llms.txt](llms.txt) is the machine-readable
+> pointer into this repo.
+
 
 An **agent-first programming language**: written, read, and maintained primarily by LLM agents, with humans in a review and audit role. Transpiles to readable source in host languages (C# primary, Go secondary).
 

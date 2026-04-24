@@ -7,7 +7,16 @@ It is not rationale; that lives in `DESIGN.md`. Each section here shows the
 **one canonical form** for a construct (no alternatives, no history) and the
 diagnostic you'll see if you miswrite it.
 
-Status as of commit tip: 359 tests; `overt run` executes transpiled programs
+New to Overt? Read [INTEGRATE.md](INTEGRATE.md) first: it's the 5-minute
+guide to adding Overt to an existing `.csproj`. Come back here when you're
+ready to author `.ov` code.
+
+**Version**: this document ships inside both the `Overt` and `Overt.Build`
+NuGet packages. The copy you are reading applies to the enclosing package's
+version. The copy on GitHub `main` tracks the current development tip and
+may be ahead of any published package; if in doubt, read the bundled copy.
+
+Status as of commit tip: 391 tests; `overt run` executes transpiled programs
 via in-memory Roslyn. The C# back end is primary; Go is scaffolded only.
 
 ---

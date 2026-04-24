@@ -88,6 +88,13 @@
            root README uses relative paths that don't resolve outside
            GitHub. -->
       <_OvertPackageFile Include="..\..\docs\nuget\Overt.Build.README.md" PackagePath="README.md" />
+
+      <!-- Agent-facing docs bundled so an agent discovering the package
+           offline (no GitHub access) can still find both the authoring
+           reference and the integration guide. Versioned automatically
+           by package version. -->
+      <_OvertPackageFile Include="..\..\AGENTS.md" PackagePath="AGENTS.md" />
+      <_OvertPackageFile Include="..\..\INTEGRATE.md" PackagePath="INTEGRATE.md" />
     </ItemGroup>
     <ItemGroup>
       <None Include="@(_OvertPackageFile)" Pack="true" PackagePath="%(_OvertPackageFile.PackagePath)" />

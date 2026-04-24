@@ -49,7 +49,12 @@
        specific one under docs/nuget/, not the repo-root README (which
        uses relative image and link paths that don't resolve outside
        GitHub). Both are packed at the root of the nupkg so PackageIcon
-       and PackageReadmeFile find them by filename. -->
+       and PackageReadmeFile find them by filename.
+
+       AGENTS.md and INTEGRATE.md ride along at the package root so an
+       agent discovering the package offline (no GitHub access) can
+       still find both the authoring reference and the onboarding
+       guide. They are automatically versioned by package version. -->
   <ItemGroup>
     <None Include="..\..\assets\icons\icon_128x128.png"
           Pack="true"
@@ -58,6 +63,14 @@
     <None Include="..\..\docs\nuget\Overt.README.md"
           Pack="true"
           PackagePath="README.md"
+          Visible="false" />
+    <None Include="..\..\AGENTS.md"
+          Pack="true"
+          PackagePath="AGENTS.md"
+          Visible="false" />
+    <None Include="..\..\INTEGRATE.md"
+          Pack="true"
+          PackagePath="INTEGRATE.md"
           Visible="false" />
   </ItemGroup>
 

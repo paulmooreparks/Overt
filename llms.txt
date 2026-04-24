@@ -1,0 +1,28 @@
+# Overt
+
+> Overt is an agent-first programming language. Every effect, error, dispatch, mutation, and piece of state is *overt*, visible at the call or declaration site, never concealed. Transpiles to C# (today) or Go (planned) via MSBuild integration. Designed for LLM authorship, tolerable for human auditing.
+
+Overt ships as two NuGet packages. `Overt` is a .NET global CLI tool for transpiling, running, and formatting `.ov` files. `Overt.Build` is an MSBuild task + targets package that compiles `.ov` alongside `.cs` in any SDK-style csproj. Most projects want `Overt.Build`.
+
+## Docs
+
+- [INTEGRATE.md](https://github.com/paulmooreparks/Overt/blob/main/INTEGRATE.md): 5-minute guide for adding Overt to an existing .NET project. Read first when integrating.
+- [AGENTS.md](https://github.com/paulmooreparks/Overt/blob/main/AGENTS.md): operational reference for authoring `.ov` files. Load into context when writing Overt.
+- [README.md](https://github.com/paulmooreparks/Overt/blob/main/README.md): project overview, thesis summary, quick-try.
+- [docs/why-overt.md](https://github.com/paulmooreparks/Overt/blob/main/docs/why-overt.md): the thesis essay. Why agent-first is a different design target than human-first.
+- [DESIGN.md](https://github.com/paulmooreparks/Overt/blob/main/DESIGN.md): full design document. Rationale, not reference.
+
+## Packages
+
+- [Overt on nuget.org](https://www.nuget.org/packages/Overt): .NET global tool. `dotnet tool install --global Overt --prerelease`.
+- [Overt.Build on nuget.org](https://www.nuget.org/packages/Overt.Build): MSBuild integration. `<PackageReference Include="Overt.Build" Version="0.1.0-*" />`.
+
+## Worked examples
+
+- [samples/config-validate/](https://github.com/paulmooreparks/Overt/tree/main/samples/config-validate): CLI that validates a JSON config against a refinement-typed schema. ~160 lines of Overt + ~60 lines of C# boundary code.
+- [examples/](https://github.com/paulmooreparks/Overt/tree/main/examples): one `.ov` per language feature. Useful as grep targets when you need to see what a construct looks like.
+
+## Optional
+
+- [ROLLOUT.md](https://github.com/paulmooreparks/Overt/blob/main/ROLLOUT.md): phased launch plan. Mostly of interest to contributors.
+- [docs/grammar/](https://github.com/paulmooreparks/Overt/tree/main/docs/grammar): authoritative lexical and precedence grammars.
