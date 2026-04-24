@@ -41,23 +41,23 @@ produces signal.
 
 Dependencies flow top-down: each phase's exit criteria gate the next.
 
-### Phase 1 — Foundation (repo-only, no external surface)
+### Phase 1: Foundation (repo-only, no external surface)
 
 Deliverables:
-- [ ] **Refresh `README.md`** — not a greenfield write; a tightening pass
+- [ ] **Refresh `README.md`.** Not a greenfield write; a tightening pass
   on the existing 230-line file. Concrete edits: trim the leading status
   blockquote, fix stale test count (file says 354; currently 389), drop
   the unfinished Compiler Explorer sentence, lead with the thesis instead
   of status, add a "Quick try" section near the top once the global-tool
   install path works. Target: a visitor in under a minute knows whether
   to click deeper.
-- [ ] `docs/why-overt.md` — the thesis. "Languages were designed for
-  humans; AI agents are now primary authors — what changes?" Names the
-  tradeoffs (redundant annotations, effect rows, no shadowing, explicit
-  awaits, etc.) and what each buys an agent. This is the piece a
-  curious reader will actually argue with, so it needs to be honest
-  about what's hypothesis vs. validated.
-- [ ] One real sample application under `samples/` — not an isolated
+- [ ] `docs/why-overt.md`: the thesis. "Languages were designed for
+  humans; AI agents are now primary authors, so what changes?" Names
+  the tradeoffs (redundant annotations, effect rows, no shadowing,
+  explicit awaits, etc.) and what each buys an agent. This is the
+  piece a curious reader will actually argue with, so it needs to be
+  honest about what's hypothesis vs. validated.
+- [ ] One real sample application under `samples/`. Not an isolated
   feature demo (examples/ already plays that role), but a small
   end-to-end CLI tool written in Overt. Candidates: `json-flatten`,
   `config-validate`, `log-summarize`. Pick the one most agent-friendly
@@ -69,22 +69,22 @@ Deliverables:
 
 Exit criteria: someone can land on the repo, read the README, skim
 the thesis, install `overt` globally, build the sample app, and form
-an opinion — all within 10 minutes and without reading DESIGN.md.
+an opinion, all within 10 minutes and without reading DESIGN.md.
 
-### Phase 2 — Soft-launch (low-friction public channels)
+### Phase 2: Soft-launch (low-friction public channels)
 
 Deliverables:
 - [ ] Publish `Overt.Build` to nuget.org.
 - [ ] Publish `overt` as a .NET global tool on nuget.org.
-- [ ] `docs/tutorial.md` — guided walk from hello-world through
+- [ ] `docs/tutorial.md`: guided walk from hello-world through
   records/match/refinements/FFI/async, built on the existing examples/
   corpus. Target: a reader who finished the thesis and wants to "try
   more" has a 30-minute path.
-- [ ] `docs/howto/` — 4–6 task-shaped pages, each: problem statement →
+- [ ] `docs/howto/`: 4–6 task-shaped pages, each: problem statement →
   idiomatic Overt → resulting output → where the design shows.
   Candidates: JSON roundtrip, file I/O with Result, async fetch, state
   machine, refinement validation, error-propagation chain.
-- [ ] Issue templates under `.github/ISSUE_TEMPLATE/` — bug,
+- [ ] Issue templates under `.github/ISSUE_TEMPLATE/`: bug,
   language-design feedback, "I tried to write X and got stuck."
   Low ceremony; the goal is lowering friction for the feedback loop.
 
@@ -92,7 +92,7 @@ Exit criteria: someone unfamiliar with Overt can `dotnet tool install
 -g overt`, follow the tutorial or a howto, and get a working program;
 and has a clear place to report what broke.
 
-### Phase 3 — Public awareness
+### Phase 3: Public awareness
 
 Deliverables:
 - [ ] Blog post hosting (GitHub Pages, Substack, or personal blog)
@@ -107,12 +107,12 @@ Exit criteria: the thesis lands in at least one public forum with
 enough substance that commenters can engage with it rather than just
 reacting to the tagline.
 
-### Phase 4 — Ongoing (after first wave of feedback)
+### Phase 4: Ongoing (after first wave of feedback)
 
 Deliverables (priority shaped by what Phase 3 surfaces):
-- [ ] 3-minute "what is Overt" video — for readers who bounced off the
+- [ ] 3-minute "what is Overt" video, for readers who bounced off the
   written thesis.
-- [ ] 10-minute "live code with an agent" demo — literally Claude Code
+- [ ] 10-minute "live code with an agent" demo, literally Claude Code
   or Cursor writing Overt; the most differentiating artifact if the
   agent-RWRA properties actually hold up.
 - [ ] More samples as feedback reveals patterns people actually want.
@@ -131,7 +131,7 @@ Deliverables (priority shaped by what Phase 3 surfaces):
   deferred until we know there are contributors.
 - **Feedback channel beyond issues?** GitHub Discussions is cheap and
   aligns with the "we want feedback, not commits" posture. Discord
-  feels premature — a channel with three people in it is worse than
+  feels premature; a channel with three people in it is worse than
   no channel.
 - **Version cadence?** 0.1.x bumps per feature until stability signals
   emerge. No formal SemVer commitment pre-1.0; README should say so
@@ -142,8 +142,8 @@ Deliverables (priority shaped by what Phase 3 surfaces):
 ## What this plan deliberately leaves out
 
 - MSBuild integration polish (already ships and works).
-- Feature work (the CARRYOVER "what next" list) — treated as orthogonal
+- Feature work (the CARRYOVER "what next" list), treated as orthogonal
   to rollout. Rollout can proceed with the current feature set; feature
   work continues independently based on user feedback.
-- International / non-English docs — premature.
-- A spec document — the DESIGN + AGENTS pair covers this for now.
+- International / non-English docs; premature.
+- A spec document; the DESIGN + AGENTS pair covers this for now.

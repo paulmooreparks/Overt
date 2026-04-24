@@ -1,4 +1,4 @@
-# Submitting Overt to Compiler Explorer (godbolt.org) — step by step
+# Submitting Overt to Compiler Explorer (godbolt.org): Step by Step
 
 This is the playbook for getting Overt listed on godbolt.org. It assumes you've
 never worked with Compiler Explorer before. Every step has a clear success
@@ -6,7 +6,7 @@ signal before you move to the next.
 
 ---
 
-## Stage 1 — Cut a release of Overt (≈10 minutes of your time)
+## Stage 1: Cut a release of Overt (≈10 minutes of your time)
 
 The release workflow does the actual work. You just push a tag.
 
@@ -34,7 +34,7 @@ That's it. This triggers
 1. Open <https://github.com/paulmooreparks/Overt/actions>.
 2. Find the run for your tag (named after the commit message, but you can
    spot it by the tag ref on the side).
-3. Wait for the green check — about 2–3 minutes.
+3. Wait for the green check, about 2–3 minutes.
 
 If anything goes red, click through to the logs and fix whatever it complains
 about. Then delete the tag and retry:
@@ -70,7 +70,7 @@ Once that works, the release is good. Move on.
 
 ---
 
-## Stage 2 — PR to `compiler-explorer/infra` (≈15 minutes)
+## Stage 2: PR to `compiler-explorer/infra` (≈15 minutes)
 
 This PR tells CE's build farm where to download Overt and how to lay it out
 under `/opt/compiler-explorer/`.
@@ -112,7 +112,7 @@ git push origin add-overt
 2. Click **New pull request**, then **compare across forks**.
 3. base: `compiler-explorer/infra:main`, compare: `<you>/infra:add-overt`.
 4. Title: `Add Overt`.
-5. Description — paste this, adjusting the URL and PR number:
+5. Description. Paste this, adjusting the URL and PR number:
 
    ```markdown
    Adds an install recipe for Overt, an agent-first programming language
@@ -139,7 +139,7 @@ git push origin add-overt
    Future versions append to the `targets:` list.
 
    Happy to adjust `url_pattern`, `dir_pattern`, `strip_components`, or
-   `check_exe` if any of those don't match your infra conventions — just
+   `check_exe` if any of those don't match your infra conventions; just
    let me know and I'll push an update.
    ```
 
@@ -150,17 +150,17 @@ git push origin add-overt
 ### 2.5 What happens next
 
 - A CE maintainer reviews (usually within a few days).
-- They'll comment if the recipe needs adjustments — url patterns, strip
+- They'll comment if the recipe needs adjustments: url patterns, strip
   components, check_exe paths, target format.
 - When merged, CE's automated installer will fetch the tarball and expand it
   to `/opt/compiler-explorer/overt-0.1.0-preview/` on their build farm.
 
-You can't test this part locally — it runs on CE's infrastructure. Trust the
-reviewer; most issues are fixable in one or two comment rounds.
+You can't test this part locally because it runs on CE's infrastructure.
+Trust the reviewer; most issues are fixable in one or two comment rounds.
 
 ---
 
-## Stage 3 — PR to `compiler-explorer/compiler-explorer` (≈30 minutes)
+## Stage 3: PR to `compiler-explorer/compiler-explorer` (≈30 minutes)
 
 This PR makes Overt appear in the language dropdown on godbolt.org and
 configures how the compiler is invoked.
@@ -209,7 +209,7 @@ c: {
 
 Add a new entry, alphabetically ordered, using the snippet at
 [`tooling/godbolt/config/languages-entry.ts.snippet`](config/languages-entry.ts.snippet).
-Overt sorts between `objectivec` and `pascal` alphabetically — check what's
+Overt sorts between `objectivec` and `pascal` alphabetically; check what's
 actually in the file.
 
 #### Optional but recommended: `static/modes/overt-mode.ts`
@@ -222,7 +222,7 @@ cp /path/to/Overt/tooling/godbolt/monaco/overt-mode.ts \
 Without this, the editor shows Overt source as plain text (no syntax
 highlighting). The file we staged is a complete Monaco mode definition.
 
-You may also need to register it in CE's Monaco mode loader — grep for where
+You may also need to register it in CE's Monaco mode loader; grep for where
 other languages register their modes (look for `overt` in `static/main.ts`
 or similar; pattern varies by CE internals). The maintainer will point at
 the exact spot during review if it's not obvious.
@@ -239,7 +239,7 @@ make dev        # runs a local CE instance on port 10240
 Open <http://localhost:10240>, pick Overt from the language dropdown, paste
 any example from `examples/` in this repo, select the `Overt 0.1.0-preview`
 compiler in the right pane. Even without the infra PR merged, local CE tries
-to invoke the compiler at the configured path — you can temporarily point
+to invoke the compiler at the configured path, so you can temporarily point
 `compiler.overt010preview.exe` at your locally-built `overt` binary in
 `overt.defaults.properties` to smoke-test.
 
@@ -259,11 +259,11 @@ git push origin add-overt
 1. <https://github.com/compiler-explorer/compiler-explorer/pulls> → **New**.
 2. base: `compiler-explorer/compiler-explorer:main`, compare: your branch.
 3. Title: `Add Overt language`.
-4. Description — paste this, filling in the infra PR number from stage 2:
+4. Description. Paste this, filling in the infra PR number from stage 2:
 
    ```markdown
    Adds Overt as a new language. Overt is an agent-first, transpile-to-C#
-   language — source in `.ov` files, output is C# source text (the
+   language: source in `.ov` files, output is C# source text (the
    compiler-output pane shows transpiled C#, not assembly; `supportsAsm`
    is false for now).
 
@@ -274,19 +274,19 @@ git push origin add-overt
 
    What the diff contains:
 
-   - `etc/config/overt.defaults.properties` — compiler config for the
+   - `etc/config/overt.defaults.properties`: compiler config for the
      0.1.0-preview and a `trunk` placeholder. Default flags are
      `--emit=csharp --no-color`.
-   - `examples/overt/default.ov` — the hello-world shown when a user
+   - `examples/overt/default.ov`: the hello-world shown when a user
      first lands on the language.
-   - `lib/languages.ts` — new `overt` entry, alphabetical.
-   - `static/modes/overt-mode.ts` — Monaco syntax mode.
+   - `lib/languages.ts`: new `overt` entry, alphabetical.
+   - `static/modes/overt-mode.ts`: Monaco syntax mode.
 
    Compiler behavior notes that might matter for review:
 
    - The emitted C# carries `#line` directives so runtime errors and
-     stack traces resolve to the original `.ov` file via portable PDB —
-     same mechanism F#/Razor/Blazor use.
+     stack traces resolve to the original `.ov` file via portable PDB,
+     the same mechanism F#/Razor/Blazor use.
    - Diagnostics follow `path:line:col: severity: CODE: message` with
      `help:`/`note:` follow-up lines. Codes are stable (`OV00xx` lexer,
      `OV01xx` parser, `OV02xx` resolver, `OV03xx` type checker).
@@ -295,17 +295,17 @@ git push origin add-overt
      csharp, go (go is not yet implemented and exits 1 with a clear
      message).
 
-   No logo for v0 — happy to add one if that's required or if you'd like
+   No logo for v0; happy to add one if that's required or if you'd like
    to request it as a post-merge follow-up.
    ```
 
 5. Submit. **Then immediately go back to your infra PR (stage 2.4) and
-   edit its description — replace `compiler-explorer/compiler-explorer#<NUMBER>`
+   edit its description, replacing `compiler-explorer/compiler-explorer#<NUMBER>`
    with the actual number from this PR's URL.**
 
 ### 3.6 Review loop
 
-CE reviews tend to be responsive — a few days to a week. Common review
+CE reviews tend to be responsive, a few days to a week. Common review
 comments:
 
 - **"Add a logo."** Optional. If requested, put an SVG at
@@ -318,7 +318,7 @@ comments:
 
 ---
 
-## Stage 4 — Once merged
+## Stage 4: Once merged
 
 Both PRs merged typically land on godbolt.org within 24 hours of the next CE
 deploy. The URL you'll share is:
@@ -374,5 +374,5 @@ https://.../releases/download/v{0}/overt-{0}-linux-x64.tar.xz
 ```
 
 Confirm your tag and asset names match the pattern exactly. If CE parses
-semver strictly, `preview` as a suffix may need adjustment — reviewers
+semver strictly, `preview` as a suffix may need adjustment; reviewers
 will tell you.

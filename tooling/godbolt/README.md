@@ -1,6 +1,6 @@
 # Compiler Explorer scaffolding
 
-Pre-staged files for submitting Overt to [godbolt.org](https://godbolt.org). Nothing here is live yet — these are templates that get filled in and copied into the two Compiler Explorer repos once the transpiler produces stable output.
+Pre-staged files for submitting Overt to [godbolt.org](https://godbolt.org). Nothing here is live yet; these are templates that get filled in and copied into the two Compiler Explorer repos once the transpiler produces stable output.
 
 **See [`docs/tooling/godbolt.md`](../../docs/tooling/godbolt.md) for the plan, gate items, and submission process.**
 
