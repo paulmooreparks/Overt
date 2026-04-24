@@ -112,12 +112,58 @@ public sealed class TypeChecker
             RegisterDeclarationType(decl);
         }
 
+        // Pass 1b: precompute which user-declared fns use `.await` in their body.
+        // Those fns emit as `async Task<ReturnType>` in C#, and their call-site
+        // type wraps to `Task<ReturnType>` so callers must `.await` to extract.
+        // Fns that carry `async` in their effect row for other reasons (e.g.
+        // par_map runs things concurrently but returns a sync value) are NOT in
+        // this set — their emission shape is unchanged.
+        foreach (var decl in _module.Declarations)
+        {
+            if (decl is FunctionDecl fn && BodyContainsAwait(fn.Body))
+            {
+                _asyncFunctionNames.Add(fn.Name);
+            }
+        }
+
         // Pass 2: walk each declaration's body and annotate expressions.
         foreach (var decl in _module.Declarations)
         {
             AnnotateDeclaration(decl);
         }
     }
+
+    /// <summary>Names of user-declared fns whose body contains <c>.await</c>.
+    /// Call-site type wrapping (T → Task&lt;T&gt;) fires only for these.</summary>
+    private readonly HashSet<string> _asyncFunctionNames = new(StringComparer.Ordinal);
+
+    private static bool BodyContainsAwait(Expression e) => e switch
+    {
+        AwaitExpr => true,
+        PropagateExpr pr => BodyContainsAwait(pr.Operand),
+        UnaryExpr ue => BodyContainsAwait(ue.Operand),
+        BinaryExpr be => BodyContainsAwait(be.Left) || BodyContainsAwait(be.Right),
+        CallExpr c => BodyContainsAwait(c.Callee) || c.Arguments.Any(a => BodyContainsAwait(a.Value)),
+        FieldAccessExpr fa => BodyContainsAwait(fa.Target),
+        IfExpr ie => BodyContainsAwait(ie.Condition) || BodyContainsAwait(ie.Then)
+            || (ie.Else is { } b && BodyContainsAwait(b)),
+        MatchExpr me => BodyContainsAwait(me.Scrutinee) || me.Arms.Any(a => BodyContainsAwait(a.Body)),
+        BlockExpr b => b.Statements.Any(s => s switch
+        {
+            LetStmt ls => BodyContainsAwait(ls.Initializer),
+            AssignmentStmt asn => BodyContainsAwait(asn.Value),
+            ExpressionStmt es => BodyContainsAwait(es.Expression),
+            _ => false,
+        }) || (b.TrailingExpression is { } t && BodyContainsAwait(t)),
+        TupleExpr te => te.Elements.Any(BodyContainsAwait),
+        RecordLiteralExpr rl => rl.Fields.Any(f => BodyContainsAwait(f.Value)),
+        WithExpr we => BodyContainsAwait(we.Target) || we.Updates.Any(u => BodyContainsAwait(u.Value)),
+        InterpolatedStringExpr isx => isx.Parts.OfType<StringInterpolationPart>()
+            .Any(p => BodyContainsAwait(p.Expression)),
+        ParallelExpr pe => pe.Tasks.Any(BodyContainsAwait),
+        RaceExpr re => re.Tasks.Any(BodyContainsAwait),
+        _ => false,
+    };
 
     private void RegisterDeclarationType(Declaration decl)
     {
@@ -339,6 +385,7 @@ public sealed class TypeChecker
         FieldAccessExpr fa => InferFieldAccess(fa),
         CallExpr c => InferCall(c),
         PropagateExpr pr => InferPropagate(pr),
+        AwaitExpr aw => InferAwait(aw),
         BinaryExpr be => InferBinary(be),
         UnaryExpr ue => InferUnary(ue),
 
@@ -469,6 +516,19 @@ public sealed class TypeChecker
                 CheckCallArity(c, ft);
                 CheckCallArgumentTypes(c, ft);
             }
+            // Call-site async wrap: a user-declared fn that uses `.await` in
+            // its body emits as `async Task<ReturnType>`, so the value callers
+            // see is `Task<ReturnType>`. `.await` at the call site unwraps
+            // back to ReturnType. Not triggered by `async` effect alone — stdlib
+            // fns like `par_map` carry `async` for effect-tracking but return
+            // sync values. Externs that literally return Task<T> get their
+            // Task-ness from the declared return type, not from this wrap.
+            if (c.Callee is IdentifierExpr calleeId
+                && _asyncFunctionNames.Contains(calleeId.Name)
+                && ft.Return is not NamedTypeRef { Name: "Task" })
+            {
+                return new NamedTypeRef("Task", ImmutableArray.Create<TypeRef>(ft.Return));
+            }
             return ft.Return;
         }
         return UnknownType.Instance;
@@ -525,6 +585,25 @@ public sealed class TypeChecker
         if (operandType is NamedTypeRef { Name: "Option", TypeArguments: { Length: 1 } oargs })
         {
             return oargs[0];
+        }
+        return UnknownType.Instance;
+    }
+
+    private TypeRef InferAwait(AwaitExpr aw)
+    {
+        var operandType = AnnotateExpression(aw.Operand);
+        // `t.await` on Task<T> yields T. Anything else is an error — report and
+        // fall through to Unknown so downstream inference doesn't cascade.
+        if (operandType is NamedTypeRef { Name: "Task", TypeArguments: { Length: 1 } args })
+        {
+            return args[0];
+        }
+        if (operandType is not UnknownType)
+        {
+            ReportErrorWithHelp("OV0317",
+                $"`.await` requires a `Task<T>` value; got `{operandType.Display}`",
+                aw.Span,
+                "call an async function, or bind a Task-typed value before awaiting");
         }
         return UnknownType.Instance;
     }
@@ -1359,6 +1438,11 @@ public sealed class TypeChecker
             case RaceExpr re:
                 acc.Add("async");
                 foreach (var t in re.Tasks) CollectBodyEffects(t, acc);
+                break;
+
+            case AwaitExpr aw:
+                acc.Add("async");
+                CollectBodyEffects(aw.Operand, acc);
                 break;
 
             case BlockExpr b:

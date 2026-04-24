@@ -100,6 +100,12 @@ public class StdlibTranspiledEndToEndTests
         try
         {
             var result = mainMethod.Invoke(null, null);
+            // Async main returns Task<T>; unwrap for tests that assert on IsOk.
+            if (result is System.Threading.Tasks.Task task)
+            {
+                task.GetAwaiter().GetResult();
+                result = task.GetType().GetProperty("Result")?.GetValue(task);
+            }
             return (result, sw.ToString());
         }
         finally
@@ -107,6 +113,10 @@ public class StdlibTranspiledEndToEndTests
             Console.SetOut(previousOut);
         }
     }
+
+    private static (object? Result, string Stdout) CompileAndRunAsync(
+        string ovSource, string assemblyName)
+        => CompileAndRun(ovSource, assemblyName);
 
     [Fact]
     public void Transpiled_MultiModule_AliasedImportCallsThroughAlias()
@@ -903,6 +913,32 @@ public class StdlibTranspiledEndToEndTests
         Assert.NotNull(result);
         Assert.Equal("False",
             result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
+    public void Transpiled_Async_AwaitOnTaskReturningExtern_RoundTrips()
+    {
+        // `Task.FromResult<int>(42)` produces an already-completed Task<int>.
+        // `.await` unwraps it, and the enclosing async-effect `main` gets
+        // lowered to C# `async Task<Result<Unit, IoError>>`. The test harness's
+        // runner awaits the Task before checking IsOk.
+        const string src = """
+            module async_e2e
+
+            extern "csharp" fn ready(value: Int) -> Task<Int>
+                binds "System.Threading.Tasks.Task.FromResult<int>"
+
+            fn main() !{async, io} -> Result<(), IoError> {
+                let x: Int = ready(42).await
+                println("x = ${x}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRunAsync(src, "async_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("x = 42", stdout);
     }
 
     [Fact]

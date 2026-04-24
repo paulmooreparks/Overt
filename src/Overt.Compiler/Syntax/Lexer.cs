@@ -44,6 +44,7 @@ public sealed class Lexer
             ["extern"] = TokenKind.KeywordExtern,
             ["unsafe"] = TokenKind.KeywordUnsafe,
             ["type"] = TokenKind.KeywordType,
+            ["await"] = TokenKind.KeywordAwait,
         }.ToImmutableDictionary();
 
     // Mode stack. The top frame determines how the next token is scanned.

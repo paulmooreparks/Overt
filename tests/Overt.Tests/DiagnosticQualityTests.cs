@@ -104,4 +104,32 @@ public class DiagnosticQualityTests
             + "    binds \"System.Object\"\n",
             "OV0316");
     }
+
+    [Fact]
+    public void OV0317_AwaitOnNonTask_Fires()
+    {
+        // `.await` requires a Task<T>. Here the operand is a plain Int.
+        var d = TypeCheckAndFindFirst(
+            "module m\n"
+            + "fn main() !{async, io} -> Result<(), IoError> {\n"
+            + "    let x: Int = 42.await\n"
+            + "    Ok(())\n"
+            + "}\n",
+            "OV0317");
+        var help = Assert.Single(d.Notes, n => n.Kind == DiagnosticNoteKind.Help);
+        Assert.Contains("Task", help.Text);
+    }
+
+    private static Diagnostic TypeCheckAndFindFirst(string source, string code)
+    {
+        var lex = Lexer.Lex(source);
+        var parse = Parser.Parse(lex.Tokens);
+        var resolve = NameResolver.Resolve(parse.Module);
+        var typed = TypeChecker.Check(parse.Module, resolve);
+        var all = lex.Diagnostics
+            .AddRange(parse.Diagnostics)
+            .AddRange(resolve.Diagnostics)
+            .AddRange(typed.Diagnostics);
+        return Assert.Single(all, d => d.Code == code);
+    }
 }

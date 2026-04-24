@@ -1089,6 +1089,19 @@ public sealed class Parser
                 continue;
             }
 
+            // `.await` is a postfix operator that extracts T from Task<T>. It
+            // mirrors `?` (error-propagation) in shape and is only legal inside
+            // an async-effect function; that check is the type checker's job.
+            if (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.KeywordAwait)
+            {
+                Advance(); // .
+                var awaitToken = Advance();
+                expr = new AwaitExpr(
+                    expr,
+                    new SourceSpan(expr.Span.Start, awaitToken.Span.End));
+                continue;
+            }
+
             if (Check(TokenKind.Dot) && Peek(1).Kind == TokenKind.Identifier)
             {
                 Advance(); // .

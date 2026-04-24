@@ -39,6 +39,7 @@ public enum TokenKind
     KeywordExtern,
     KeywordUnsafe,
     KeywordType,
+    KeywordAwait,
 
     // Trivia — emitted by the lexer so the formatter can preserve them.
     // Parser callers skip these via AdvancePastComments / token-navigation helpers.

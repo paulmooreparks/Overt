@@ -490,7 +490,17 @@ public sealed class CSharpEmitter
     {
         EmitEffectRowComment(fn.Effects);
         EmitLineDirective(fn.Span);
-        _w.Write("public static ");
+
+        // Functions whose body uses `.await` emit as C# `async Task<ReturnType>`.
+        // `.await` lowers to C# `await`; call sites see `Task<T>` and use
+        // `.await` to unwrap. Fns that carry `async` in their effect row for
+        // other reasons (par_map, etc.) stay sync.
+        var isAsync = BodyContainsAwaitExpr(fn.Body);
+        _w.Write(isAsync ? "public static async " : "public static ");
+        if (isAsync)
+        {
+            _w.Write("global::System.Threading.Tasks.Task<");
+        }
         if (fn.ReturnType is { } rt)
         {
             EmitType(rt);
@@ -498,6 +508,10 @@ public sealed class CSharpEmitter
         else
         {
             _w.Write("Unit");
+        }
+        if (isAsync)
+        {
+            _w.Write(">");
         }
         _w.Write($" {EscapeId(fn.Name)}");
 
@@ -902,6 +916,7 @@ public sealed class CSharpEmitter
         "Float" => "double",
         "Bool" => "bool",
         "String" => "string",
+        "Task" => "global::System.Threading.Tasks.Task",
         _ => name,
     };
 
@@ -1141,6 +1156,10 @@ public sealed class CSharpEmitter
                     Visit(pr.Operand, false);
                     break;
 
+                case AwaitExpr aw:
+                    Visit(aw.Operand, false);
+                    break;
+
                 case FieldAccessExpr fa:
                     Visit(fa.Target, false);
                     break;
@@ -1214,6 +1233,7 @@ public sealed class CSharpEmitter
         BinaryExpr { Op: BinaryOp.PipePropagate } => true,
         BinaryExpr be => ContainsPropagate(be.Left) || ContainsPropagate(be.Right),
         UnaryExpr ue => ContainsPropagate(ue.Operand),
+        AwaitExpr aw => ContainsPropagate(aw.Operand),
         CallExpr c => ContainsPropagate(c.Callee) || c.Arguments.Any(a => ContainsPropagate(a.Value)),
         FieldAccessExpr fa => ContainsPropagate(fa.Target),
         IfExpr ie => ContainsPropagate(ie.Then) || (ie.Else is { } b && ContainsPropagate(b)),
@@ -1234,6 +1254,41 @@ public sealed class CSharpEmitter
         LetStmt ls => ContainsPropagate(ls.Initializer),
         AssignmentStmt asn => ContainsPropagate(asn.Value),
         ExpressionStmt es => ContainsPropagate(es.Expression),
+        _ => false,
+    };
+
+    /// <summary>Whether a fn body contains <c>.await</c> anywhere — the signal
+    /// that its C# emission is <c>async Task&lt;T&gt;</c> rather than plain
+    /// <c>T</c>. Mirrors <see cref="ContainsPropagate"/> but for
+    /// <see cref="AwaitExpr"/>.</summary>
+    private static bool BodyContainsAwaitExpr(Expression e) => e switch
+    {
+        AwaitExpr => true,
+        PropagateExpr pr => BodyContainsAwaitExpr(pr.Operand),
+        UnaryExpr ue => BodyContainsAwaitExpr(ue.Operand),
+        BinaryExpr be => BodyContainsAwaitExpr(be.Left) || BodyContainsAwaitExpr(be.Right),
+        CallExpr c => BodyContainsAwaitExpr(c.Callee)
+            || c.Arguments.Any(a => BodyContainsAwaitExpr(a.Value)),
+        FieldAccessExpr fa => BodyContainsAwaitExpr(fa.Target),
+        IfExpr ie => BodyContainsAwaitExpr(ie.Condition) || BodyContainsAwaitExpr(ie.Then)
+            || (ie.Else is { } b && BodyContainsAwaitExpr(b)),
+        MatchExpr me => BodyContainsAwaitExpr(me.Scrutinee)
+            || me.Arms.Any(a => BodyContainsAwaitExpr(a.Body)),
+        BlockExpr b => b.Statements.Any(s => s switch
+        {
+            LetStmt ls => BodyContainsAwaitExpr(ls.Initializer),
+            AssignmentStmt asn => BodyContainsAwaitExpr(asn.Value),
+            ExpressionStmt es => BodyContainsAwaitExpr(es.Expression),
+            _ => false,
+        }) || (b.TrailingExpression is { } t && BodyContainsAwaitExpr(t)),
+        TupleExpr te => te.Elements.Any(BodyContainsAwaitExpr),
+        RecordLiteralExpr rl => rl.Fields.Any(f => BodyContainsAwaitExpr(f.Value)),
+        WithExpr we => BodyContainsAwaitExpr(we.Target)
+            || we.Updates.Any(u => BodyContainsAwaitExpr(u.Value)),
+        InterpolatedStringExpr isx => isx.Parts.OfType<StringInterpolationPart>()
+            .Any(p => BodyContainsAwaitExpr(p.Expression)),
+        ParallelExpr pe => pe.Tasks.Any(BodyContainsAwaitExpr),
+        RaceExpr re => re.Tasks.Any(BodyContainsAwaitExpr),
         _ => false,
     };
 
@@ -1409,6 +1464,12 @@ public sealed class CSharpEmitter
 
             case UnaryExpr ue:
                 CollectHoistablePropagates(ue.Operand, into);
+                break;
+
+            case AwaitExpr aw:
+                // `.await` doesn't need hoisting — C# `await` IS the hoisting —
+                // but its operand might still contain `?` sites that do.
+                CollectHoistablePropagates(aw.Operand, into);
                 break;
 
             case FieldAccessExpr fa:
@@ -1776,6 +1837,14 @@ public sealed class CSharpEmitter
                 _w.Write("(");
                 WithExpected(innerExpected, () => EmitExpression(pr.Operand));
                 _w.Write(").Unwrap()");
+                break;
+
+            case AwaitExpr aw:
+                // `t.await` → C# `(await t)`. Parentheses so the unwrapped value
+                // composes in any expression position without precedence ties.
+                _w.Write("(await ");
+                EmitExpression(aw.Operand);
+                _w.Write(")");
                 break;
 
             case BinaryExpr be:
@@ -2508,9 +2577,9 @@ public sealed class CSharpEmitter
         PrimitiveType { Name: "String" } => "string",
         PrimitiveType { Name: "Unit" } => "Unit",
         PrimitiveType p => p.Name,
-        NamedTypeRef n when n.TypeArguments.Length == 0 => n.Name,
+        NamedTypeRef n when n.TypeArguments.Length == 0 => MapTypeName(n.Name),
         NamedTypeRef n =>
-            $"{n.Name}<{string.Join(", ", n.TypeArguments.Select(CSharpTypeDisplay))}>",
+            $"{MapTypeName(n.Name)}<{string.Join(", ", n.TypeArguments.Select(CSharpTypeDisplay))}>",
         TupleTypeRef tt =>
             $"({string.Join(", ", tt.Elements.Select(CSharpTypeDisplay))})",
         TypeVarRef tv => tv.Name,

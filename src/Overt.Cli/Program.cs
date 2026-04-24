@@ -310,6 +310,15 @@ static class Cli
         try
         {
             result = mainMethod.Invoke(null, null);
+            // If `main` is async, it returns a Task<T>; unwrap to T. The async
+            // entry point is async Task<Result<...>> — we .GetAwaiter().GetResult()
+            // rather than block-via-.Result to preserve exception fidelity.
+            if (result is System.Threading.Tasks.Task task)
+            {
+                task.GetAwaiter().GetResult();
+                var taskResultProp = task.GetType().GetProperty("Result");
+                result = taskResultProp?.GetValue(task);
+            }
         }
         catch (TargetInvocationException tie)
         {
@@ -832,6 +841,7 @@ static class Cli
         ["OV0314"] = "AGENTS.md §3 (every let requires a type annotation)",
         ["OV0315"] = "AGENTS.md §11 (FFI — `extern instance fn` requires `self` first)",
         ["OV0316"] = "AGENTS.md §11 (FFI — `extern ctor fn` requires a return type)",
+        ["OV0317"] = "AGENTS.md §9 (async — `.await` requires a Task value)",
     };
 
     static int WriteDiagnostics(string path, ImmutableArray<Diagnostic> diagnostics)

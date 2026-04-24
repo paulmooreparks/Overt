@@ -525,6 +525,12 @@ public sealed record PropagateExpr(
     Expression Operand,
     SourceSpan Span) : Expression(Span);
 
+/// <summary>Postfix <c>.await</c>: extract the <c>T</c> from a <c>Task&lt;T&gt;</c>.
+/// Only legal inside a function whose effect row contains <c>async</c>.</summary>
+public sealed record AwaitExpr(
+    Expression Operand,
+    SourceSpan Span) : Expression(Span);
+
 /// <summary>A block expression: <c>{ stmt; stmt; trailingExpr? }</c>. If
 /// <see cref="TrailingExpression"/> is null the block evaluates to <c>()</c>.</summary>
 public sealed record BlockExpr(

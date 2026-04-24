@@ -401,6 +401,34 @@ stmt-lowering shape — `let x: T = consume(if cond { foo()? } else { ... })`
 evaluates the if first into a temp, the `?` propagates as a value, and
 only then calls `consume`.
 
+### .await — async at the extern boundary
+
+Overt binds to `Task<T>`-returning BCL methods (`File.ReadAllTextAsync`,
+`HttpClient.GetStringAsync`, etc.) by spelling the return type as
+`Task<T>` in the extern signature. The postfix `.await` operator extracts
+`T` from `Task<T>` — same shape as `?` for `Result<T, E>`. Functions that
+use `.await` must carry `async` in their effect row:
+
+```overt
+extern "csharp" fn read_text(path: String) -> Task<String>
+    binds "System.IO.File.ReadAllTextAsync"
+
+fn load(path: String) !{async, io} -> Result<Int, IoError> {
+    let content: String = read_text(path).await
+    Ok(length(content))
+}
+```
+
+Any fn whose body uses `.await` emits as C# `async Task<ReturnType>`;
+its callers see `Task<ReturnType>` as the call-site type and must `.await`
+to extract. Fns carrying `async` for other reasons (`par_map`, `parallel`,
+`race` — they run things concurrently but return sync values) don't trip
+this rewrite — the compiler keys off `.await` presence in the body, not
+on the effect row alone.
+
+**OV0317** fires if `.await` is applied to a non-`Task<T>` value. The
+effect row itself is checked by **OV0310** (missing effect).
+
 ---
 
 ## 10. Calls and pipes
@@ -742,6 +770,7 @@ reference. Codes are stable.
 | OV0314 | type | `let` without type annotation | add `: <Type>` after the binder |
 | OV0315 | resolve | `extern instance fn` without `self` first parameter | add `self: <Type>` as the first parameter |
 | OV0316 | resolve | `extern ctor fn` without return type | add `-> <Type>` — the constructed type |
+| OV0317 | type | `.await` on a non-`Task<T>` value | await a Task-returning expression |
 
 ---
 

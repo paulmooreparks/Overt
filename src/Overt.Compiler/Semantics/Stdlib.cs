@@ -74,6 +74,7 @@ public static class Stdlib
         e.Add(Type("CString"));
         e.Add(Type("Ptr"));
         e.Add(Type("Trace")); // stdlib namespace shape
+        e.Add(Type("Task"));  // async-boundary wrapper; see AGENTS.md §9
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>

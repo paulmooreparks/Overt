@@ -411,6 +411,10 @@ public sealed class NameResolver
                 ResolveExpression(pr.Operand, scope);
                 break;
 
+            case AwaitExpr aw:
+                ResolveExpression(aw.Operand, scope);
+                break;
+
             case BinaryExpr be:
                 ResolveExpression(be.Left, scope);
                 ResolveExpression(be.Right, scope);
