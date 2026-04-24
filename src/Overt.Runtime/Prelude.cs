@@ -259,6 +259,14 @@ public static class Prelude
     // returns the first Err (by original index) if any element fails. On empty
     // input returns Ok of the empty list. The Overt signature declares
     // !{io, async, E} — TPL satisfies async; io is over-approximated.
+    //
+    // Implementation uses Task.Run per item rather than Parallel.For. The
+    // parallel-loop scheduler's heuristics can elect to run every iteration
+    // inline on the calling thread when the work per item is small, which
+    // silently violates par_map's "genuinely concurrent" contract. Task-per-
+    // item forces enqueue onto the thread pool, so callers always observe
+    // the concurrency they asked for. Per-task overhead is cheap for the
+    // list sizes Overt programs use in practice.
     public static Result<List<U>, E> par_map<T, U, E>(List<T> list, Func<T, Result<U, E>> f)
     {
         var items = list.Items;
@@ -266,7 +274,13 @@ public static class Prelude
             return Ok(new List<U>(System.Collections.Immutable.ImmutableArray<U>.Empty));
 
         var results = new Result<U, E>[items.Length];
-        System.Threading.Tasks.Parallel.For(0, items.Length, i => results[i] = f(items[i]));
+        var tasks = new System.Threading.Tasks.Task[items.Length];
+        for (int i = 0; i < items.Length; i++)
+        {
+            int idx = i;
+            tasks[idx] = System.Threading.Tasks.Task.Run(() => results[idx] = f(items[idx]));
+        }
+        System.Threading.Tasks.Task.WaitAll(tasks);
 
         var okBuilder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(items.Length);
         for (int i = 0; i < results.Length; i++)
