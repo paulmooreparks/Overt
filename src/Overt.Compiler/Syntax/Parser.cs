@@ -1351,7 +1351,7 @@ public sealed class Parser
             case TokenKind.KeywordTrace:
                 return ParseTraceExpr();
 
-            // TODO: list literals.
+                // TODO: list literals.
         }
 
         ReportErrorWithHelp("OV0155",

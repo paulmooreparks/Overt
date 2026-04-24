@@ -653,62 +653,62 @@ public sealed class CSharpEmitter
         }
 
         var returnsResult = x.ReturnType is NamedType
-            { Name: "Result", TypeArguments.Length: 2 };
+        { Name: "Result", TypeArguments.Length: 2 };
 
         string callExpr;
         switch (x.Kind)
         {
             case ExternKind.Constructor:
-            {
-                var ctorArgs = string.Join(", ",
-                    x.Parameters.Select(p => EscapeId(p.Name)));
-                callExpr = $"new global::{x.BindsTarget}({ctorArgs})";
-                break;
-            }
+                {
+                    var ctorArgs = string.Join(", ",
+                        x.Parameters.Select(p => EscapeId(p.Name)));
+                    callExpr = $"new global::{x.BindsTarget}({ctorArgs})";
+                    break;
+                }
             case ExternKind.Instance:
-            {
-                if (x.Parameters.Length == 0)
                 {
-                    _w.WriteLine(
-                        "throw new InvalidOperationException("
-                        + "\"extern instance requires a `self` parameter\");");
-                    return;
-                }
-                var lastDot = x.BindsTarget.LastIndexOf('.');
-                if (lastDot < 1)
-                {
-                    _w.WriteLine(
-                        "throw new InvalidOperationException("
-                        + $"\"extern instance binds target '{x.BindsTarget}' must be Type.Member\");");
-                    return;
-                }
-                var typeName = x.BindsTarget[..lastDot];
-                var memberName = x.BindsTarget[(lastDot + 1)..];
-                var receiver = EscapeId(x.Parameters[0].Name);
+                    if (x.Parameters.Length == 0)
+                    {
+                        _w.WriteLine(
+                            "throw new InvalidOperationException("
+                            + "\"extern instance requires a `self` parameter\");");
+                        return;
+                    }
+                    var lastDot = x.BindsTarget.LastIndexOf('.');
+                    if (lastDot < 1)
+                    {
+                        _w.WriteLine(
+                            "throw new InvalidOperationException("
+                            + $"\"extern instance binds target '{x.BindsTarget}' must be Type.Member\");");
+                        return;
+                    }
+                    var typeName = x.BindsTarget[..lastDot];
+                    var memberName = x.BindsTarget[(lastDot + 1)..];
+                    var receiver = EscapeId(x.Parameters[0].Name);
 
-                if (x.Parameters.Length == 1
-                    && IsInstancePropertyOrField(typeName, memberName))
-                {
-                    callExpr = $"{receiver}.{memberName}";
+                    if (x.Parameters.Length == 1
+                        && IsInstancePropertyOrField(typeName, memberName))
+                    {
+                        callExpr = $"{receiver}.{memberName}";
+                    }
+                    else
+                    {
+                        var rest = string.Join(", ",
+                            x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
+                        callExpr = $"{receiver}.{memberName}({rest})";
+                    }
+                    break;
                 }
-                else
-                {
-                    var rest = string.Join(", ",
-                        x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
-                    callExpr = $"{receiver}.{memberName}({rest})";
-                }
-                break;
-            }
             default: // ExternKind.Static
-            {
-                var args = string.Join(", ",
-                    x.Parameters.Select(p => EscapeId(p.Name)));
-                var prefixedTarget = "global::" + x.BindsTarget;
-                callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
-                    ? prefixedTarget
-                    : $"{prefixedTarget}({args})";
-                break;
-            }
+                {
+                    var args = string.Join(", ",
+                        x.Parameters.Select(p => EscapeId(p.Name)));
+                    var prefixedTarget = "global::" + x.BindsTarget;
+                    callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
+                        ? prefixedTarget
+                        : $"{prefixedTarget}({args})";
+                    break;
+                }
         }
 
         if (!returnsResult)

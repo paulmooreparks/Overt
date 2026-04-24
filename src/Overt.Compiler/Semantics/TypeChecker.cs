@@ -300,7 +300,7 @@ public sealed class TypeChecker
             case TypeAliasDecl t:
                 if (t.Predicate is { } pred) AnnotateExpression(pred);
                 break;
-            // ExternDecl, RecordDecl, EnumDecl have no bodies to annotate.
+                // ExternDecl, RecordDecl, EnumDecl have no bodies to annotate.
         }
         _currentTypeParams = new HashSet<string>();
     }
@@ -1194,7 +1194,7 @@ public sealed class TypeChecker
                 }
                 break;
 
-            // WildcardPattern and PathPattern bind nothing.
+                // WildcardPattern and PathPattern bind nothing.
         }
     }
 
@@ -1532,7 +1532,7 @@ public sealed class TypeChecker
                 CollectBodyEffects(tx.Body, acc);
                 break;
 
-            // Leaf primary expressions contribute no effects.
+                // Leaf primary expressions contribute no effects.
         }
     }
 

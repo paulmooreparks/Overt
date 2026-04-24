@@ -139,7 +139,7 @@ public static class BindGenerator
             .ToList();
 
         foreach (var prop in properties) EmitProperty(sb, targetType, prop, effects, pure, knownOpaques);
-        foreach (var field in fields)   EmitField(sb, targetType, field, effects, pure, knownOpaques);
+        foreach (var field in fields) EmitField(sb, targetType, field, effects, pure, knownOpaques);
 
         // Track every name that will become a free function in this facade —
         // static methods/properties/fields AND instance methods/properties.
@@ -149,7 +149,7 @@ public static class BindGenerator
         // property `Year`) are later mangled with an `_arg` suffix.
         var topLevelNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var p in properties) topLevelNames.Add(ToSnakeCase(p.Name));
-        foreach (var f in fields)     topLevelNames.Add(ToSnakeCase(f.Name));
+        foreach (var f in fields) topLevelNames.Add(ToSnakeCase(f.Name));
 
         var methods = targetType
             .GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly)
