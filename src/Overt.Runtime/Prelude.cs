@@ -156,8 +156,64 @@ public sealed record RaceAllFailed<E>(System.Collections.Immutable.ImmutableArra
 // ------------------------------------------------------- Collection stubs
 
 /// <summary>Minimal ordered collection placeholder. Real implementation lands with the
-/// stdlib milestone; this shape is just enough to let transpiled code type-check.</summary>
+/// stdlib milestone; this shape is just enough to let transpiled code type-check.
+/// The JsonConverter attribute wires System.Text.Json (de)serialization: a JSON
+/// array maps to / from the wrapped ImmutableArray, so Overt records with List
+/// fields round-trip through JsonSerializer without any per-consumer setup.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(ListJsonConverterFactory))]
 public sealed record List<T>(System.Collections.Immutable.ImmutableArray<T> Items);
+
+/// <summary>
+/// Binds the generic List&lt;T&gt; to a per-T JsonConverter. The per-T converter
+/// defers element (de)serialization to the runtime's configured converters, so
+/// nested Overt types and user-defined converters both flow through.
+/// </summary>
+internal sealed class ListJsonConverterFactory : System.Text.Json.Serialization.JsonConverterFactory
+{
+    public override bool CanConvert(Type typeToConvert)
+        => typeToConvert.IsGenericType
+           && typeToConvert.GetGenericTypeDefinition() == typeof(List<>);
+
+    public override System.Text.Json.Serialization.JsonConverter CreateConverter(
+        Type typeToConvert,
+        System.Text.Json.JsonSerializerOptions options)
+    {
+        var elementType = typeToConvert.GetGenericArguments()[0];
+        var converterType = typeof(ListJsonConverter<>).MakeGenericType(elementType);
+        return (System.Text.Json.Serialization.JsonConverter)Activator.CreateInstance(converterType)!;
+    }
+}
+
+internal sealed class ListJsonConverter<T> : System.Text.Json.Serialization.JsonConverter<List<T>>
+{
+    public override List<T>? Read(
+        ref System.Text.Json.Utf8JsonReader reader,
+        Type typeToConvert,
+        System.Text.Json.JsonSerializerOptions options)
+    {
+        if (reader.TokenType == System.Text.Json.JsonTokenType.Null)
+        {
+            return null;
+        }
+        var arr = System.Text.Json.JsonSerializer.Deserialize<T[]>(ref reader, options);
+        return new List<T>(arr is null
+            ? System.Collections.Immutable.ImmutableArray<T>.Empty
+            : System.Collections.Immutable.ImmutableArray.Create(arr));
+    }
+
+    public override void Write(
+        System.Text.Json.Utf8JsonWriter writer,
+        List<T> value,
+        System.Text.Json.JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (var item in value.Items)
+        {
+            System.Text.Json.JsonSerializer.Serialize(writer, item, options);
+        }
+        writer.WriteEndArray();
+    }
+}
 
 /// <summary>
 /// Non-generic namespace companion to <see cref="List{T}"/>. Overt source calls

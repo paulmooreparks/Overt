@@ -919,6 +919,13 @@ public sealed class CSharpEmitter
         "Bool" => "bool",
         "String" => "string",
         "Task" => "global::System.Threading.Tasks.Task",
+        // `List` collides with `System.Collections.Generic.List<T>` whenever
+        // the consuming project has ImplicitUsings enabled (the .NET SDK
+        // default). Fully qualify so the generated code stays unambiguous
+        // regardless of the consumer's using context. Other Overt.Runtime
+        // types (Result, Option, Unit, Tuple) have no System counterpart
+        // brought in by default, so they don't need the same treatment.
+        "List" => "global::Overt.Runtime.List",
         _ => name,
     };
 
@@ -2233,12 +2240,26 @@ public sealed class CSharpEmitter
         _w.WriteLine("{");
         using (_w.Indent())
         {
+            var hasWildcard = false;
             foreach (var arm in me.Arms)
             {
+                if (arm.Pattern is WildcardPattern)
+                {
+                    hasWildcard = true;
+                }
                 EmitPatternForMatch(arm.Pattern, scrutineeType);
                 _w.Write(" => ");
                 WithExpected(expected, () => EmitExpression(arm.Body));
                 _w.WriteLine(",");
+            }
+            // Synthetic discard arm. Overt's semantic pass has already
+            // proved this match exhaustive; the arm exists so Roslyn's
+            // own exhaustiveness check (CS8509) stays silent for
+            // consumers that build with TreatWarningsAsErrors. The
+            // exception should never fire at runtime.
+            if (!hasWildcard)
+            {
+                _w.WriteLine("_ => throw new global::System.InvalidOperationException(\"Overt match: unreachable arm\"),");
             }
         }
         _w.Write("})");
