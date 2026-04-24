@@ -17,9 +17,77 @@
     <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
 
+  <!-- NuGet packaging. `dotnet pack src/Overt.Build` produces a
+       consumable .nupkg laying out the task DLL under tasks/net9.0/,
+       the runtime DLL under lib/net9.0/ (so consumers pick up
+       Overt.Runtime as a normal reference), and the .targets file
+       under build/ where NuGet auto-imports it. Version is pinned
+       here; no SemVer story yet — treat it as 0.x pre-release. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Overt.Build</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Overt contributors</Authors>
+    <Description>MSBuild integration for the Overt language: compile `.ov` files alongside `.cs` in a .csproj via OvertCompile items. Import the targets by PackageReference and drop `.ov` files into the project.</Description>
+    <PackageTags>overt;msbuild;transpiler;codegen</PackageTags>
+    <!-- Output artifacts go to NuGet-layout paths via the custom target
+         below, not the default lib/; suppress the default output-as-lib
+         behavior so we don't emit duplicates. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <DevelopmentDependency>false</DevelopmentDependency>
+    <!-- Transitive package deps would end up as package dependencies;
+         the task is self-contained (DLLs in tasks/) so suppress them. -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+  </PropertyGroup>
+
+  <!-- Package contents:
+       - build/Overt.Build.targets  → auto-imported by NuGet for every
+         project that PackageReferences Overt.Build.
+       - tasks/net9.0/*.dll          → the task assembly and the
+         transitive assemblies it loads at build time. Not referenced
+         from the consumer's Csc — the UsingTask in the targets file
+         points MSBuild at Overt.Build.dll explicitly.
+       - lib/net9.0/Overt.Runtime.dll → the consumer's generated
+         Overt code references types from Overt.Runtime, so NuGet
+         passes this through to Csc as a normal reference. -->
+  <Target Name="_OvertBuildPackContents" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <!-- Targets file — top-level build/ so NuGet auto-imports. -->
+      <_OvertPackageFile Include="Overt.Build.targets" PackagePath="build/" />
+
+      <!-- Task assembly + the Overt pipeline DLLs it loads. Collected
+           from the task project's own output to avoid hand-listing
+           transitive dependencies. Roslyn and System.* live in the
+           MSBuild host so we rely on those; any remaining custom
+           assemblies the task loads are emitted here. -->
+      <_OvertPackageFile Include="$(OutputPath)Overt.Build.dll" PackagePath="tasks/net9.0/" />
+      <_OvertPackageFile Include="$(OutputPath)Overt.Compiler.dll" PackagePath="tasks/net9.0/" />
+      <_OvertPackageFile Include="$(OutputPath)Overt.Backend.CSharp.dll" PackagePath="tasks/net9.0/" />
+
+      <!-- Consumer-side reference: generated code uses Overt.Runtime
+           types (Result<,>, Unit, List<T>, etc.), so the consumer needs
+           this on their Compile's reference list. `lib/net9.0/` is the
+           conventional NuGet slot that flows into Csc. Sourced from
+           Overt.Runtime's own build output (the ProjectReference above
+           forces that build but we don't copy the DLL across). -->
+      <_OvertPackageFile Include="..\Overt.Runtime\bin\$(Configuration)\net9.0\Overt.Runtime.dll" PackagePath="lib/net9.0/" />
+    </ItemGroup>
+    <ItemGroup>
+      <None Include="@(_OvertPackageFile)" Pack="true" PackagePath="%(_OvertPackageFile.PackagePath)" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\Overt.Compiler\Overt.Compiler.csproj" />
     <ProjectReference Include="..\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
+    <!-- Overt.Runtime is built so the pack target can include it; the
+         task itself doesn't link against Overt.Runtime, so the reference
+         only matters for its side effect of building the sibling
+         project. The pack target reads directly from Overt.Runtime's
+         own $(OutputPath) rather than copying it through here. -->
+    <ProjectReference Include="..\Overt.Runtime\Overt.Runtime.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <!-- Copy the targets file next to the built DLL so in-repo samples (and

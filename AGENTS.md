@@ -483,11 +483,12 @@ else.
 
 ## 11. Building with MSBuild (C# backend)
 
-A `.csproj` can include `.ov` files directly by importing
-`Overt.Build.targets`. Each `.ov` file transpiles to C# under
+A `.csproj` can include `.ov` files directly by pulling in the
+`Overt.Build` NuGet package. Each `.ov` file transpiles to C# under
 `obj/$(Configuration)/$(TargetFramework)/overt/<Name>.g.cs` before
 Csc runs; those files are added to `@(Compile)` so they compile in the
-same pass as hand-written C#.
+same pass as hand-written C#. `Overt.Runtime.dll` ships with the
+package and flows into the compile reference set automatically.
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -497,10 +498,8 @@ same pass as hand-written C#.
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="path/to/Overt.Runtime/Overt.Runtime.csproj" />
+    <PackageReference Include="Overt.Build" Version="0.1.0" />
   </ItemGroup>
-
-  <Import Project="path/to/Overt.Build/bin/Debug/net9.0/Overt.Build.targets" />
 </Project>
 ```
 
@@ -508,14 +507,16 @@ All `.ov` files under the project directory become `<OvertCompile>`
 items automatically; disable with
 `<EnableDefaultOvertCompileItems>false</...>` and list them by hand.
 Customize the generated-file location via `<OvertGeneratedOutputPath>`.
-A working example lives at [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 
 Compile-time diagnostics from the Overt pipeline surface as normal
 MSBuild errors/warnings with file/line/column info, so OV0314 / OV0310
 etc. appear in the IDE's error list exactly like Csc diagnostics.
 
-A real NuGet packaging story will come later; for now consumers import
-the targets file by relative path from a sibling build of `Overt.Build`.
+**Dev workflow inside this repo** (no NuGet feed, targets imported by
+path) is demonstrated in [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
+**Package consumption** (the `PackageReference` path above, through
+`dotnet pack` → local feed → `dotnet build`) is exercised by
+`OvertBuildNuGetTests` and is the shape real consumers should use.
 
 ---
 

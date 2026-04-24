@@ -28,9 +28,22 @@
     <OvertCompile Include="**\*.ov" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
   </ItemGroup>
 
+  <!-- Resolve the task DLL in two supported layouts:
+       1. In-repo dev: the task DLL is copied next to this targets file
+          via the project's build output. `$(MSBuildThisFileDirectory)Overt.Build.dll`
+          exists in that case.
+       2. NuGet package: this targets file lives at `build/Overt.Build.targets`
+          and the task DLL is at `tasks/net9.0/Overt.Build.dll`. Fall back
+          to that path.
+       -->
+  <PropertyGroup>
+    <_OvertBuildTaskDll Condition=" Exists('$(MSBuildThisFileDirectory)Overt.Build.dll') ">$(MSBuildThisFileDirectory)Overt.Build.dll</_OvertBuildTaskDll>
+    <_OvertBuildTaskDll Condition=" '$(_OvertBuildTaskDll)' == '' ">$(MSBuildThisFileDirectory)..\tasks\net9.0\Overt.Build.dll</_OvertBuildTaskDll>
+  </PropertyGroup>
+
   <UsingTask
     TaskName="Overt.Build.OvertTranspileTask"
-    AssemblyFile="$(MSBuildThisFileDirectory)Overt.Build.dll" />
+    AssemblyFile="$(_OvertBuildTaskDll)" />
 
   <!--
     Runs before CoreCompile so the Csc invocation sees the generated
