@@ -818,6 +818,40 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternCsharp_JsonRoundTripThroughUserRecord()
+    {
+        // User-defined Overt records roundtrip through JsonSerializer via the
+        // angle-bracket binds-target pattern. The Overt `User` record lowers
+        // to a C# record with matching snake_case field names; System.Text.Json
+        // binds by name and case by default, so the fields line up without
+        // extra plumbing.
+        const string src = """
+            module json_rt_e2e
+
+            record User { name: String, age: Int }
+
+            extern "csharp" fn serialize(u: User) -> String
+                binds "System.Text.Json.JsonSerializer.Serialize<User>"
+
+            extern "csharp" fn deserialize(s: String) -> User
+                binds "System.Text.Json.JsonSerializer.Deserialize<User>"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let u: User = User { name = "Alice", age = 30 }
+                let s: String = serialize(u)
+                let back: User = deserialize(s)
+                println("${back.name} ${back.age}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "json_rt_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("Alice 30", stdout);
+    }
+
+    [Fact]
     public void Transpiled_ExternCsharp_CallsBcl()
     {
         // Pure BCL static call through extern — should return the same string

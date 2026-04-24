@@ -112,6 +112,7 @@ public class CSharpEmitterTests
     [InlineData("trace.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
+    [InlineData("json.ov")]
     public void Emit_Example_ProducesCSharp(string file)
     {
         var source = File.ReadAllText(Path.Combine(ExamplesDir, file));

@@ -1,0 +1,24 @@
+module json_example
+
+// Typed JSON roundtrip through `System.Text.Json.JsonSerializer`.
+// Generic BCL methods bind by spelling the concrete type argument in the
+// binds target — the emitter passes the angle-bracket segment straight
+// through to the C# call.
+
+record User { name: String, age: Int }
+
+extern "csharp" fn serialize_user(u: User) -> String
+    binds "System.Text.Json.JsonSerializer.Serialize<User>"
+
+extern "csharp" fn parse_user(s: String) -> User
+    binds "System.Text.Json.JsonSerializer.Deserialize<User>"
+
+fn main() !{io} -> Result<(), IoError> {
+    let alice: User = User { name = "Alice", age = 30 }
+    let wire:  String = serialize_user(alice)
+    println("serialized: ${wire}")?
+
+    let back: User = parse_user(wire)
+    println("parsed: ${back.name}, age ${back.age}")?
+    Ok(())
+}

@@ -287,6 +287,7 @@ public class LexerTests
     [InlineData("ffi.ov")]
     [InlineData("hello.ov")]
     [InlineData("inference.ov")]
+    [InlineData("json.ov")]
     [InlineData("mutation.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("race.ov")]

@@ -32,6 +32,17 @@ public class CSharpCompileCheckTests
         // code references it directly.
         var runtimeAssembly = typeof(Overt.Runtime.Unit).Assembly;
 
+        // Force-load BCL assemblies that examples may extern into (JSON, Http,
+        // Regex, generic collections). They don't get pulled into the AppDomain
+        // automatically just because the test binary runs.
+        _ = new Type[]
+        {
+            typeof(System.Net.Http.HttpClient),
+            typeof(System.Text.Json.JsonSerializer),
+            typeof(System.Text.RegularExpressions.Regex),
+            typeof(System.Collections.Generic.Dictionary<,>),
+        };
+
         var refs = ImmutableArray.CreateBuilder<MetadataReference>();
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
@@ -114,6 +125,7 @@ public class CSharpCompileCheckTests
     [InlineData("refinement.ov")]
     [InlineData("trace.ov")]
     [InlineData("arith_eval.ov")]
+    [InlineData("json.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);
