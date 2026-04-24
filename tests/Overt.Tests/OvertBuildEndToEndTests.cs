@@ -89,6 +89,13 @@ public class OvertBuildEndToEndTests
         Assert.Contains(expectedInStderr, stderr);
     }
 
+    // Cap any single shell-out at two minutes. These tests drive dotnet
+    // build/run, so a couple of seconds is normal; anything past a minute
+    // means something is wedged. The timeout keeps a broken test from
+    // burning a CI hour and gives a clear failure message instead of a
+    // hang.
+    private static readonly TimeSpan s_processTimeout = TimeSpan.FromMinutes(2);
+
     private static (int Code, string Stdout, string Stderr) Run(
         string fileName, string args, string workingDir)
     {
@@ -100,10 +107,34 @@ public class OvertBuildEndToEndTests
             UseShellExecute = false,
         };
         using var p = Process.Start(psi)!;
-        var stdout = p.StandardOutput.ReadToEnd();
-        var stderr = p.StandardError.ReadToEnd();
-        p.WaitForExit();
-        return (p.ExitCode, stdout, stderr);
+
+        // Drain stdout and stderr concurrently. Reading one to EOF before
+        // the other starts deadlocks when the unread pipe fills: child
+        // blocks writing, the read we're waiting on never sees EOF,
+        // everyone stays stuck. MsbuildSmoke's output is tiny so it never
+        // hit this; ConfigValidate's four-fixture run plus dotnet build
+        // chatter is big enough to fill a pipe buffer and freeze CI.
+        var stdoutTask = p.StandardOutput.ReadToEndAsync();
+        var stderrTask = p.StandardError.ReadToEndAsync();
+
+        // Wait for both streams to reach EOF before WaitForExit, per the
+        // documented pattern: EOF means the child has no more output, so
+        // exit-on-WaitForExit is safe to follow.
+        if (!Task.WaitAll(new Task[] { stdoutTask, stderrTask }, s_processTimeout))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            throw new Xunit.Sdk.XunitException(
+                $"`{fileName} {args}` (cwd={workingDir}) did not produce EOF on both streams within {s_processTimeout.TotalSeconds:0}s; killed.");
+        }
+
+        if (!p.WaitForExit((int)s_processTimeout.TotalMilliseconds))
+        {
+            try { p.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            throw new Xunit.Sdk.XunitException(
+                $"`{fileName} {args}` (cwd={workingDir}) exited-waited past {s_processTimeout.TotalSeconds:0}s; killed.");
+        }
+
+        return (p.ExitCode, stdoutTask.Result, stderrTask.Result);
     }
 
     private static void RunOrThrow(string fileName, string args, string workingDir)
