@@ -1,0 +1,63 @@
+# Continuous integration: build, test, and style-check on every push
+# and pull request targeting main.
+#
+# This workflow does not produce release artifacts; that is release.yml's
+# job. CI is fast and runs on Linux only. Release builds are slower and
+# exercise the packaging + publish pipeline.
+#
+# What this proves on green:
+#   - Every project compiles (dotnet build Overt.sln -c Release)
+#   - All xUnit tests pass (dotnet test)
+#   - The source tree is `dotnet format`-clean (whitespace + style)
+#
+# The same SDK pin from global.json is honored via actions/setup-dotnet's
+# global.json-aware resolution.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test, format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Overt.sln
+
+      - name: Build
+        run: dotnet build Overt.sln --configuration Release --no-restore --nologo
+
+      # Serializes the shell-out tests that hit the NuGet global cache
+      # (OvertBuildNuGet, OvertCliTool, OvertBuildEndToEnd). They live
+      # in the `dotnet-cli-serial` xunit Collection; the default runner
+      # parallelism still applies to every other test.
+      - name: Test
+        run: dotnet test Overt.sln --configuration Release --no-build --nologo
+
+      # Whitespace gate. `dotnet format whitespace --verify-no-changes`
+      # exits non-zero if indentation, line endings, or trailing spaces
+      # need rewriting. Contributors fix locally with `dotnet format
+      # whitespace`. The `style` and `analyzers` subcommands flag
+      # opinionated refactors (collection expressions, static readonly
+      # arrays); we don't gate on those. Keep this after tests so a
+      # format miss doesn't mask a real failure.
+      - name: Verify whitespace formatting
+        run: dotnet format whitespace Overt.sln --verify-no-changes --no-restore

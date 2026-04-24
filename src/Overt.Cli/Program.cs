@@ -51,7 +51,15 @@ return Cli.Run(args);
 
 static class Cli
 {
-    const string Version = "overt 0.1.0-dev";
+    // Reads AssemblyInformationalVersionAttribute from the CLI assembly
+    // itself, so `overt --version` tracks whatever `dotnet pack` stamped
+    // into the package (e.g. "0.1.0-local.3" or "0.1.0-dev.42"). The
+    // attribute is always present on SDK-built assemblies; the fallback
+    // is a defensive "unknown" string.
+    static readonly string Version =
+        "overt " + (typeof(Cli).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? "unknown");
 
     const string Usage =
         """

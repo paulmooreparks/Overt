@@ -18,3 +18,11 @@ Thumbs.db
 
 # Claude Code local
 .claude/settings.local.json
+
+# Packaging output produced by scripts/publish-channel.*
+dist/
+
+# Local-only env file used by scripts/publish-channel.* (the
+# *-build-counter files are tracked; this is for any per-machine
+# overrides like OVERT_PUBLISH_SKIP_INSTALL).
+scripts/publish.env

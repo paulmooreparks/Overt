@@ -1,51 +1,193 @@
-name: release
-
-# Builds a Linux x64 self-contained `overt` binary and attaches it to a GitHub
-# Release whenever a `v*` tag is pushed. The produced tarball is what Compiler
-# Explorer's infra recipe (tooling/godbolt/infra/overt.yaml) downloads.
+# Build the Overt and Overt.Build NuGet packages, a Linux self-contained
+# overt tarball for Compiler Explorer, and attach everything to a GitHub
+# Release whenever a `v*` tag is pushed.
 #
-# How to cut a release:
-#   1. Bump whatever version metadata is stored in-repo (none today; see docs
-#      for when that changes).
-#   2. git tag v0.1.0 && git push origin v0.1.0
-#   3. Watch this workflow run; verify the GitHub Release lands with the
-#      overt-<version>-linux-x64.tar.xz asset.
-#   4. If anything fails, delete the tag and the draft release, fix, retag.
+# Triggers:
+#   - Push of a `v*` tag: use the tag as-is. Tag shape decides the channel:
+#       v0.1.0-dev.N   -> dev channel    (pushed to nuget.org, --prerelease)
+#       v0.1.0-beta.N  -> beta channel   (pushed to nuget.org, --prerelease)
+#       v0.1.0         -> stable channel (pushed to nuget.org, plain)
+#   - workflow_dispatch: compute the next dev-counter for the current
+#     MAJOR.MINOR (from VERSION) by scanning existing tags, reserve it
+#     atomically on the remote, then build that tag.
+#   - workflow_call with a `tag` input: the caller (promote.yml) has
+#     already created and pushed the tag; just build it.
+#
+# Credentials:
+#   - NUGET_API_KEY secret: required to push to nuget.org. Configure in
+#     repository settings. Without it, the nuget.org push step fails.
+#   - GITHUB_TOKEN: auto-provided; used for the GitHub Packages push and
+#     the GitHub Release creation.
+
+name: release
 
 on:
   push:
     tags:
       - 'v*'
 
+  workflow_dispatch: {}
+
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to build (e.g. v0.1.0-beta.1). Must already exist on the remote."
+        required: true
+        type: string
+
 permissions:
-  contents: write     # needed to create GitHub Releases + upload artifacts
+  contents: write   # create GitHub Releases and upload assets
+  packages: write   # push Overt and Overt.Build to GitHub Packages
 
 jobs:
-  build-linux:
+  # Resolve the tag once and reserve it on the remote. Three entry
+  # shapes converge here:
+  #
+  #   - workflow_call with tag: caller already created the tag.
+  #   - push of v*: use github.ref_name.
+  #   - workflow_dispatch: scan existing tags for vMAJOR.MINOR.0-dev.N,
+  #     pick the next N, create the tag on the remote. Using createRef
+  #     eliminates the "two concurrent dispatches compute the same N"
+  #     race (the second createRef fails with 422).
+  compute-version:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      channel: ${{ steps.version.outputs.channel }}
+      build_number: ${{ steps.version.outputs.build_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup .NET 9
+      - name: Compute and reserve tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+            echo "Using caller-supplied tag: $TAG"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+            echo "Using pushed tag: $TAG"
+          else
+            # workflow_dispatch: compute next dev counter
+            BASE=$(tr -d '[:space:]' < VERSION)
+            PATTERN="^v${BASE}\.0-dev\.[0-9]+$"
+            HIGHEST=$(gh api "repos/$REPO/git/matching-refs/tags/v${BASE}.0-dev." --jq '.[].ref' \
+              | sed 's|refs/tags/||' \
+              | grep -E "$PATTERN" \
+              | sed -E "s|^v${BASE}\.0-dev\.||" \
+              | sort -n | tail -1)
+            N=$((${HIGHEST:-0} + 1))
+            TAG="v${BASE}.0-dev.${N}"
+            echo "Computed next dev tag: $TAG"
+            SHA=$(git rev-parse HEAD)
+            gh api -X POST "repos/$REPO/git/refs" \
+              -f ref="refs/tags/$TAG" \
+              -f sha="$SHA"
+            echo "Reserved $TAG at $SHA"
+          fi
+
+          # Decide channel + build number from tag shape.
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-dev\.([0-9]+)$ ]]; then
+            CHANNEL="dev"
+            BUILD_NUMBER="${BASH_REMATCH[1]}"
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.([0-9]+)$ ]]; then
+            CHANNEL="beta"
+            BUILD_NUMBER="${BASH_REMATCH[1]}"
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            CHANNEL="stable"
+            BUILD_NUMBER="0"
+          else
+            echo "::error::Tag '$TAG' does not match a known channel shape"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=$TAG channel=$CHANNEL build_number=$BUILD_NUMBER"
+
+  build:
+    needs: compute-version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.compute-version.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          global-json-file: global.json
 
-      - name: Compute version
+      - name: Derive NuGet version and FileVersion
         id: ver
         run: |
-          # Strip the `v` prefix: refs/tags/v0.1.0-preview -> 0.1.0-preview
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          TAG="${{ needs.compute-version.outputs.tag }}"
+          CHANNEL="${{ needs.compute-version.outputs.channel }}"
+          BUILD="${{ needs.compute-version.outputs.build_number }}"
+          # NuGet version is the tag without the leading 'v'.
+          NUGET_VERSION="${TAG#v}"
+          # VersionPrefix (MAJOR.MINOR.PATCH) and optional suffix.
+          if [[ "$NUGET_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-(.+))?$ ]]; then
+            BASE="${BASH_REMATCH[1]}"
+            SUFFIX="${BASH_REMATCH[3]}"
+          else
+            echo "::error::Cannot parse NuGet version '$NUGET_VERSION'"
+            exit 1
+          fi
+          # FileVersion mirrors VersionPrefix with the channel build
+          # number as the fourth field, matching the local publish
+          # script's convention.
+          FILE_VERSION="${BASE}.${BUILD}"
+          echo "nuget_version=$NUGET_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_prefix=$BASE" >> "$GITHUB_OUTPUT"
+          echo "version_suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+          echo "file_version=$FILE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${SUFFIX:+true}" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "Resolved: NuGet $NUGET_VERSION, FileVersion $FILE_VERSION"
 
       - name: Restore
         run: dotnet restore Overt.sln
 
-      - name: Test
-        run: dotnet test Overt.sln --configuration Release --nologo
+      - name: Build
+        run: |
+          dotnet build Overt.sln \
+            --configuration Release \
+            --no-restore --nologo \
+            -p:FileVersion=${{ steps.ver.outputs.file_version }}
 
-      - name: Publish overt (linux-x64, self-contained)
+      - name: Test
+        run: dotnet test Overt.sln --configuration Release --no-build --nologo
+
+      - name: Pack Overt and Overt.Build
+        run: |
+          SUFFIX_ARG=""
+          if [ -n "${{ steps.ver.outputs.version_suffix }}" ]; then
+            SUFFIX_ARG="--version-suffix ${{ steps.ver.outputs.version_suffix }}"
+          fi
+          for proj in src/Overt.Cli/Overt.Cli.csproj src/Overt.Build/Overt.Build.csproj; do
+            dotnet pack "$proj" \
+              --configuration Release \
+              --no-build \
+              --output dist \
+              $SUFFIX_ARG \
+              -p:FileVersion=${{ steps.ver.outputs.file_version }}
+          done
+          ls -la dist/
+
+      - name: Publish overt (linux-x64, self-contained) for Compiler Explorer
         run: |
           dotnet publish src/Overt.Cli/Overt.Cli.csproj \
             --configuration Release \
@@ -53,19 +195,21 @@ jobs:
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:FileVersion=${{ steps.ver.outputs.file_version }} \
             --output publish/bin
 
-      - name: Publish Overt.Runtime (linux-x64 DLL for consumers who compile the emitted C#)
+      - name: Publish Overt.Runtime (linux-x64 DLL)
         run: |
           dotnet publish src/Overt.Runtime/Overt.Runtime.csproj \
             --configuration Release \
             --runtime linux-x64 \
             --self-contained false \
+            -p:FileVersion=${{ steps.ver.outputs.file_version }} \
             --output publish/runtime
 
-      - name: Stage release tree
+      - name: Stage Compiler Explorer tarball
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"
+          VERSION="${{ steps.ver.outputs.nuget_version }}"
           DIR="overt-${VERSION}"
           mkdir -p "${DIR}/bin" "${DIR}/runtime"
           cp publish/bin/overt "${DIR}/bin/overt"
@@ -74,20 +218,46 @@ jobs:
           cp LICENSE "${DIR}/"
           cp README.md "${DIR}/"
           echo "${VERSION}" > "${DIR}/VERSION"
-          # Quick smoke test on the actual binary we're about to ship.
           "./${DIR}/bin/overt" --version
-          ls -la "${DIR}"
+          tar -cJf "dist/overt-${VERSION}-linux-x64.tar.xz" "${DIR}"
+          ls -la dist/
 
-      - name: Create tarball
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"
-          tar -cJf "overt-${VERSION}-linux-x64.tar.xz" "overt-${VERSION}"
-          ls -la overt-*.tar.xz
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY secret is not configured"
+            exit 1
+          fi
+          for pkg in dist/Overt.${{ steps.ver.outputs.nuget_version }}.nupkg \
+                     dist/Overt.Build.${{ steps.ver.outputs.nuget_version }}.nupkg; do
+            echo "Pushing $pkg"
+            dotnet nuget push "$pkg" \
+              --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json \
+              --skip-duplicate
+          done
+
+      - name: Push to GitHub Packages
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          for pkg in dist/Overt.${{ steps.ver.outputs.nuget_version }}.nupkg \
+                     dist/Overt.Build.${{ steps.ver.outputs.nuget_version }}.nupkg; do
+            echo "Pushing $pkg to GitHub Packages"
+            dotnet nuget push "$pkg" \
+              --api-key "${{ secrets.GITHUB_TOKEN }}" \
+              --source "https://nuget.pkg.github.com/${OWNER}/index.json" \
+              --skip-duplicate
+          done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: overt-*-linux-x64.tar.xz
+          tag_name: ${{ steps.ver.outputs.tag }}
           generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+          prerelease: ${{ steps.ver.outputs.is_prerelease == 'true' }}
+          files: |
+            dist/Overt.${{ steps.ver.outputs.nuget_version }}.nupkg
+            dist/Overt.Build.${{ steps.ver.outputs.nuget_version }}.nupkg
+            dist/overt-${{ steps.ver.outputs.nuget_version }}-linux-x64.tar.xz

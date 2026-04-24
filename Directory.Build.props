@@ -11,4 +11,38 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <NeutralLanguage>en-US</NeutralLanguage>
   </PropertyGroup>
+
+  <!-- Single source of truth for package versions. The repo-root VERSION
+       file holds MAJOR.MINOR (e.g. "0.1"); the PATCH slot is always ".0"
+       because every release channel (dev, beta, stable, local) disambiguates
+       via the prerelease suffix passed to `dotnet pack` (the `version-suffix`
+       argument).
+       Bump VERSION to cut a new MINOR. See scripts/publish-channel.ps1 and
+       the release workflow for how the suffix is computed per channel. -->
+  <PropertyGroup>
+    <OvertVersionFile>$(MSBuildThisFileDirectory)VERSION</OvertVersionFile>
+    <OvertVersionBase Condition="Exists('$(OvertVersionFile)')">$([System.IO.File]::ReadAllText('$(OvertVersionFile)').Trim())</OvertVersionBase>
+    <VersionPrefix Condition="'$(OvertVersionBase)' != ''">$(OvertVersionBase).0</VersionPrefix>
+  </PropertyGroup>
+
+  <!-- Assembly-level metadata stamped on every DLL and EXE in the repo.
+       AssemblyVersion stays at MAJOR.MINOR.0.0 so consumers binding
+       against a specific Overt.Runtime don't have to rebind across
+       patch/prerelease bumps. FileVersion mirrors VersionPrefix by
+       default (MAJOR.MINOR.0.0); publish-channel and the release
+       workflow override it with `-p:FileVersion=MAJOR.MINOR.0.BUILD`
+       so the counter is visible in Explorer's File Version column.
+       InformationalVersion composes VersionPrefix + VersionSuffix, so
+       it carries the full prerelease string (e.g. "0.1.0-local.3").
+       IncludeSourceRevisionInInformationalVersion is off because we
+       want the CLI banner to stay clean; git SHA belongs in logs, not
+       the version string. -->
+  <PropertyGroup>
+    <Product>Overt</Product>
+    <Company>Overt contributors</Company>
+    <Copyright>Copyright (c) Overt contributors</Copyright>
+    <AssemblyVersion Condition="'$(OvertVersionBase)' != ''">$(OvertVersionBase).0.0</AssemblyVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
 </Project>

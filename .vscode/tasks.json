@@ -2,6 +2,29 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "publish-local",
+      "detail": "Pack Overt + Overt.Build on the local channel and reinstall the global tool. Ctrl-Shift-B.",
+      "type": "process",
+      "command": "pwsh",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/publish-channel.ps1"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
       "label": "build",
       "type": "process",
       "command": "dotnet",
@@ -10,10 +33,7 @@
         "${workspaceFolder}/Overt.sln",
         "/consoleloggerparameters:NoSummary;ForceNoAlign"
       ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
+      "group": "build",
       "presentation": {
         "reveal": "silent",
         "revealProblems": "onProblem",
