@@ -1,4 +1,3 @@
-<img src="assets/artwork/mascot.png" alt="Overt mascot" align="right" width="180">
 
 # Overt
 
