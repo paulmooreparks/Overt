@@ -87,39 +87,99 @@ extern "csharp" fn unescape_data_string(string_to_unescape: String) !{io, fails}
     binds "System.Uri.UnescapeDataString"
 
 // skipped System.Uri.UnescapeDataString: parameter 'charsToUnescape' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn new_string(uri_string: String) -> Uri
-    binds "System.Uri..ctor"
+extern "csharp" ctor fn new_string(uri_string: String) -> Uri
+    binds "System.Uri"
 
-extern "csharp" fn new_string_bool(uri_string: String, dont_escape: Bool) -> Uri
-    binds "System.Uri..ctor"
+extern "csharp" ctor fn new_string_bool(uri_string: String, dont_escape: Bool) -> Uri
+    binds "System.Uri"
 
-extern "csharp" fn new_uri_string(base_uri: Uri, relative_uri: String) -> Uri
-    binds "System.Uri..ctor"
+extern "csharp" ctor fn new_uri_string(base_uri: Uri, relative_uri: String) -> Uri
+    binds "System.Uri"
 
-extern "csharp" fn new_uri_uri(base_uri: Uri, relative_uri: Uri) -> Uri
-    binds "System.Uri..ctor"
+extern "csharp" ctor fn new_uri_uri(base_uri: Uri, relative_uri: Uri) -> Uri
+    binds "System.Uri"
 
-extern "csharp" fn new_uri_string_bool(base_uri: Uri, relative_uri: String, dont_escape: Bool) -> Uri
-    binds "System.Uri..ctor"
+extern "csharp" ctor fn new_uri_string_bool(base_uri: Uri, relative_uri: String, dont_escape: Bool) -> Uri
+    binds "System.Uri"
 
-extern "csharp" fn equals(self: Uri, other: Uri) !{io, fails} -> Result<Bool, IoError>
-    binds "System.Uri::Equals"
+extern "csharp" instance fn absolute_path(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.AbsolutePath"
 
-extern "csharp" fn get_hash_code(self: Uri) !{io, fails} -> Result<Int, IoError>
-    binds "System.Uri::GetHashCode"
+extern "csharp" instance fn absolute_uri(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.AbsoluteUri"
 
-extern "csharp" fn is_base_of(self: Uri, uri: Uri) !{io, fails} -> Result<Bool, IoError>
-    binds "System.Uri::IsBaseOf"
+extern "csharp" instance fn authority(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.Authority"
 
-extern "csharp" fn is_well_formed_original_string(self: Uri) !{io, fails} -> Result<Bool, IoError>
-    binds "System.Uri::IsWellFormedOriginalString"
+extern "csharp" instance fn dns_safe_host(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.DnsSafeHost"
 
-extern "csharp" fn make_relative(self: Uri, to_uri: Uri) !{io, fails} -> Result<String, IoError>
-    binds "System.Uri::MakeRelative"
+extern "csharp" instance fn fragment(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.Fragment"
 
-extern "csharp" fn make_relative_uri(self: Uri, uri: Uri) !{io, fails} -> Result<Uri, IoError>
-    binds "System.Uri::MakeRelativeUri"
+extern "csharp" instance fn host(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.Host"
 
-extern "csharp" fn to_string(self: Uri) !{io, fails} -> Result<String, IoError>
-    binds "System.Uri::ToString"
+extern "csharp" instance fn idn_host(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.IdnHost"
+
+extern "csharp" instance fn is_absolute_uri(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsAbsoluteUri"
+
+extern "csharp" instance fn is_default_port(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsDefaultPort"
+
+extern "csharp" instance fn is_file(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsFile"
+
+extern "csharp" instance fn is_loopback(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsLoopback"
+
+extern "csharp" instance fn is_unc(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsUnc"
+
+extern "csharp" instance fn local_path(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.LocalPath"
+
+extern "csharp" instance fn original_string(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.OriginalString"
+
+extern "csharp" instance fn path_and_query(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.PathAndQuery"
+
+extern "csharp" instance fn port(self: Uri) !{io, fails} -> Result<Int, IoError>
+    binds "System.Uri.Port"
+
+extern "csharp" instance fn query(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.Query"
+
+extern "csharp" instance fn scheme(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.Scheme"
+
+extern "csharp" instance fn user_escaped(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.UserEscaped"
+
+extern "csharp" instance fn user_info(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.UserInfo"
+
+extern "csharp" instance fn equals(self: Uri, other: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.Equals"
+
+extern "csharp" instance fn get_hash_code(self: Uri) !{io, fails} -> Result<Int, IoError>
+    binds "System.Uri.GetHashCode"
+
+extern "csharp" instance fn is_base_of(self: Uri, uri: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsBaseOf"
+
+extern "csharp" instance fn is_well_formed_original_string(self: Uri) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Uri.IsWellFormedOriginalString"
+
+extern "csharp" instance fn make_relative(self: Uri, to_uri: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.MakeRelative"
+
+extern "csharp" instance fn make_relative_uri(self: Uri, uri: Uri) !{io, fails} -> Result<Uri, IoError>
+    binds "System.Uri.MakeRelativeUri"
+
+extern "csharp" instance fn to_string(self: Uri) !{io, fails} -> Result<String, IoError>
+    binds "System.Uri.ToString"
 

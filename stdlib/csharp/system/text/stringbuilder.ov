@@ -6,93 +6,108 @@ module stdlib.csharp.system.text.stringbuilder
 
 extern "csharp" type StringBuilder binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_() -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_() -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_int(capacity: Int) -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_int(capacity_arg: Int) -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_string(value: String) -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_string(value: String) -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_string_int(value: String, capacity: Int) -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_string_int(value: String, capacity_arg: Int) -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_int_int(capacity: Int, max_capacity: Int) -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_int_int(capacity_arg: Int, max_capacity_arg: Int) -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn new_string_int_int_int(value: String, start_index: Int, length: Int, capacity: Int) -> StringBuilder
-    binds "System.Text.StringBuilder..ctor"
+extern "csharp" ctor fn new_string_int_int_int(value: String, start_index: Int, length_arg: Int, capacity_arg: Int) -> StringBuilder
+    binds "System.Text.StringBuilder"
 
-extern "csharp" fn append_string(self: StringBuilder, value: String) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn capacity(self: StringBuilder) !{io, fails} -> Result<Int, IoError>
+    binds "System.Text.StringBuilder.Capacity"
 
-extern "csharp" fn append_string_builder(self: StringBuilder, value: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn length(self: StringBuilder) !{io, fails} -> Result<Int, IoError>
+    binds "System.Text.StringBuilder.Length"
 
-extern "csharp" fn append_bool(self: StringBuilder, value: Bool) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn max_capacity(self: StringBuilder) !{io, fails} -> Result<Int, IoError>
+    binds "System.Text.StringBuilder.MaxCapacity"
 
-extern "csharp" fn append_int(self: StringBuilder, value: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn append_string(self: StringBuilder, value: String) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_float(self: StringBuilder, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn append_string_builder(self: StringBuilder, value: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_double(self: StringBuilder, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn append_bool(self: StringBuilder, value: Bool) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_string_int_int(self: StringBuilder, value: String, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn append_int(self: StringBuilder, value: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_string_builder_int_int(self: StringBuilder, value: StringBuilder, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Append"
+extern "csharp" instance fn append_long(self: StringBuilder, value: Int64) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_line(self: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::AppendLine"
+extern "csharp" instance fn append_float(self: StringBuilder, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn append_line_string(self: StringBuilder, value: String) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::AppendLine"
+extern "csharp" instance fn append_double(self: StringBuilder, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn clear(self: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Clear"
+extern "csharp" instance fn append_string_int_int(self: StringBuilder, value: String, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn ensure_capacity(self: StringBuilder, capacity: Int) !{io, fails} -> Result<Int, IoError>
-    binds "System.Text.StringBuilder::EnsureCapacity"
+extern "csharp" instance fn append_string_builder_int_int(self: StringBuilder, value: StringBuilder, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Append"
 
-extern "csharp" fn equals(self: StringBuilder, sb: StringBuilder) !{io, fails} -> Result<Bool, IoError>
-    binds "System.Text.StringBuilder::Equals"
+extern "csharp" instance fn append_line(self: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.AppendLine"
 
-extern "csharp" fn insert_int_string(self: StringBuilder, index: Int, value: String) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn append_line_string(self: StringBuilder, value: String) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.AppendLine"
 
-extern "csharp" fn insert_int_bool(self: StringBuilder, index: Int, value: Bool) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn clear(self: StringBuilder) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Clear"
 
-extern "csharp" fn insert_int_int(self: StringBuilder, index: Int, value: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn ensure_capacity(self: StringBuilder, capacity_arg: Int) !{io, fails} -> Result<Int, IoError>
+    binds "System.Text.StringBuilder.EnsureCapacity"
 
-extern "csharp" fn insert_int_float(self: StringBuilder, index: Int, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn equals(self: StringBuilder, sb: StringBuilder) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Text.StringBuilder.Equals"
 
-extern "csharp" fn insert_int_double(self: StringBuilder, index: Int, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn insert_int_string(self: StringBuilder, index: Int, value: String) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn insert_int_string_int(self: StringBuilder, index: Int, value: String, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Insert"
+extern "csharp" instance fn insert_int_bool(self: StringBuilder, index: Int, value: Bool) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn remove(self: StringBuilder, start_index: Int, length: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Remove"
+extern "csharp" instance fn insert_int_int(self: StringBuilder, index: Int, value: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn replace_string_string(self: StringBuilder, old_value: String, new_value: String) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Replace"
+extern "csharp" instance fn insert_int_long(self: StringBuilder, index: Int, value: Int64) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn replace_string_string_int_int(self: StringBuilder, old_value: String, new_value: String, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
-    binds "System.Text.StringBuilder::Replace"
+extern "csharp" instance fn insert_int_float(self: StringBuilder, index: Int, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn to_string(self: StringBuilder) !{io, fails} -> Result<String, IoError>
-    binds "System.Text.StringBuilder::ToString"
+extern "csharp" instance fn insert_int_double(self: StringBuilder, index: Int, value: Float) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
 
-extern "csharp" fn to_string_int_int(self: StringBuilder, start_index: Int, length: Int) !{io, fails} -> Result<String, IoError>
-    binds "System.Text.StringBuilder::ToString"
+extern "csharp" instance fn insert_int_string_int(self: StringBuilder, index: Int, value: String, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Insert"
+
+extern "csharp" instance fn remove(self: StringBuilder, start_index: Int, length_arg: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Remove"
+
+extern "csharp" instance fn replace_string_string(self: StringBuilder, old_value: String, new_value: String) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Replace"
+
+extern "csharp" instance fn replace_string_string_int_int(self: StringBuilder, old_value: String, new_value: String, start_index: Int, count: Int) !{io, fails} -> Result<StringBuilder, IoError>
+    binds "System.Text.StringBuilder.Replace"
+
+extern "csharp" instance fn to_string(self: StringBuilder) !{io, fails} -> Result<String, IoError>
+    binds "System.Text.StringBuilder.ToString"
+
+extern "csharp" instance fn to_string_int_int(self: StringBuilder, start_index: Int, length_arg: Int) !{io, fails} -> Result<String, IoError>
+    binds "System.Text.StringBuilder.ToString"
 

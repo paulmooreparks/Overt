@@ -90,6 +90,28 @@ public sealed record ExternTypeDecl(
     string BindsTarget,
     SourceSpan Span) : Declaration(Span);
 
+/// <summary>
+/// Shape of a host-language binding. The source form <c>extern "csharp" fn
+/// ...</c> defaults to <see cref="Static"/>; adding <c>instance</c> or
+/// <c>ctor</c> between the platform string and <c>fn</c> selects the other
+/// shapes. The emitter uses this to decide the call form (bare vs.
+/// receiver-call vs. <c>new</c>).
+/// </summary>
+public enum ExternKind
+{
+    /// <summary>Static method / property / field. Binds target is the full
+    /// dotted host symbol (e.g. <c>System.IO.Path.Combine</c>).</summary>
+    Static,
+    /// <summary>Instance method / property. Binds target is the full dotted
+    /// host symbol; emitter uses its last segment as the member name and
+    /// the first Overt parameter (which must be named <c>self</c>) as the
+    /// receiver.</summary>
+    Instance,
+    /// <summary>Constructor. Binds target is just the type's full name;
+    /// emitter produces <c>new global::&lt;binds&gt;(args)</c>.</summary>
+    Constructor,
+}
+
 public sealed record ExternDecl(
     string Platform,
     bool IsUnsafe,
@@ -99,7 +121,8 @@ public sealed record ExternDecl(
     TypeExpr? ReturnType,
     string BindsTarget,
     string? FromLibrary,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    ExternKind Kind = ExternKind.Static) : Declaration(Span);
 
 public sealed record RecordDecl(
     string Name,

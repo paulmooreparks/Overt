@@ -434,7 +434,13 @@ public sealed class CSharpEmitter
     private void EmitExtern(ExternDecl x)
     {
         var unsafePrefix = x.IsUnsafe ? "// unsafe " : "// ";
-        _w.WriteLine($"{unsafePrefix}extern \"{x.Platform}\" binds \"{x.BindsTarget}\""
+        var kindKw = x.Kind switch
+        {
+            ExternKind.Instance => " instance",
+            ExternKind.Constructor => " ctor",
+            _ => "",
+        };
+        _w.WriteLine($"{unsafePrefix}extern \"{x.Platform}\"{kindKw} binds \"{x.BindsTarget}\""
             + (x.FromLibrary is { } lib ? $" from \"{lib}\"" : ""));
         EmitEffectRowComment(x.Effects);
         _w.Write("public static ");
@@ -466,28 +472,20 @@ public sealed class CSharpEmitter
     /// <summary>
     /// Lower an <c>extern</c> body to a real invocation of the binds target.
     ///
-    /// Supported today:
+    /// Three shapes, selected by <see cref="ExternDecl.Kind"/>:
     /// <list type="bullet">
-    ///   <item>Platform <c>"csharp"</c> — binds target is a dotted C# path:
-    ///     <c>System.IO.File.ReadAllText</c>. Emits a call to that static
-    ///     member with the extern's parameters passed positionally.</item>
-    ///   <item>A static property is recognized as "binds target resolves to a
-    ///     property at compile time"; emitted as a bare member access.</item>
-    ///   <item>Return type <c>Result&lt;T, E&gt;</c> wraps the call in a
-    ///     try/catch that converts thrown exceptions into an <c>Err</c> of
-    ///     the declared error type. A few error types have known
-    ///     constructors; unknown error types fall through to rethrow, with
-    ///     a diagnostic in the generated code.</item>
+    ///   <item><c>Static</c> — binds target is a dotted path
+    ///     <c>Ns.Type.Method</c>. Emits <c>global::Ns.Type.Method(args)</c>,
+    ///     or bare member access for properties/fields.</item>
+    ///   <item><c>Instance</c> — binds target is <c>Ns.Type.Method</c>; the
+    ///     first Overt parameter is the receiver. Emits <c>self.Method(rest)</c>,
+    ///     or <c>self.Prop</c> for instance properties/fields.</item>
+    ///   <item><c>Constructor</c> — binds target is a type path
+    ///     <c>Ns.Type</c>. Emits <c>new global::Ns.Type(args)</c>.</item>
     /// </list>
-    ///
-    /// Not yet supported:
-    /// <list type="bullet">
-    ///   <item>Instance methods (the <c>Namespace.Type::Method</c> convention
-    ///     with a <c>self</c> parameter).</item>
-    ///   <item>Constructors (<c>..ctor</c> binding target).</item>
-    ///   <item>Platform <c>"c"</c> — would become <c>DllImport</c>.</item>
-    ///   <item>Platform <c>"go"</c> — no Go backend emission yet.</item>
-    /// </list>
+    /// Return type <c>Result&lt;T, E&gt;</c> wraps the call in try/catch and
+    /// converts thrown exceptions into an <c>Err</c>; known narrative-shaped
+    /// error types get auto-constructed, otherwise the catch rethrows.
     /// </summary>
     private void EmitExternBody(ExternDecl x)
     {
@@ -502,59 +500,60 @@ public sealed class CSharpEmitter
         var returnsResult = x.ReturnType is NamedType
             { Name: "Result", TypeArguments.Length: 2 };
 
-        // Recognize three binds-target shapes:
-        //   Ns.Type.Method         — static method/property/field
-        //   Ns.Type::Method        — instance method; first Overt param is receiver
-        //   Ns.Type..ctor          — constructor; emit `new Ns.Type(args)`
-        // Each lowers to a different C# call expression. `global::` prefix on
-        // the type portion forces resolution against the root namespace so
-        // facade modules whose C# namespace shadows `System.*` still work.
         string callExpr;
-        if (x.BindsTarget.EndsWith("..ctor", StringComparison.Ordinal))
+        switch (x.Kind)
         {
-            var typeName = x.BindsTarget[..^"..ctor".Length];
-            var ctorArgs = string.Join(", ",
-                x.Parameters.Select(p => EscapeId(p.Name)));
-            callExpr = $"new global::{typeName}({ctorArgs})";
-        }
-        else if (x.BindsTarget.Contains("::"))
-        {
-            // Instance method or property: first Overt parameter IS the receiver.
-            if (x.Parameters.Length == 0)
+            case ExternKind.Constructor:
             {
-                _w.WriteLine(
-                    "throw new InvalidOperationException("
-                    + "\"extern with `::` binds target requires a `self` parameter\");");
-                return;
+                var ctorArgs = string.Join(", ",
+                    x.Parameters.Select(p => EscapeId(p.Name)));
+                callExpr = $"new global::{x.BindsTarget}({ctorArgs})";
+                break;
             }
-            var splitIdx = x.BindsTarget.IndexOf("::", StringComparison.Ordinal);
-            var typeName = x.BindsTarget[..splitIdx];
-            var memberName = x.BindsTarget[(splitIdx + 2)..];
-            var receiver = EscapeId(x.Parameters[0].Name);
+            case ExternKind.Instance:
+            {
+                if (x.Parameters.Length == 0)
+                {
+                    _w.WriteLine(
+                        "throw new InvalidOperationException("
+                        + "\"extern instance requires a `self` parameter\");");
+                    return;
+                }
+                var lastDot = x.BindsTarget.LastIndexOf('.');
+                if (lastDot < 1)
+                {
+                    _w.WriteLine(
+                        "throw new InvalidOperationException("
+                        + $"\"extern instance binds target '{x.BindsTarget}' must be Type.Member\");");
+                    return;
+                }
+                var typeName = x.BindsTarget[..lastDot];
+                var memberName = x.BindsTarget[(lastDot + 1)..];
+                var receiver = EscapeId(x.Parameters[0].Name);
 
-            // If the member is a property or field (detected via reflection
-            // against the declaring type), emit bare access `self.Prop`.
-            // Otherwise emit a method call `self.Member(rest-args)`.
-            if (x.Parameters.Length == 1
-                && IsInstancePropertyOrField(typeName, memberName))
-            {
-                callExpr = $"{receiver}.{memberName}";
+                if (x.Parameters.Length == 1
+                    && IsInstancePropertyOrField(typeName, memberName))
+                {
+                    callExpr = $"{receiver}.{memberName}";
+                }
+                else
+                {
+                    var rest = string.Join(", ",
+                        x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
+                    callExpr = $"{receiver}.{memberName}({rest})";
+                }
+                break;
             }
-            else
+            default: // ExternKind.Static
             {
-                var rest = string.Join(", ",
-                    x.Parameters.Skip(1).Select(p => EscapeId(p.Name)));
-                callExpr = $"{receiver}.{memberName}({rest})";
+                var args = string.Join(", ",
+                    x.Parameters.Select(p => EscapeId(p.Name)));
+                var prefixedTarget = "global::" + x.BindsTarget;
+                callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
+                    ? prefixedTarget
+                    : $"{prefixedTarget}({args})";
+                break;
             }
-        }
-        else
-        {
-            var args = string.Join(", ",
-                x.Parameters.Select(p => EscapeId(p.Name)));
-            var prefixedTarget = "global::" + x.BindsTarget;
-            callExpr = x.Parameters.Length == 0 && BindsLooksLikeProperty(x.BindsTarget)
-                ? prefixedTarget
-                : $"{prefixedTarget}({args})";
         }
 
         if (!returnsResult)

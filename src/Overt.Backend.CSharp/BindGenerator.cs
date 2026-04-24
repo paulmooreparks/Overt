@@ -329,14 +329,14 @@ public static class BindGenerator
             paramList.Add($"{paramName}: {overtType}");
         }
 
-        sb.Append("extern \"csharp\" fn ");
+        sb.Append("extern \"csharp\" ctor fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));
         sb.Append(") -> ");
         sb.Append(overtTypeName);
         sb.AppendLine();
-        sb.AppendLine($"    binds \"{targetType.FullName}..ctor\"");
+        sb.AppendLine($"    binds \"{targetType.FullName}\"");
         sb.AppendLine();
     }
 
@@ -351,13 +351,13 @@ public static class BindGenerator
         var name = ToSnakeCase(prop.Name);
         var retText = pure ? overtType : $"Result<{overtType}, IoError>";
 
-        sb.Append("extern \"csharp\" fn ");
+        sb.Append("extern \"csharp\" instance fn ");
         sb.Append(name);
         sb.Append($"(self: {overtTypeName})");
         if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
         sb.Append($" -> {retText}");
         sb.AppendLine();
-        sb.AppendLine($"    binds \"{targetType.FullName}::{prop.Name}\"");
+        sb.AppendLine($"    binds \"{targetType.FullName}.{prop.Name}\"");
         sb.AppendLine();
     }
 
@@ -387,7 +387,7 @@ public static class BindGenerator
             ? returnOvertType
             : $"Result<{returnOvertType}, IoError>";
 
-        sb.Append("extern \"csharp\" fn ");
+        sb.Append("extern \"csharp\" instance fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));
@@ -395,7 +395,7 @@ public static class BindGenerator
         if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
         sb.Append($" -> {retText}");
         sb.AppendLine();
-        sb.AppendLine($"    binds \"{targetType.FullName}::{method.Name}\"");
+        sb.AppendLine($"    binds \"{targetType.FullName}.{method.Name}\"");
         sb.AppendLine();
     }
 

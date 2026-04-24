@@ -594,22 +594,22 @@ public class StdlibTranspiledEndToEndTests
     {
         // Exercises the opaque-type + instance-method + constructor machinery
         // against a real BCL class. `StringBuilder` is declared as an
-        // `extern type`; `new_()` binds to `..ctor`; `append(self, s)` and
-        // `to_string(self)` use `::` instance-method bindings. Verifies the
+        // `extern type`; `ctor fn sb_new()` constructs; `instance fn append`
+        // and `instance fn to_string` call via the receiver. Verifies the
         // full chain emits valid C# that compiles and runs.
         const string src = """
             module sb_e2e
 
             extern "csharp" type StringBuilder binds "System.Text.StringBuilder"
 
-            extern "csharp" fn sb_new() -> StringBuilder
-                binds "System.Text.StringBuilder..ctor"
+            extern "csharp" ctor fn sb_new() -> StringBuilder
+                binds "System.Text.StringBuilder"
 
-            extern "csharp" fn sb_append(self: StringBuilder, s: String) -> StringBuilder
-                binds "System.Text.StringBuilder::Append"
+            extern "csharp" instance fn sb_append(self: StringBuilder, s: String) -> StringBuilder
+                binds "System.Text.StringBuilder.Append"
 
-            extern "csharp" fn sb_to_string(self: StringBuilder) -> String
-                binds "System.Text.StringBuilder::ToString"
+            extern "csharp" instance fn sb_to_string(self: StringBuilder) -> String
+                binds "System.Text.StringBuilder.ToString"
 
             fn main() !{io} -> Result<(), IoError> {
                 let b1: StringBuilder = sb_new()

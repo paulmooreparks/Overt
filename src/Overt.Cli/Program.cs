@@ -813,6 +813,8 @@ static class Cli
         ["OV0312"] = "AGENTS.md §8 (control flow — break/continue)",
         ["OV0313"] = "AGENTS.md §8 (control flow — for each)",
         ["OV0314"] = "AGENTS.md §3 (every let requires a type annotation)",
+        ["OV0315"] = "AGENTS.md §11 (FFI — `extern instance fn` requires `self` first)",
+        ["OV0316"] = "AGENTS.md §11 (FFI — `extern ctor fn` requires a return type)",
     };
 
     static int WriteDiagnostics(string path, ImmutableArray<Diagnostic> diagnostics)

@@ -192,15 +192,16 @@ must carry. Full analysis is in the session transcript; the short list:
 - **H3. Type alias transparency vs nominality.** Non-generic aliases are
   transparent (`Age == Int`); generic aliases are nominal. Same keyword,
   context-dependent semantics. *Needs validation before changing.*
-- **H4. Extern binds-target punctuation** encodes three call shapes in an
-  opaque string (`.` / `::` / `..ctor`). An agent editing the string can
-  silently produce a wrong shape. *Actionable now — first-class
-  `extern instance` / `extern ctor` grammar forms.*
-- **H5. Optional type annotation on `let`.** AGENTS.md §0 says redundant
-  annotations are valuable, but the language permits omission. *Actionable
-  now — require annotations; parser change + new OV code.*
-- **H6. Optional trailing `;` after statements** creates a two-mode parse.
-  *Actionable now — pick one rule (probably "never") and enforce.*
+- **H4. Extern binds-target punctuation** encoded three call shapes in an
+  opaque string (`.` / `::` / `..ctor`). **Resolved 2026-04-23.** First-class
+  `extern "csharp" instance fn` / `extern "csharp" ctor fn` keywords now
+  select shape; binds target is always a dotted path. Diagnostics OV0315
+  (missing `self`) and OV0316 (missing return type on ctor) catch misuse.
+  All stdlib facades regenerated.
+- **H5. Optional type annotation on `let`.** **Resolved 2026-04-23.**
+  Required via OV0314; all examples and tests updated.
+- **H6. Optional trailing `;` after statements.** **Resolved 2026-04-23.**
+  Stray `;` now rejected with OV0170; newlines separate statements.
 - **H7. `|>?` vs `|>`** — same prefix, different semantics. Moot if H1
   reclassifies pipes as expert idiom; no standalone action.
 - **H8. Refinement-predicate silent deferral** when undecidable — same
@@ -214,11 +215,10 @@ multi-arg calls; explicit `self` for instance methods; effect rows on every
 fn; exhaustive match; no shadowing; no method-call syntax; errors as Result
 values; single-arg positional as ambiguity-free zone.
 
-**What the three "actionable now" items share:** none of them require
+**What the three "actionable now" items share:** none of them required
 empirical agent data because the cost is measurable at the language-design
-level — each eliminates an implicit decision rule the agent must carry. H5
-and H6 are ~1 session each; H4 is ~1 session (grammar extension + emitter
-update + facade regen).
+level — each eliminates an implicit decision rule the agent must carry. All
+three (H4, H5, H6) shipped together 2026-04-23.
 
 ---
 

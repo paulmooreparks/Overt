@@ -121,99 +121,99 @@ extern "csharp" fn zero() !{io, fails} -> Result<TimeSpan, IoError>
 // skipped System.TimeSpan.TryParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.TimeSpan.TryParseExact: parameter 'formats' has unsupported type 'System.String[]'
 // skipped System.TimeSpan.TryParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn new_long(ticks_arg: Int64) -> TimeSpan
-    binds "System.TimeSpan..ctor"
+extern "csharp" ctor fn new_long(ticks_arg: Int64) -> TimeSpan
+    binds "System.TimeSpan"
 
-extern "csharp" fn new_int_int_int(hours_arg: Int, minutes_arg: Int, seconds_arg: Int) -> TimeSpan
-    binds "System.TimeSpan..ctor"
+extern "csharp" ctor fn new_int_int_int(hours_arg: Int, minutes_arg: Int, seconds_arg: Int) -> TimeSpan
+    binds "System.TimeSpan"
 
-extern "csharp" fn new_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int) -> TimeSpan
-    binds "System.TimeSpan..ctor"
+extern "csharp" ctor fn new_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int) -> TimeSpan
+    binds "System.TimeSpan"
 
-extern "csharp" fn new_int_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int, milliseconds_arg: Int) -> TimeSpan
-    binds "System.TimeSpan..ctor"
+extern "csharp" ctor fn new_int_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int, milliseconds_arg: Int) -> TimeSpan
+    binds "System.TimeSpan"
 
-extern "csharp" fn new_int_int_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int, milliseconds_arg: Int, microseconds_arg: Int) -> TimeSpan
-    binds "System.TimeSpan..ctor"
+extern "csharp" ctor fn new_int_int_int_int_int_int(days_arg: Int, hours_arg: Int, minutes_arg: Int, seconds_arg: Int, milliseconds_arg: Int, microseconds_arg: Int) -> TimeSpan
+    binds "System.TimeSpan"
 
-extern "csharp" fn days(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Days"
+extern "csharp" instance fn days(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Days"
 
-extern "csharp" fn hours(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Hours"
+extern "csharp" instance fn hours(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Hours"
 
-extern "csharp" fn microseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Microseconds"
+extern "csharp" instance fn microseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Microseconds"
 
-extern "csharp" fn milliseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Milliseconds"
+extern "csharp" instance fn milliseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Milliseconds"
 
-extern "csharp" fn minutes(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Minutes"
+extern "csharp" instance fn minutes(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Minutes"
 
-extern "csharp" fn nanoseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Nanoseconds"
+extern "csharp" instance fn nanoseconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Nanoseconds"
 
-extern "csharp" fn seconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::Seconds"
+extern "csharp" instance fn seconds(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.Seconds"
 
-extern "csharp" fn ticks(self: TimeSpan) !{io, fails} -> Result<Int64, IoError>
-    binds "System.TimeSpan::Ticks"
+extern "csharp" instance fn ticks(self: TimeSpan) !{io, fails} -> Result<Int64, IoError>
+    binds "System.TimeSpan.Ticks"
 
-extern "csharp" fn total_days(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalDays"
+extern "csharp" instance fn total_days(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalDays"
 
-extern "csharp" fn total_hours(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalHours"
+extern "csharp" instance fn total_hours(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalHours"
 
-extern "csharp" fn total_microseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalMicroseconds"
+extern "csharp" instance fn total_microseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalMicroseconds"
 
-extern "csharp" fn total_milliseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalMilliseconds"
+extern "csharp" instance fn total_milliseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalMilliseconds"
 
-extern "csharp" fn total_minutes(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalMinutes"
+extern "csharp" instance fn total_minutes(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalMinutes"
 
-extern "csharp" fn total_nanoseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalNanoseconds"
+extern "csharp" instance fn total_nanoseconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalNanoseconds"
 
-extern "csharp" fn total_seconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::TotalSeconds"
+extern "csharp" instance fn total_seconds(self: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.TotalSeconds"
 
-extern "csharp" fn add(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Add"
+extern "csharp" instance fn add(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Add"
 
-extern "csharp" fn compare_to(self: TimeSpan, value: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::CompareTo"
+extern "csharp" instance fn compare_to(self: TimeSpan, value: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.CompareTo"
 
-extern "csharp" fn divide_double(self: TimeSpan, divisor: Float) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Divide"
+extern "csharp" instance fn divide_double(self: TimeSpan, divisor: Float) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Divide"
 
-extern "csharp" fn divide_time_span(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<Float, IoError>
-    binds "System.TimeSpan::Divide"
+extern "csharp" instance fn divide_time_span(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<Float, IoError>
+    binds "System.TimeSpan.Divide"
 
-extern "csharp" fn duration(self: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Duration"
+extern "csharp" instance fn duration(self: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Duration"
 
-extern "csharp" fn equals(self: TimeSpan, obj: TimeSpan) !{io, fails} -> Result<Bool, IoError>
-    binds "System.TimeSpan::Equals"
+extern "csharp" instance fn equals(self: TimeSpan, obj: TimeSpan) !{io, fails} -> Result<Bool, IoError>
+    binds "System.TimeSpan.Equals"
 
-extern "csharp" fn get_hash_code(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
-    binds "System.TimeSpan::GetHashCode"
+extern "csharp" instance fn get_hash_code(self: TimeSpan) !{io, fails} -> Result<Int, IoError>
+    binds "System.TimeSpan.GetHashCode"
 
-extern "csharp" fn multiply(self: TimeSpan, factor: Float) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Multiply"
+extern "csharp" instance fn multiply(self: TimeSpan, factor: Float) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Multiply"
 
-extern "csharp" fn negate(self: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Negate"
+extern "csharp" instance fn negate(self: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Negate"
 
-extern "csharp" fn subtract(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
-    binds "System.TimeSpan::Subtract"
+extern "csharp" instance fn subtract(self: TimeSpan, ts: TimeSpan) !{io, fails} -> Result<TimeSpan, IoError>
+    binds "System.TimeSpan.Subtract"
 
-extern "csharp" fn to_string(self: TimeSpan) !{io, fails} -> Result<String, IoError>
-    binds "System.TimeSpan::ToString"
+extern "csharp" instance fn to_string(self: TimeSpan) !{io, fails} -> Result<String, IoError>
+    binds "System.TimeSpan.ToString"
 
-extern "csharp" fn to_string_string(self: TimeSpan, format: String) !{io, fails} -> Result<String, IoError>
-    binds "System.TimeSpan::ToString"
+extern "csharp" instance fn to_string_string(self: TimeSpan, format: String) !{io, fails} -> Result<String, IoError>
+    binds "System.TimeSpan.ToString"
 

@@ -27,27 +27,27 @@ extern "csharp" fn empty() !{io, fails} -> Result<Guid, IoError>
 // skipped System.Guid.TryParse: parameter 's' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
 // skipped System.Guid.TryParseExact: parameter 'result' has unsupported type 'System.Guid&'
 // skipped System.Guid.TryParseExact: parameter 'input' has unsupported type 'System.ReadOnlySpan`1[[System.Char, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]'
-extern "csharp" fn new_(g: String) -> Guid
-    binds "System.Guid..ctor"
+extern "csharp" ctor fn new_(g: String) -> Guid
+    binds "System.Guid"
 
-extern "csharp" fn variant(self: Guid) !{io, fails} -> Result<Int, IoError>
-    binds "System.Guid::Variant"
+extern "csharp" instance fn variant(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid.Variant"
 
-extern "csharp" fn version(self: Guid) !{io, fails} -> Result<Int, IoError>
-    binds "System.Guid::Version"
+extern "csharp" instance fn version(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid.Version"
 
-extern "csharp" fn compare_to(self: Guid, value: Guid) !{io, fails} -> Result<Int, IoError>
-    binds "System.Guid::CompareTo"
+extern "csharp" instance fn compare_to(self: Guid, value: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid.CompareTo"
 
-extern "csharp" fn equals(self: Guid, g: Guid) !{io, fails} -> Result<Bool, IoError>
-    binds "System.Guid::Equals"
+extern "csharp" instance fn equals(self: Guid, g: Guid) !{io, fails} -> Result<Bool, IoError>
+    binds "System.Guid.Equals"
 
-extern "csharp" fn get_hash_code(self: Guid) !{io, fails} -> Result<Int, IoError>
-    binds "System.Guid::GetHashCode"
+extern "csharp" instance fn get_hash_code(self: Guid) !{io, fails} -> Result<Int, IoError>
+    binds "System.Guid.GetHashCode"
 
-extern "csharp" fn to_string(self: Guid) !{io, fails} -> Result<String, IoError>
-    binds "System.Guid::ToString"
+extern "csharp" instance fn to_string(self: Guid) !{io, fails} -> Result<String, IoError>
+    binds "System.Guid.ToString"
 
-extern "csharp" fn to_string_string(self: Guid, format: String) !{io, fails} -> Result<String, IoError>
-    binds "System.Guid::ToString"
+extern "csharp" instance fn to_string_string(self: Guid, format: String) !{io, fails} -> Result<String, IoError>
+    binds "System.Guid.ToString"
 

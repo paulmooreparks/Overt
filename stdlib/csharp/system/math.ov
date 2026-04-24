@@ -17,7 +17,9 @@ extern "csharp" fn tau() -> Float
 extern "csharp" fn abs_int(value: Int) -> Int
     binds "System.Math.Abs"
 
-// skipped System.Math.Abs: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn abs_long(value: Int64) -> Int64
+    binds "System.Math.Abs"
+
 // skipped System.Math.Abs: parameter 'value' has unsupported type 'System.IntPtr'
 // skipped System.Math.Abs: parameter 'value' has unsupported type 'System.SByte'
 // skipped System.Math.Abs: parameter 'value' has unsupported type 'System.Decimal'
@@ -49,11 +51,13 @@ extern "csharp" fn atanh(d: Float) -> Float
     binds "System.Math.Atanh"
 
 // skipped System.Math.BigMul: parameter 'a' has unsupported type 'System.UInt32'
-// skipped System.Math.BigMul: return type 'System.Int64' is unsupported
+extern "csharp" fn big_mul(a: Int, b: Int) -> Int64
+    binds "System.Math.BigMul"
+
 // skipped System.Math.BigMul: parameter 'a' has unsupported type 'System.UInt64'
-// skipped System.Math.BigMul: parameter 'a' has unsupported type 'System.Int64'
+// skipped System.Math.BigMul: return type 'System.Int128' is unsupported
 // skipped System.Math.BigMul: parameter 'a' has unsupported type 'System.UInt64'
-// skipped System.Math.BigMul: parameter 'a' has unsupported type 'System.Int64'
+// skipped System.Math.BigMul: parameter 'low' has unsupported type 'System.Int64&'
 extern "csharp" fn bit_decrement(x: Float) -> Float
     binds "System.Math.BitDecrement"
 
@@ -76,7 +80,9 @@ extern "csharp" fn clamp_double_double_double(value: Float, min_arg: Float, max_
 extern "csharp" fn clamp_int_int_int(value: Int, min_arg: Int, max_arg: Int) -> Int
     binds "System.Math.Clamp"
 
-// skipped System.Math.Clamp: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn clamp_long_long_long(value: Int64, min_arg: Int64, max_arg: Int64) -> Int64
+    binds "System.Math.Clamp"
+
 // skipped System.Math.Clamp: parameter 'value' has unsupported type 'System.IntPtr'
 // skipped System.Math.Clamp: parameter 'value' has unsupported type 'System.SByte'
 extern "csharp" fn clamp_float_float_float(value: Float, min_arg: Float, max_arg: Float) -> Float
@@ -101,12 +107,12 @@ extern "csharp" fn cosh(value: Float) -> Float
 // skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.UInt16'
 // skipped System.Math.DivRem: return type 'System.ValueTuple`2[[System.Int32, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.Int32, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]' is unsupported
 // skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.UInt32'
-// skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.Int64'
+// skipped System.Math.DivRem: return type 'System.ValueTuple`2[[System.Int64, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[System.Int64, System.Private.CoreLib, Version=9.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]' is unsupported
 // skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.UInt64'
 // skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.IntPtr'
 // skipped System.Math.DivRem: parameter 'left' has unsupported type 'System.UIntPtr'
 // skipped System.Math.DivRem: parameter 'result' has unsupported type 'System.Int32&'
-// skipped System.Math.DivRem: parameter 'a' has unsupported type 'System.Int64'
+// skipped System.Math.DivRem: parameter 'result' has unsupported type 'System.Int64&'
 extern "csharp" fn exp(d: Float) -> Float
     binds "System.Math.Exp"
 
@@ -144,7 +150,9 @@ extern "csharp" fn max_double_double(val1: Float, val2: Float) -> Float
 extern "csharp" fn max_int_int(val1: Int, val2: Int) -> Int
     binds "System.Math.Max"
 
-// skipped System.Math.Max: parameter 'val1' has unsupported type 'System.Int64'
+extern "csharp" fn max_long_long(val1: Int64, val2: Int64) -> Int64
+    binds "System.Math.Max"
+
 // skipped System.Math.Max: parameter 'val1' has unsupported type 'System.IntPtr'
 // skipped System.Math.Max: parameter 'val1' has unsupported type 'System.SByte'
 extern "csharp" fn max_float_float(val1: Float, val2: Float) -> Float
@@ -166,7 +174,9 @@ extern "csharp" fn min_double_double(val1: Float, val2: Float) -> Float
 extern "csharp" fn min_int_int(val1: Int, val2: Int) -> Int
     binds "System.Math.Min"
 
-// skipped System.Math.Min: parameter 'val1' has unsupported type 'System.Int64'
+extern "csharp" fn min_long_long(val1: Int64, val2: Int64) -> Int64
+    binds "System.Math.Min"
+
 // skipped System.Math.Min: parameter 'val1' has unsupported type 'System.IntPtr'
 // skipped System.Math.Min: parameter 'val1' has unsupported type 'System.SByte'
 extern "csharp" fn min_float_float(val1: Float, val2: Float) -> Float
@@ -211,7 +221,9 @@ extern "csharp" fn sign_double(value: Float) -> Int
 extern "csharp" fn sign_int(value: Int) -> Int
     binds "System.Math.Sign"
 
-// skipped System.Math.Sign: parameter 'value' has unsupported type 'System.Int64'
+extern "csharp" fn sign_long(value: Int64) -> Int
+    binds "System.Math.Sign"
+
 // skipped System.Math.Sign: parameter 'value' has unsupported type 'System.IntPtr'
 // skipped System.Math.Sign: parameter 'value' has unsupported type 'System.SByte'
 extern "csharp" fn sign_float(value: Float) -> Int

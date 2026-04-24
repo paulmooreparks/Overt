@@ -205,6 +205,21 @@ public sealed class Parser
             return ParseExternTypeDeclRest(platform, startPos);
         }
 
+        // Optional extern kind: `instance` or `ctor` between the platform
+        // string and `fn`. Default is Static. These are contextual keywords
+        // — normal identifier names elsewhere.
+        var externKind = ExternKind.Static;
+        if (Check(TokenKind.Identifier) && Current.Lexeme == "instance")
+        {
+            Advance();
+            externKind = ExternKind.Instance;
+        }
+        else if (Check(TokenKind.Identifier) && Current.Lexeme == "ctor")
+        {
+            Advance();
+            externKind = ExternKind.Constructor;
+        }
+
         Expect(TokenKind.KeywordFn, "extern function signature");
         var nameToken = Expect(TokenKind.Identifier, "extern function name");
         Expect(TokenKind.LeftParen, "extern parameter list");
@@ -249,7 +264,8 @@ public sealed class Parser
             returnType,
             bindsTarget,
             fromLibrary,
-            new SourceSpan(startPos, endPos));
+            new SourceSpan(startPos, endPos),
+            Kind: externKind);
     }
 
     /// <summary>A reasonable default for the `add module X` hint. The parser

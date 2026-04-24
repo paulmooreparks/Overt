@@ -283,7 +283,13 @@ public static class Formatter
     {
         ctx.WriteIndent();
         if (ex.IsUnsafe) ctx.Write("unsafe ");
-        ctx.Write($"extern \"{ex.Platform}\" fn {ex.Name}(");
+        var kindKw = ex.Kind switch
+        {
+            ExternKind.Instance => " instance",
+            ExternKind.Constructor => " ctor",
+            _ => "",
+        };
+        ctx.Write($"extern \"{ex.Platform}\"{kindKw} fn {ex.Name}(");
         for (var i = 0; i < ex.Parameters.Length; i++)
         {
             if (i > 0) ctx.Write(", ");

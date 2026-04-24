@@ -83,4 +83,25 @@ public class DiagnosticQualityTests
         var help = Assert.Single(d.Notes, n => n.Kind == DiagnosticNoteKind.Help);
         Assert.Contains("tuple", help.Text);
     }
+
+    [Fact]
+    public void OV0315_ExternInstance_RequiresSelf()
+    {
+        ResolveAndFindFirst(
+            "module m\n"
+            + "extern \"csharp\" type T binds \"System.Object\"\n"
+            + "extern \"csharp\" instance fn bad(x: T) -> Int\n"
+            + "    binds \"System.Object.GetHashCode\"\n",
+            "OV0315");
+    }
+
+    [Fact]
+    public void OV0316_ExternCtor_RequiresReturnType()
+    {
+        ResolveAndFindFirst(
+            "module m\n"
+            + "extern \"csharp\" ctor fn bad()\n"
+            + "    binds \"System.Object\"\n",
+            "OV0316");
+    }
 }

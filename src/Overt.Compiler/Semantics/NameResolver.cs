@@ -256,6 +256,28 @@ public sealed class NameResolver
         {
             ResolveType(rt, sigScope);
         }
+
+        // Kind-shape validation: `instance` requires a `self` first parameter;
+        // `ctor` requires a return type. These are load-bearing for emission.
+        switch (ext.Kind)
+        {
+            case ExternKind.Instance:
+                if (ext.Parameters.Length == 0 || ext.Parameters[0].Name != "self")
+                {
+                    Report("OV0315",
+                        "`extern instance fn` requires `self` as the first parameter",
+                        ext.Span);
+                }
+                break;
+            case ExternKind.Constructor:
+                if (ext.ReturnType is null)
+                {
+                    Report("OV0316",
+                        "`extern ctor fn` requires an explicit return type (the constructed type)",
+                        ext.Span);
+                }
+                break;
+        }
     }
 
     private void ResolveRecordDecl(RecordDecl rec, Scope moduleScope)
