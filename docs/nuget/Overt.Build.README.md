@@ -1,6 +1,6 @@
-# Overt.Build
+<img src="https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot.png" alt="Overt mascot" align="right" width="180">
 
-![Overt mascot](https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot.png)
+# Overt.Build
 
 **Overt.Build** is the MSBuild integration for the [Overt](https://www.nuget.org/packages/Overt) language: a task + targets package that compiles `.ov` files alongside `.cs` files during `dotnet build`. Add the package to any SDK-style `.csproj`, drop `.ov` files into the project, and the generated C# is fed to Csc the same way any other `Compile` item is. Diagnostics surface in the IDE's error list as normal Csc errors.
 
