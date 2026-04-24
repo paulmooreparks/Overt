@@ -42,15 +42,22 @@
     <Description>The Overt language CLI: `overt run`, `overt fmt`, `overt bind`, and emit-stage inspection for `.ov` files.</Description>
     <PackageTags>overt;language;transpiler;cli</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- Icon displayed on nuget.org and in `dotnet tool` listings. Sourced
-       from the canonical 128x128 PNG under assets/icons; packed at the
-       root of the nupkg so PackageIcon finds it. -->
+  <!-- Icon and README displayed on nuget.org. README is the package-
+       specific one under docs/nuget/, not the repo-root README (which
+       uses relative image and link paths that don't resolve outside
+       GitHub). Both are packed at the root of the nupkg so PackageIcon
+       and PackageReadmeFile find them by filename. -->
   <ItemGroup>
     <None Include="..\..\assets\icons\icon_128x128.png"
           Pack="true"
           PackagePath="icon.png"
+          Visible="false" />
+    <None Include="..\..\docs\nuget\Overt.README.md"
+          Pack="true"
+          PackagePath="README.md"
           Visible="false" />
   </ItemGroup>
 

@@ -34,6 +34,7 @@
     <Description>MSBuild integration for the Overt language: compile `.ov` files alongside `.cs` in a .csproj via OvertCompile items. Import the targets by PackageReference and drop `.ov` files into the project.</Description>
     <PackageTags>overt;msbuild;transpiler;codegen</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- Output artifacts go to NuGet-layout paths via the custom target
          below, not the default lib/; suppress the default output-as-lib
          behavior so we don't emit duplicates. -->
@@ -81,6 +82,12 @@
            per PackageIcon convention; sourced from the canonical
            assets/icons/ folder. -->
       <_OvertPackageFile Include="..\..\assets\icons\icon_128x128.png" PackagePath="icon.png" />
+
+      <!-- Package README displayed on the nuget.org package page. The
+           package-specific README lives under docs/nuget/; the repo-
+           root README uses relative paths that don't resolve outside
+           GitHub. -->
+      <_OvertPackageFile Include="..\..\docs\nuget\Overt.Build.README.md" PackagePath="README.md" />
     </ItemGroup>
     <ItemGroup>
       <None Include="@(_OvertPackageFile)" Pack="true" PackagePath="%(_OvertPackageFile.PackagePath)" />
