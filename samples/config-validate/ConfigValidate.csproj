@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Real-world sample: a CLI that validates a JSON config file against
+    a refinement-typed schema written in Overt. The domain-validation
+    core (types, checks, error variants, pretty-print) is in
+    Validator.ov; Program.cs is the boundary adapter that reads the
+    file, deserializes JSON, and renders the result.
+
+    This project is not part of Overt.sln; it's built externally, the
+    way an outside consumer would build it once Overt.Build ships on
+    nuget.org. Until that first publish lands, the csproj imports
+    Overt.Build.targets directly from the in-repo build output (the
+    same pattern samples/msbuild-smoke uses). After publish, consumers
+    replace that Import with:
+
+      <ItemGroup>
+        <PackageReference Include="Overt.Build" Version="0.1.0-dev.*" />
+      </ItemGroup>
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ConfigValidate</RootNamespace>
+    <AssemblyName>config-validate</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Overt.Runtime\Overt.Runtime.csproj" />
+  </ItemGroup>
+
+  <!-- In-repo build of Overt.Build, matched to the current $(Configuration)
+       so this sample follows Debug or Release without edits. The
+       Condition guards against a first-time clone where Overt.Build
+       has not been built yet; in that case the targets file is absent,
+       the OvertTranspileTask does not run, and Csc will surface a
+       clear "namespace not found" error referring to the generated
+       Overt.Generated.Validator type, which is the prompt to run
+       `dotnet build src/Overt.Build` once. -->
+  <PropertyGroup>
+    <OvertBuildOutputDir>$(MSBuildThisFileDirectory)..\..\src\Overt.Build\bin\$(Configuration)\net9.0\</OvertBuildOutputDir>
+  </PropertyGroup>
+  <Import Project="$(OvertBuildOutputDir)Overt.Build.targets"
+          Condition="Exists('$(OvertBuildOutputDir)Overt.Build.targets')" />
+
+</Project>

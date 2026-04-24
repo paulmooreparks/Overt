@@ -1,0 +1,166 @@
+module validator
+
+// Config validator for a hypothetical HTTP service. The consumer side
+// (Program.cs) reads a JSON file and parses it into `ConfigJson`; this
+// module validates the raw shape against refinement types and returns a
+// `Config` the rest of the program can trust every field of.
+//
+// What this sample is showing off:
+//
+//   - Refinement types push domain rules (port range, non-empty host,
+//     known log level, non-empty upstream list) out of scattered runtime
+//     checks and into the type signatures callers read.
+//   - Validation errors are values, not exceptions. Every failure mode is
+//     a variant of `ValidationError`; `describe` pattern-matches on it,
+//     and the compiler enforces that every case is covered (OV0308).
+//   - `?` propagation makes the happy path linear: each boundary check
+//     short-circuits to the first Err.
+
+// ---------------------------------------------------------------- refinements
+
+// Valid TCP port. Zero and negative numbers are ruled out by the lower
+// bound; 65535 is the ceiling for the 16-bit port field.
+type Port = Int where 1 <= self && self <= 65535
+
+// Upper bound is arbitrary; it's here to catch transposition typos
+// (e.g. 10000 where someone meant 100) rather than system limits.
+type WorkerCount = Int where 1 <= self && self <= 256
+
+type NonEmptyString = String where length(self) > 0
+
+type NonEmpty<T> = List<T> where size(self) > 0
+
+// ---------------------------------------------------------------- types
+
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+// Raw shape as it comes out of the JSON deserializer. Fields are the
+// wide base types; no invariants are enforced here.
+record ConfigJson {
+    host:          String,
+    port:          Int,
+    worker_count:  Int,
+    log_level:     String,
+    upstream_urls: List<String>,
+}
+
+// Validated shape. Any code that takes a `Config` can rely on every
+// field matching its refinement type without re-checking.
+record Config {
+    host:          NonEmptyString,
+    port:          Port,
+    worker_count:  WorkerCount,
+    log_level:     LogLevel,
+    upstream_urls: NonEmpty<String>,
+}
+
+@derive(Debug)
+enum ValidationError {
+    EmptyHost,
+    PortOutOfRange        { got: Int },
+    WorkerCountOutOfRange { got: Int },
+    UnknownLogLevel       { got: String },
+    EmptyUpstreamUrls,
+}
+
+// ---------------------------------------------------------------- validation
+
+fn check_host(raw: String) -> Result<NonEmptyString, ValidationError> {
+    if length(raw) > 0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.EmptyHost)
+    }
+}
+
+fn check_port(raw: Int) -> Result<Port, ValidationError> {
+    if 1 <= raw && raw <= 65535 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.PortOutOfRange { got = raw })
+    }
+}
+
+fn check_worker_count(raw: Int) -> Result<WorkerCount, ValidationError> {
+    if 1 <= raw && raw <= 256 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.WorkerCountOutOfRange { got = raw })
+    }
+}
+
+fn check_log_level(raw: String) -> Result<LogLevel, ValidationError> {
+    if raw == "trace" {
+        Ok(LogLevel.Trace)
+    } else if raw == "debug" {
+        Ok(LogLevel.Debug)
+    } else if raw == "info" {
+        Ok(LogLevel.Info)
+    } else if raw == "warn" {
+        Ok(LogLevel.Warn)
+    } else if raw == "error" {
+        Ok(LogLevel.Error)
+    } else {
+        Err(ValidationError.UnknownLogLevel { got = raw })
+    }
+}
+
+fn check_upstream_urls(raw: List<String>) -> Result<NonEmpty<String>, ValidationError> {
+    if size(raw) > 0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.EmptyUpstreamUrls)
+    }
+}
+
+// Main validator. Each `?` is a boundary check that either narrows its
+// field to the refined type or short-circuits with the first Err. The
+// Config constructor below compiles because every field has been proven
+// to satisfy its refinement.
+fn validate(raw: ConfigJson) -> Result<Config, ValidationError> {
+    let host:    NonEmptyString  = check_host(raw.host)?
+    let port:    Port            = check_port(raw.port)?
+    let workers: WorkerCount     = check_worker_count(raw.worker_count)?
+    let level:   LogLevel        = check_log_level(raw.log_level)?
+    let urls:    NonEmpty<String> = check_upstream_urls(raw.upstream_urls)?
+
+    Ok(Config {
+        host          = host,
+        port          = port,
+        worker_count  = workers,
+        log_level     = level,
+        upstream_urls = urls,
+    })
+}
+
+// ---------------------------------------------------------------- formatting
+
+// Human-readable error text. Exhaustive match on ValidationError: adding
+// a new variant forces a new arm here, so the error surface can't silently
+// grow past what the user is told about.
+fn describe(e: ValidationError) -> String {
+    match e {
+        ValidationError.EmptyHost =>
+            "host must not be empty",
+        ValidationError.PortOutOfRange { got = g } =>
+            "port ${g} is out of range; expected 1..65535",
+        ValidationError.WorkerCountOutOfRange { got = g } =>
+            "worker_count ${g} is out of range; expected 1..256",
+        ValidationError.UnknownLogLevel { got = g } =>
+            "log_level '${g}' is not recognized; expected one of: trace, debug, info, warn, error",
+        ValidationError.EmptyUpstreamUrls =>
+            "upstream_urls must not be empty",
+    }
+}
+
+// Summary for the success case. Takes a validated Config, so every field
+// access here is safe: the types guarantee it.
+fn ok_summary(c: Config) -> String {
+    "validated: listening on ${c.host}:${c.port}, ${c.worker_count} workers"
+}
