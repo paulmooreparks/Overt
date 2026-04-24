@@ -839,8 +839,8 @@ static class Cli
         ["OV0312"] = "AGENTS.md §8 (control flow — break/continue)",
         ["OV0313"] = "AGENTS.md §8 (control flow — for each)",
         ["OV0314"] = "AGENTS.md §3 (every let requires a type annotation)",
-        ["OV0315"] = "AGENTS.md §11 (FFI — `extern instance fn` requires `self` first)",
-        ["OV0316"] = "AGENTS.md §11 (FFI — `extern ctor fn` requires a return type)",
+        ["OV0315"] = "AGENTS.md §12 (FFI — `extern instance fn` requires `self` first)",
+        ["OV0316"] = "AGENTS.md §12 (FFI — `extern ctor fn` requires a return type)",
         ["OV0317"] = "AGENTS.md §9 (async — `.await` requires a Task value)",
     };
 

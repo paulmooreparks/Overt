@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Smoke project that proves `.ov` files compile alongside `.cs` files
+    via the Overt.Build.targets integration. The OvertTranspileTask
+    generates C# for Greeter.ov into $(IntermediateOutputPath)overt/
+    before Csc runs; Program.cs then calls into the generated module.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Keep the build hermetic: no default compile items hidden here. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Overt.Runtime\Overt.Runtime.csproj" />
+  </ItemGroup>
+
+  <!-- Import the Overt build integration from the task project's build
+       output; that layout (targets next to the task DLL) matches what a
+       NuGet package would ship. Real consumers would pull both files
+       from a package; for the in-repo smoke test we just look at bin/. -->
+  <PropertyGroup>
+    <OvertBuildOutputDir>$(MSBuildThisFileDirectory)..\..\src\Overt.Build\bin\Debug\net9.0\</OvertBuildOutputDir>
+  </PropertyGroup>
+  <Import Project="$(OvertBuildOutputDir)Overt.Build.targets" Condition="Exists('$(OvertBuildOutputDir)Overt.Build.targets')" />
+
+</Project>

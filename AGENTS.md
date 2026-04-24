@@ -481,7 +481,45 @@ else.
 
 ---
 
-## 11. Stdlib surface (runnable subset)
+## 11. Building with MSBuild (C# backend)
+
+A `.csproj` can include `.ov` files directly by importing
+`Overt.Build.targets`. Each `.ov` file transpiles to C# under
+`obj/$(Configuration)/$(TargetFramework)/overt/<Name>.g.cs` before
+Csc runs; those files are added to `@(Compile)` so they compile in the
+same pass as hand-written C#.
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="path/to/Overt.Runtime/Overt.Runtime.csproj" />
+  </ItemGroup>
+
+  <Import Project="path/to/Overt.Build/bin/Debug/net9.0/Overt.Build.targets" />
+</Project>
+```
+
+All `.ov` files under the project directory become `<OvertCompile>`
+items automatically; disable with
+`<EnableDefaultOvertCompileItems>false</...>` and list them by hand.
+Customize the generated-file location via `<OvertGeneratedOutputPath>`.
+A working example lives at [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
+
+Compile-time diagnostics from the Overt pipeline surface as normal
+MSBuild errors/warnings with file/line/column info, so OV0314 / OV0310
+etc. appear in the IDE's error list exactly like Csc diagnostics.
+
+A real NuGet packaging story will come later; for now consumers import
+the targets file by relative path from a sibling build of `Overt.Build`.
+
+---
+
+## 12. Stdlib surface (runnable subset)
 
 ### Result / Option
 
@@ -699,7 +737,7 @@ fn strlen(s: String) -> Int {
 
 ---
 
-## 12. Formatting and naming
+## 13. Formatting and naming
 
 - Two-space indent. Not indentation-significant (C-family braces).
 - Identifiers: `snake_case` for values and functions, `PascalCase` for types,
@@ -712,7 +750,7 @@ fn strlen(s: String) -> Int {
 
 ---
 
-## 13. What doesn't work yet
+## 14. What doesn't work yet
 
 **If you try these, you will get an error or a runtime failure. Don't.**
 
@@ -729,7 +767,7 @@ fn strlen(s: String) -> Int {
 
 ---
 
-## 14. Diagnostic codes
+## 15. Diagnostic codes
 
 Every error comes with `help:` text naming the fix; this table is a quick
 reference. Codes are stable.
@@ -774,7 +812,7 @@ reference. Codes are stable.
 
 ---
 
-## 15. Canonical templates
+## 16. Canonical templates
 
 **Fallible function with I/O:**
 ```overt

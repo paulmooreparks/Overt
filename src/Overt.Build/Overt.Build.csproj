@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- MSBuild task assemblies must not conflict with assemblies MSBuild
+         already loaded; disable assembly-redirect copying of Microsoft.Build.*
+         so our task sees the MSBuild host's versions. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- GHSA-w3q9-fxm7-j8fq is a high-sev advisory against Microsoft.Build.*
+         that affects MSBuild hosts processing untrusted project files; an
+         in-build custom task isn't the exposure surface, and there's no
+         fixed version available for the utilities package we reference.
+         Suppress the transitive-vulnerability warning-as-error so the
+         project restores until Microsoft ships a patched Utilities.Core. -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Overt.Compiler\Overt.Compiler.csproj" />
+    <ProjectReference Include="..\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
+  </ItemGroup>
+
+  <!-- Copy the targets file next to the built DLL so in-repo samples (and
+       any future NuGet `build/` layout) can import it and find the task
+       assembly via `$(MSBuildThisFileDirectory)Overt.Build.dll`. -->
+  <ItemGroup>
+    <None Include="Overt.Build.targets" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Provided by the MSBuild host; reference-only so the task can
+         subclass Microsoft.Build.Utilities.Task. -->
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.8" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.8" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

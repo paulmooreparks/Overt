@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- Matches Overt.Build's suppression; see that project for rationale. -->
+    <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +16,11 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Brought in so `OvertBuildTaskTests` can subclass IBuildEngine and
+         invoke the task directly, outside a real MSBuild host. The runtime
+         assets are required here (the test binary does the loading). -->
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="17.14.8" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="17.14.8" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Overt.Compiler\Overt.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
+    <ProjectReference Include="..\..\src\Overt.Build\Overt.Build.csproj" />
     <ProjectReference Include="..\..\src\Overt.Cli\Overt.Cli.csproj" />
     <ProjectReference Include="..\Overt.EndToEnd\Overt.EndToEnd.csproj" />
   </ItemGroup>

@@ -1,0 +1,6 @@
+module greeter
+
+// Used by Program.cs to verify the MSBuild integration end-to-end.
+fn greet(name: String) -> String {
+    "hello, ${name}"
+}

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Overt MSBuild integration.
+
+  Importing this file into a C# project makes `.ov` files build alongside
+  `.cs` files. Each `.ov` is transpiled to C# via the `OvertTranspileTask`
+  below, the resulting `.g.cs` is added to the `Compile` item group, and
+  Csc picks it up in the normal build. A `ProjectReference` to
+  `Overt.Runtime` is added automatically so generated code resolves
+  `Overt.Runtime.Unit`, `Result<,>`, etc. without the consumer having to
+  add it by hand.
+
+  Opt-in usage:
+    <Import Project="path/to/Overt.Build.targets" />
+
+  Defaults:
+    - Every `*.ov` under the project directory becomes an `<OvertCompile>`
+      item (disable via `<EnableDefaultOvertCompileItems>false</...>`).
+    - Generated `.cs` files land in `$(IntermediateOutputPath)overt/`.
+-->
+<Project>
+
+  <PropertyGroup>
+    <EnableDefaultOvertCompileItems Condition=" '$(EnableDefaultOvertCompileItems)' == '' ">true</EnableDefaultOvertCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(EnableDefaultOvertCompileItems)' == 'true' ">
+    <OvertCompile Include="**\*.ov" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder)" />
+  </ItemGroup>
+
+  <UsingTask
+    TaskName="Overt.Build.OvertTranspileTask"
+    AssemblyFile="$(MSBuildThisFileDirectory)Overt.Build.dll" />
+
+  <!--
+    Runs before CoreCompile so the Csc invocation sees the generated
+    .g.cs files. Inputs/Outputs drive incremental build: if a .ov
+    hasn't changed and its .g.cs exists, MSBuild skips us.
+
+    OvertGeneratedOutputPath defaults inside the target so the fallback
+    resolves AFTER the SDK has finished populating $(IntermediateOutputPath);
+    evaluating it in a top-level PropertyGroup at import time would see
+    an empty string and drop generated files in the project root.
+  -->
+  <Target
+    Name="OvertTranspile"
+    BeforeTargets="CoreCompile"
+    Condition=" '@(OvertCompile)' != '' "
+    Inputs="@(OvertCompile)"
+    Outputs="@(OvertCompile->'$(OvertGeneratedOutputPath)%(Filename).g.cs')">
+
+    <PropertyGroup>
+      <OvertGeneratedOutputPath Condition=" '$(OvertGeneratedOutputPath)' == '' ">$(IntermediateOutputPath)overt\</OvertGeneratedOutputPath>
+    </PropertyGroup>
+
+    <OvertTranspileTask
+      SourceFiles="@(OvertCompile)"
+      OutputDirectory="$(OvertGeneratedOutputPath)">
+      <Output TaskParameter="GeneratedFiles" ItemName="Compile" />
+      <Output TaskParameter="GeneratedFiles" ItemName="FileWrites" />
+    </OvertTranspileTask>
+  </Target>
+
+</Project>
