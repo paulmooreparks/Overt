@@ -14,6 +14,7 @@ namespace Overt.Tests;
 /// dwarfs whatever `OvertBuildTaskTests` exercises directly; treat this as
 /// the coarse-grained integration seal.
 /// </summary>
+[Collection("dotnet-cli-serial")]
 public class OvertBuildEndToEndTests
 {
     [Fact]

@@ -26,7 +26,11 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Overt.Build</PackageId>
-    <Version>0.1.0</Version>
+    <!-- VersionPrefix (rather than Version) so `dotnet pack` with a
+         version-suffix argument composes into a pre-release build.
+         The package-consumption test relies on that to produce per-run
+         versions and dodge NuGet's global-package cache. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
     <Authors>Overt contributors</Authors>
     <Description>MSBuild integration for the Overt language: compile `.ov` files alongside `.cs` in a .csproj via OvertCompile items. Import the targets by PackageReference and drop `.ov` files into the project.</Description>
     <PackageTags>overt;msbuild;transpiler;codegen</PackageTags>

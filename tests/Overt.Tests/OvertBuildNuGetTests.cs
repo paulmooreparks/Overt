@@ -16,6 +16,7 @@ namespace Overt.Tests;
 /// means the targets file can't find its task DLL, the runtime DLL
 /// isn't visible to Csc, or the auto-import didn't fire.
 /// </summary>
+[Collection("dotnet-cli-serial")]
 public class OvertBuildNuGetTests
 {
     [Fact]

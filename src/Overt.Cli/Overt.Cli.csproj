@@ -26,4 +26,33 @@
     <RootNamespace>Overt.Cli</RootNamespace>
   </PropertyGroup>
 
+  <!-- .NET global tool packaging. `dotnet pack` produces a nupkg that
+       `dotnet tool install -g Overt` drops onto PATH as `overt`.
+       See AGENTS.md §11 / ROLLOUT.md Phase 1 for the install story. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>overt</ToolCommandName>
+    <PackageId>Overt</PackageId>
+    <!-- VersionPrefix (rather than Version) so `dotnet pack` with a
+         version-suffix argument composes into a pre-release build —
+         used by the tool-install e2e test, which needs per-run
+         versions to dodge the NuGet global-package cache. -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Authors>Overt contributors</Authors>
+    <Description>The Overt language CLI: `overt run`, `overt fmt`, `overt bind`, and emit-stage inspection for `.ov` files.</Description>
+    <PackageTags>overt;language;transpiler;cli</PackageTags>
+  </PropertyGroup>
+
+  <!-- Bundle the blessed stdlib next to the executable inside the tool
+       package so `overt run` finds it via the same discovery walk
+       (AppContext.BaseDirectory → ancestor containing `stdlib/`) the
+       in-repo dev layout uses. `tools/<TFM>/any/` is where global-tool
+       contents get extracted at install time. -->
+  <ItemGroup>
+    <None Include="..\..\stdlib\**\*.ov"
+          Pack="true"
+          PackagePath="tools/net9.0/any/stdlib/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
