@@ -1036,7 +1036,7 @@ The stdlib decision in §19 — per-back-end, not portable — cascades through 
 flowchart TB
     src["<b>Overt source</b><br/><code>.ov</code> files"]
 
-    subgraph tier1 ["<b>Tier 1 — back-end-independent</b> · <code>Overt.Compiler</code>"]
+    subgraph tier1 ["Tier 1: <code>Overt.Compiler</code>"]
         direction TB
         pipe["Lex · Parse · Resolve · Type-check"]
         shared["Formatter (<code>overt fmt</code>) · Module graph<br/>OV-code diagnostics · LSP protocol<br/>--emit=tokens / ast / resolved / typed"]
@@ -1044,7 +1044,7 @@ flowchart TB
 
     ast["<b>AST + type annotations</b>"]
 
-    subgraph tier2 ["<b>Tier 2 — per-back-end</b> · <code>Overt.Backend.*</code>"]
+    subgraph tier2 ["Tier 2: <code>Overt.Backend.*</code>"]
         direction LR
         subgraph cs ["<code>Overt.Backend.CSharp</code> (today)"]
             cs1["Emitter (.cs)<br/>Overt.Runtime (.NET)<br/>BindGenerator (Roslyn)<br/>Runner (in-memory Roslyn)<br/>#line + portable PDB<br/>NuGet interop"]
