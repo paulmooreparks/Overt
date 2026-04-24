@@ -7,7 +7,6 @@
 [![License](https://img.shields.io/github/license/paulmooreparks/Overt)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512bd4?logo=dotnet)](https://dotnet.microsoft.com/)
 
-<img src="https://raw.githubusercontent.com/paulmooreparks/Overt/main/assets/artwork/mascot.png" align="right" width="200" alt="Overt mascot">
 
 An **agent-first programming language**: written, read, and maintained primarily by LLM agents, with humans in a review and audit role. Transpiles to readable source in host languages (C# primary, Go secondary).
 
@@ -16,6 +15,8 @@ The name is the design philosophy: every effect, error, dispatch, mutation, and 
 ---
 
 ## Why agent-first?
+
+<img src="assets/artwork/mascot.png" align="right" width="200" alt="Overt mascot">
 
 Every existing programming language is designed for humans. Short names, implicit effects, positional arguments, exceptions that unwind invisibly, and reflection are all accommodations for *human* cognitive limits: small working memory, strong pattern-matching, and strong causal intuition.
 
