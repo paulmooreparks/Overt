@@ -1560,9 +1560,8 @@ public sealed class CSharpEmitter
 
         var id = _propagateCounter++;
         var qName = $"__q_{id}";
-        var vName = $"__qv_{id}";
 
-        _w.Write($"var {qName} = (");
+        _w.Write($"var {qName} = ");
         if (operand is BinaryExpr pipe)
         {
             EmitPipeSpliceOnly(pipe);
@@ -1571,11 +1570,14 @@ public sealed class CSharpEmitter
         {
             EmitExpression(operand);
         }
-        _w.WriteLine(");");
+        _w.WriteLine(";");
         _w.WriteLine($"if (!{qName}.IsOk) return Err<{errCs}>({qName}.UnwrapErr());");
-        _w.WriteLine($"var {vName} = {qName}.Unwrap();");
 
-        _hoistMap[siteSpan] = vName;
+        // Substitute `__q_N.Unwrap()` at the `?` use site rather than stashing
+        // the unwrapped value in a second local. Unwrap() is cheap after the
+        // IsOk check above, and eliding the temp removes the bulk of the
+        // `__q_N`/`__qv_N` noise from the emitted source.
+        _hoistMap[siteSpan] = $"{qName}.Unwrap()";
     }
 
     /// <summary>

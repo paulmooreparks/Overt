@@ -24,7 +24,12 @@ public class CSharpEmitterTests
         Assert.Contains("namespace Overt.Generated.Hello;", csharp);
         Assert.Contains("public static class Module", csharp);
         Assert.Contains("public static Result<Unit, IoError> main()", csharp);
-        Assert.Contains(".Unwrap()", csharp); // ? propagation
+        // `?` propagation: the hoist emits `var __q_N = expr; if (!__q_N.IsOk)
+        // return Err<E>(__q_N.UnwrapErr());`. An Unwrap() call only appears
+        // at use sites where the Ok value is consumed; hello.ov's `?` is a
+        // pure discard, so the Err-check shape is the signal.
+        Assert.Contains("var __q_0 = println", csharp);
+        Assert.Contains("if (!__q_0.IsOk) return Err<IoError>(__q_0.UnwrapErr());", csharp);
         // With the function-return type known, the emitter pins Ok's type parameter and
         // casts the argument so generic-return helpers target-type correctly in nested
         // positions. Either form is valid Ok; the explicit-T form is what we expect now.

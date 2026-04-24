@@ -21,9 +21,8 @@ public static class Module
     // !{io}
     public static Result<Unit, IoError> main()
     {
-        var __q_0 = (println("Hello, LLM!"));
+        var __q_0 = println("Hello, LLM!");
         if (!__q_0.IsOk) return Err<IoError>(__q_0.UnwrapErr());
-        var __qv_0 = __q_0.Unwrap();
         return Ok<Unit>((Unit)Unit.Value);
     }
 
