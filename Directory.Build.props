@@ -40,7 +40,7 @@
   <PropertyGroup>
     <Product>Overt</Product>
     <Company>Overt contributors</Company>
-    <Copyright>Copyright (c) Overt contributors</Copyright>
+    <Copyright>Copyright (c) Paul Moore Parks</Copyright>
     <AssemblyVersion Condition="'$(OvertVersionBase)' != ''">$(OvertVersionBase).0.0</AssemblyVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Deterministic>true</Deterministic>
