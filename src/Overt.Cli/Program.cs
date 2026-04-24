@@ -256,6 +256,15 @@ static class Cli
         }
         var refs = ImmutableArray.CreateBuilder<RoslynCore.MetadataReference>();
         var runtimeAssembly = typeof(global::Overt.Runtime.Unit).Assembly;
+        // IL3000 flags every Assembly.Location read as single-file-unsafe, but
+        // the logic here already handles the empty-Location case (continue /
+        // IsNullOrEmpty guard). Under single-file publish, every assembly
+        // returns empty Location, so `overt run` can't find references --
+        // that failure mode is on the Godbolt-style distribution, not the
+        // global-tool distribution; Godbolt uses --emit, which never touches
+        // this code path. Tracked as a separate redesign for when single-file
+        // + overt-run both matter on the same binary.
+#pragma warning disable IL3000
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (asm.IsDynamic) continue;
@@ -267,6 +276,7 @@ static class Cli
         {
             refs.Add(RoslynCore.MetadataReference.CreateFromFile(runtimeAssembly.Location));
         }
+#pragma warning restore IL3000
 
         var compilation = RoslynCSharp.CSharpCompilation.Create(
             assemblyName: Path.GetFileNameWithoutExtension(inputFile),
