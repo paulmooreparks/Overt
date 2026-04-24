@@ -278,6 +278,13 @@ match (state, event) {
 Missing arms fire **OV0308**. Literal patterns don't contribute to
 exhaustiveness (infinite domain); they require `_`.
 
+Tuple scrutinees whose every element is an enum-shaped type are checked
+cartesian-product-style: `match (a, b) { ... }` where `a: A` and `b: B`
+requires every `(A.variant, B.variant)` pair to be covered. Per-position
+wildcards (`(_, B.P)`) expand to all variants at that position. Tuples
+that include a non-enum element (e.g. `Int`) skip the check since the
+pattern space is infinite.
+
 ### with — record update
 
 ```overt

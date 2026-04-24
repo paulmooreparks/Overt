@@ -680,13 +680,21 @@ public sealed class TypeChecker
     /// the list of uncovered names so agents adding a variant get every existing
     /// match pinpointed as a todo.
     ///
-    /// v0 limitations: only single-enum scrutinees (tuples of enums would be a
-    /// cartesian-product walk, deferred). Arity on variant patterns is not checked
-    /// here — <c>Some(x, y)</c> still counts as covering <c>Some</c> even though Some
-    /// takes one arg.
+    /// Also covers tuples of enums via a cartesian-product walk — <c>match (a, b)</c>
+    /// where both elements are enum-shaped enumerates all (variant_a, variant_b)
+    /// pairs and verifies each is covered by some arm, with per-position catch-alls
+    /// (e.g. `(_, B.Variant)`) expanding to cover every variant at that position.
+    ///
+    /// Arity on variant patterns is not checked here — <c>Some(x, y)</c> still
+    /// counts as covering <c>Some</c> even though Some takes one arg.
     /// </summary>
     private void CheckMatchExhaustiveness(MatchExpr me, TypeRef scrutineeType)
     {
+        if (scrutineeType is TupleTypeRef tuple)
+        {
+            CheckTupleMatchExhaustiveness(me, tuple);
+            return;
+        }
         if (scrutineeType is not NamedTypeRef nt) return;
 
         var allVariants = GetEnumVariants(nt.Name);
@@ -725,6 +733,138 @@ public sealed class TypeChecker
                 .WithHelp(
                     "add an arm for each missing variant, or add a wildcard arm "
                     + "`_ => ...` to cover the remainder"));
+    }
+
+    /// <summary>Exhaustiveness check for a tuple scrutinee whose every element is
+    /// an enum-shaped type. Missing pairs are reported as
+    /// <c>(EnumA.Variant, EnumB.Variant)</c>. Positions that aren't enum-shaped
+    /// make the pattern space infinite (e.g. tuple of Int), so we skip.</summary>
+    private void CheckTupleMatchExhaustiveness(MatchExpr me, TupleTypeRef tuple)
+    {
+        // Each position needs an enum name and variant set.
+        var positionEnums = new string[tuple.Elements.Length];
+        var positionVariants = new HashSet<string>[tuple.Elements.Length];
+        for (var i = 0; i < tuple.Elements.Length; i++)
+        {
+            if (tuple.Elements[i] is not NamedTypeRef nt) return;
+            var variants = GetEnumVariants(nt.Name);
+            if (variants is null) return;
+            positionEnums[i] = nt.Name;
+            positionVariants[i] = variants;
+        }
+
+        // Build the cartesian product as tuples-of-strings.
+        var cartesian = new List<string[]> { new string[tuple.Elements.Length] };
+        for (var i = 0; i < tuple.Elements.Length; i++)
+        {
+            var next = new List<string[]>(cartesian.Count * positionVariants[i].Count);
+            foreach (var prefix in cartesian)
+            {
+                foreach (var v in positionVariants[i])
+                {
+                    var copy = (string[])prefix.Clone();
+                    copy[i] = v;
+                    next.Add(copy);
+                }
+            }
+            cartesian = next;
+        }
+
+        var covered = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var arm in me.Arms)
+        {
+            CollectTupleArmCoverage(arm.Pattern, positionEnums, positionVariants, covered);
+            // If the arm is a whole-tuple catch-all (`_` or bare binding), mark every
+            // combination covered — further arms are redundant but not our concern.
+            if (arm.Pattern is WildcardPattern
+                || (arm.Pattern is IdentifierPattern ip
+                    && !ip.Name.Any(char.IsUpper)))
+            {
+                foreach (var combo in cartesian) covered.Add(string.Join("", combo));
+            }
+        }
+
+        var missing = new List<string>();
+        foreach (var combo in cartesian)
+        {
+            var key = string.Join("", combo);
+            if (!covered.Contains(key))
+            {
+                var rendered = "(" + string.Join(", ",
+                    combo.Select((v, i) => $"{positionEnums[i]}.{v}")) + ")";
+                missing.Add(rendered);
+            }
+        }
+        if (missing.Count == 0) return;
+
+        var displayed = missing.Take(6).ToList();
+        var suffix = missing.Count > displayed.Count
+            ? $", … ({missing.Count - displayed.Count} more)"
+            : "";
+        var list = string.Join(", ", displayed.Select(m => $"`{m}`"));
+        var plural = missing.Count == 1 ? "combination" : "combinations";
+        _diagnostics.Add(
+            new Diagnostic(
+                DiagnosticSeverity.Error,
+                "OV0308",
+                $"non-exhaustive match on tuple of enums: missing {plural} {list}{suffix}",
+                me.Span)
+                .WithHelp(
+                    "add an arm for each missing combination, use a per-position "
+                    + "wildcard like `(_, B.Variant)`, or add a whole-tuple `_ => ...` arm"));
+    }
+
+    /// <summary>Expand a single arm's pattern into the set of (variant, variant, ...)
+    /// keys it covers in a tuple-of-enums scrutinee, writing them into
+    /// <paramref name="covered"/>. A non-tuple pattern contributes nothing (whole-tuple
+    /// catch-alls are handled by the caller).</summary>
+    private void CollectTupleArmCoverage(
+        Pattern pattern,
+        string[] positionEnums,
+        HashSet<string>[] positionVariants,
+        HashSet<string> covered)
+    {
+        if (pattern is not TuplePattern tp) return;
+        if (tp.Elements.Length != positionEnums.Length) return;
+
+        // Resolve each position to the set of variants it covers (singleton for
+        // variant refs, full set for catch-alls).
+        var perPos = new List<string>[positionEnums.Length];
+        for (var i = 0; i < positionEnums.Length; i++)
+        {
+            var inner = tp.Elements[i];
+            var name = TryGetVariantName(inner, positionEnums[i], positionVariants[i]);
+            if (name is not null)
+            {
+                perPos[i] = new List<string> { name };
+            }
+            else if (IsCatchAllPattern(inner, positionVariants[i]))
+            {
+                perPos[i] = positionVariants[i].ToList();
+            }
+            else
+            {
+                return; // pattern we don't understand — conservatively contribute nothing
+            }
+        }
+
+        // Cartesian-product over the per-position covered sets.
+        var combos = new List<string[]> { new string[positionEnums.Length] };
+        for (var i = 0; i < positionEnums.Length; i++)
+        {
+            var next = new List<string[]>(combos.Count * perPos[i].Count);
+            foreach (var prefix in combos)
+            {
+                foreach (var v in perPos[i])
+                {
+                    var copy = (string[])prefix.Clone();
+                    copy[i] = v;
+                    next.Add(copy);
+                }
+            }
+            combos = next;
+        }
+        foreach (var combo in combos) covered.Add(string.Join("", combo));
     }
 
     /// <summary>

@@ -299,14 +299,70 @@ public class TypeDiagnosticTests
     }
 
     [Fact]
-    public void OV0308_TupleScrutinee_NotChecked()
+    public void OV0308_TupleScrutinee_Wildcard_NoDiagnostic()
     {
-        // Tuple-of-enum exhaustiveness is deferred; v0 only handles single-enum
-        // scrutinees. Should produce no diagnostic even when incomplete.
+        // Whole-tuple `_ => ...` covers all combinations.
         var r = Check(
             "module t\nenum A { X, Y }\nenum B { P, Q }\n"
             + "fn f(a: A, b: B) -> Int "
             + "{ match (a, b) { (A.X, B.P) => 1, _ => 0 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_TupleOfEnums_MissingCombination_Fires()
+    {
+        // 2×2 cartesian = 4 combinations; covering only 3 should report the 4th.
+        var r = Check(
+            "module t\nenum A { X, Y }\nenum B { P, Q }\n"
+            + "fn f(a: A, b: B) -> Int "
+            + "{ match (a, b) { (A.X, B.P) => 1, (A.X, B.Q) => 2, (A.Y, B.P) => 3 } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("`(A.Y, B.Q)`", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_TupleOfEnums_AllCombinationsCovered_NoDiagnostic()
+    {
+        var r = Check(
+            "module t\nenum A { X, Y }\nenum B { P, Q }\n"
+            + "fn f(a: A, b: B) -> Int "
+            + "{ match (a, b) { (A.X, B.P) => 1, (A.X, B.Q) => 2, "
+            + "(A.Y, B.P) => 3, (A.Y, B.Q) => 4 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_TupleOfEnums_PerPositionWildcard_Covers()
+    {
+        // `(_, B.P)` covers (A.X, B.P) and (A.Y, B.P); `(_, B.Q)` handles the rest.
+        var r = Check(
+            "module t\nenum A { X, Y }\nenum B { P, Q }\n"
+            + "fn f(a: A, b: B) -> Int "
+            + "{ match (a, b) { (_, B.P) => 1, (_, B.Q) => 2 } }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_TupleOfEnums_PartialWildcard_StillMisses()
+    {
+        // `(_, B.P)` only covers B.P; B.Q arm is still missing.
+        var r = Check(
+            "module t\nenum A { X, Y }\nenum B { P, Q }\n"
+            + "fn f(a: A, b: B) -> Int "
+            + "{ match (a, b) { (_, B.P) => 1 } }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("B.Q", d.Message);
+    }
+
+    [Fact]
+    public void OV0308_TupleWithNonEnum_SkipsCheck()
+    {
+        // Tuple of (Enum, Int) has infinite pattern space on position 1 — no check.
+        var r = Check(
+            "module t\nenum A { X, Y }\n"
+            + "fn f(a: A, n: Int) -> Int "
+            + "{ match (a, n) { (A.X, 0) => 1, (A.Y, 0) => 2 } }");
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
     }
 
