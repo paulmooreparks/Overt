@@ -58,8 +58,8 @@ point than any existing language occupies.
 
 ## Humans Can Read It, but Humans Are Not the Audience
 
-This is the thing that trips people up when they first read the
-repo, so let me say it plainly: humans can read Overt, and I expect
+This is something that might trip people up when they first read
+Overt source code, so let me say it plainly: humans can read Overt, and I expect
 human auditors to *review* Overt code in practice. Humans are not,
 however, the primary authors, and the language doesn't bend itself
 to make human authorship more comfortable at the expense of agent
@@ -133,38 +133,38 @@ app.ov:12:5: error: OV0310: function `process` performs effect `io`
 
 The fix is in the message. No "check the docs" round-trip, because
 the docs pointer *is in the error.* (Come to think of it, maybe programming
-languages for humans should do this too.)
+languages for humans should do this, too.)
 
 ## Overt Is a .NET Application. Or a Go Application. Or...
 
-Here's the part that surprises people: when I show them a working
-Overt program, they assume it's running on some Overt VM. It isn't.
+There is another aspect of Overt that might surprise you.
+If I show you a working Overt program, you may assume it's running
+on some sort of Overt VM. It isn't.
 It's a .NET application. I don't mean that it has a lot in common
 with .NET because that's what the compiler is written in; I mean it
 *is* a .NET application.
 It compiles to IL, debugs in Visual Studio against the original `.ov`
 source, imports NuGet packages, publishes via `dotnet publish`,
-participates in the `dotnet` build graph through MSBuild.
+and it participates in the `dotnet` build graph through MSBuild.
 
 When the Go back end ships, an Overt program targeting Go *is* a Go
 application. It'll use `go mod`, link Go libraries, and produce tiny
-static binaries. The same applies to TypeScript, Rust, Zig, Swift, or
-whatever comes after.
+static binaries. The same will apply to TypeScript, Rust, Zig, Swift,
+or whatever comes after.
 
 **When you choose Overt for a project, you choose the language your
 agent writes. You also choose the back-end language and platform that
 fits the application.** Those are independent choices. Overt doesn't
 try to be multi-platform in the "write once, run anywhere" sense,
 and it doesn't hide standard library bindings behind some
-be-all-end-all abstraction. Each backend is explicit about its
+be-all-end-all abstraction. Each back end is explicit about its
 target.
 
-That means you can introduce Overt into an existing project (as
-long as Overt has a back end for that project) by installing one
-NuGet package and dropping `.ov` files next to `.cs` files. You can
-even mix languages and platforms: Go for the web back end, TypeScript
-for the web front end, and the agent can use a single language for
-both.
+That means you can currently introduce Overt into an existing .NET
+project by installing one NuGet package and dropping `.ov` files next
+to `.cs` files. You may even mix languages and platforms, such as Go
+for the web back end and TypeScript for the web front end,
+and the agent can use a single language for both.
 
 ## Why "Transpile to a Host Language" Is Right, Not a Workaround
 
@@ -172,18 +172,18 @@ Two observations make this the right architecture rather than a
 shortcut:
 
 **The compiler host and the emission target are independent axes.**
-The compiler is a C# program today. It runs on .NET. It emits `.cs`
-today and will emit `.go` next. Nothing about targeting Go requires
+The compiler is a C# program today. It runs on .NET, It emits `.cs`
+today, and it will emit `.go` in the future. Nothing about targeting Go requires
 the compiler to *run on* Go's toolchain. Someone targeting Go just
 needs .NET installed to run the compiler; the output runs on Go's
 toolchain. Same pattern TypeScript uses: `tsc` is written in
 TypeScript, runs on Node, emits JavaScript for any environment.
 
-The practical consequence: **new backends are libraries, not
-compilers.** A backend author doesn't rewrite the lexer, parser, or
+The practical consequence is that **new back ends are libraries, not
+compilers**. A back end author doesn't rewrite the lexer, parser, or
 type-checker. They write one project that walks the AST and emits
 target source. The language is the AST shape. Everything above that
-is shared across every backend.
+is shared across every back end.
 
 **Inheriting the host's runtime is free power.** An Overt program
 targeting .NET inherits the GC, BCL, async/await, NativeAOT, Blazor
@@ -194,8 +194,8 @@ normal things; I bind to the target's stdlib through explicit, typed
 FFI. Agents get to use their training priors about `System.Text.Json`
 directly, and there's no "Overt JSON" that subtly differs from it.
 
-Eventually there'll be a portable back end for Overt, but before
-then there'll be many back ends that are all easier for AI to read,
+Eventually, there will be a portable back end for Overt, but before
+then there will be many back ends that are all easier for AI to read,
 write, and reason about (RWRA) because of Overt.
 
 ## What Overt Is Not
@@ -206,9 +206,9 @@ Here are a few things to get out of the way:
   by hand.** If you're a strong C# developer writing a
   performance-critical inner loop and you know exactly what IL you
   want, write C#. Overt's tradeoffs are for the author who *isn't*
-  already expert, which describes every agent regardless of how
-  much of the internet it's read.
-- **It's not trying to be portable-across-backends.** An Overt
+  already an expert, which describes every agent regardless of how
+  much of the Internet it's read.
+- **It's not trying to be portable across back ends.** An Overt
   program written against the C# back end uses C#-flavored stdlib
   facades and won't compile against Go. A portable back end will
   eventually exist, but it'll be its own deliberate thing, not
@@ -238,8 +238,8 @@ surprise later.
 
 - That agents produce *better* Overt than they produce Python or
   C# on the same task. I believe this, but I haven't run controlled
-  measurements. Individual impressions have been encouraging;
-  individual impressions aren't data.
+  measurements. Individual impressions have been encouraging,
+  but individual impressions aren't data.
 - That the specific knobs Overt turned (mandatory `let`
   annotations, `.await` postfix, no shadowing, etc.) each earn their
   keep. Some probably matter more than others, and the order isn't
@@ -257,7 +257,7 @@ section.
 The [README](../README.md) has a quick-try: clone the repo, run one
 command, and you're executing an Overt program through the full
 pipeline. To pull Overt into an existing C# project, see [AGENTS.md
-§11](../AGENTS.md#11-building-with-msbuild-c-backend) and the working
+§11](../AGENTS.md#11-building-with-msbuild-c-back-end) and the working
 sample at [`samples/msbuild-smoke/`](../samples/msbuild-smoke/).
 
 I'm especially interested in feedback from people whose first

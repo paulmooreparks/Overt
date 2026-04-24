@@ -481,7 +481,7 @@ else.
 
 ---
 
-## 11. Building with MSBuild (C# backend)
+## 11. Building with MSBuild (C# Back End)
 
 A `.csproj` can include `.ov` files directly by pulling in the
 `Overt.Build` NuGet package. Each `.ov` file transpiles to C# under
