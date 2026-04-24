@@ -215,6 +215,13 @@ static class Cli
             return 1;
         }
 
+        // Force-load common BCL assemblies (System.Text.Json, System.Net.Http,
+        // etc.) so they're in the AppDomain when we collect MetadataReferences
+        // below. Without this, an extern binding that reaches into one of
+        // these assemblies emits valid C# that then fails to compile because
+        // the type isn't in scope.
+        PreloadCommonBclAssemblies();
+
         // Resolve + type-check the module graph through the shared pipeline,
         // which applies stdlib auto-discovery (DiscoverSearchDirs).
         var compiled = CompileGraph(inputFile);

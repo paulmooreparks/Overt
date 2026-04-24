@@ -536,7 +536,10 @@ public static class BindGenerator
         if (method.IsGenericMethod)
         {
             canRender = false;
-            skipReason = "method is generic";
+            var typeParams = string.Join(", ", method.GetGenericArguments().Select(a => a.Name));
+            skipReason = $"generic method (parameters: {typeParams}) — "
+                + $"bind by hand with a concrete type arg: "
+                + $"binds \"{targetType.FullName}.{method.Name}<YourType>\"";
         }
 
         string? returnOvertType = null;

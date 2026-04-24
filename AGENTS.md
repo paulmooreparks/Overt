@@ -593,6 +593,21 @@ constructed type (OV0316 otherwise) — and emits `new T(args)`.
 constructors, static members, and instance methods get emitted in one pass
 with the correct kind keywords.
 
+**Generic methods.** BCL methods with a type parameter (like
+`JsonSerializer.Deserialize<T>` or `Enumerable.Empty<T>`) can be bound by
+spelling the concrete type argument inline in the binds target:
+
+```overt
+extern "csharp" fn parse_int_json(s: String) -> Int
+    binds "System.Text.Json.JsonSerializer.Deserialize<int>"
+```
+
+The emitter passes the angle-bracket segment through verbatim, so .NET
+picks up the specialized method. Each specialization is its own extern
+declaration. `overt bind` doesn't auto-generate these (the type argument
+is user-chosen); it emits a `// skipped` comment with the canonical
+shape to copy.
+
 **Cross-type references.** For methods that take or return other opaque
 types, register them with `--with-opaque`:
 

@@ -25,6 +25,16 @@ public class StdlibTranspiledEndToEndTests
     private static ImmutableArray<MetadataReference> BuildReferences()
     {
         var runtimeAssembly = typeof(Overt.Runtime.Unit).Assembly;
+        // Force-load common BCL assemblies (JSON, HTTP, Regex, generic
+        // collections) so tests that exercise externs reaching into those
+        // namespaces see them in the MetadataReferences below.
+        _ = new Type[]
+        {
+            typeof(System.Net.Http.HttpClient),
+            typeof(System.Text.Json.JsonSerializer),
+            typeof(System.Text.RegularExpressions.Regex),
+            typeof(System.Collections.Generic.Dictionary<,>),
+        };
         var refs = ImmutableArray.CreateBuilder<MetadataReference>();
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {
@@ -778,6 +788,33 @@ public class StdlibTranspiledEndToEndTests
         Assert.NotNull(result);
         Assert.Equal("True",
             result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
+    public void Transpiled_ExternCsharp_GenericMethodViaAngleBracketBindsTarget()
+    {
+        // Generic BCL methods (like JsonSerializer.Deserialize<T>) work today
+        // by spelling the type argument inline in the binds target. The
+        // emitter passes `Namespace.Type.Method<ConcreteT>` through verbatim
+        // to the C# call. The user picks the concrete T; Overt and .NET see
+        // the specialized method.
+        const string src = """
+            module generic_ext_e2e
+
+            extern "csharp" fn parse_int_json(s: String) -> Int
+                binds "System.Text.Json.JsonSerializer.Deserialize<int>"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = parse_int_json("42")
+                println("n = ${n}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "generic_ext_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("n = 42", stdout);
     }
 
     [Fact]
