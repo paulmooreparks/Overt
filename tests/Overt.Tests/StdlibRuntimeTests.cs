@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using Overt.Runtime;
 using static Overt.Runtime.Prelude;
 
@@ -116,19 +117,30 @@ public class StdlibRuntimeTests
     [Fact]
     public void ParMap_RunsConcurrently()
     {
-        // Record the set of thread ids the callback saw. For a list >> 1, with a
-        // callback that blocks briefly, we expect more than one thread to appear;
-        // if par_map were serial this would be 1.
+        // Record the set of thread ids the callback saw. For a long-enough
+        // list with a callback that blocks, Parallel.For should spread the
+        // work across multiple pool threads; if par_map were serial, the
+        // set would degenerate to 1.
+        //
+        // The workload is tuned to defeat Parallel.For's "too small to
+        // parallelize" heuristic: 32 items at 50 ms each totals 1.6 s
+        // serial, which on anything but a pegged single-CPU runner is far
+        // over the threshold where the scheduler chooses to spread work.
+        // On a truly single-CPU host the contract degenerates; we skip
+        // the assertion rather than assert a false-positive flake.
+        if (System.Environment.ProcessorCount < 2)
+            return;
+
         var threadIds = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
-        var input = L(1, 2, 3, 4, 5, 6, 7, 8);
+        var input = L(Enumerable.Range(1, 32).ToArray());
         par_map<int, int, string>(input, x =>
         {
             threadIds.TryAdd(System.Environment.CurrentManagedThreadId, 0);
-            System.Threading.Thread.Sleep(20);
+            System.Threading.Thread.Sleep(50);
             return Ok(x);
         });
         Assert.True(threadIds.Count > 1,
-            $"expected parallel execution, saw only {threadIds.Count} thread(s)");
+            $"expected parallel execution on a {System.Environment.ProcessorCount}-CPU host, saw only {threadIds.Count} thread(s)");
     }
 
     // -------------------------------------------------------------- Trace
