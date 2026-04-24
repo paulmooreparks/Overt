@@ -674,11 +674,6 @@ fn strlen(s: String) -> Int {
   Buried in a call like `foo(if cond { bar()? } else { baz })` it may fall
   back to `.Unwrap()` which throws. Lift the `?` into a let if you need
   guaranteed propagation.
-- **Return-value refinement checks.** Boundary-wrapping fires at call
-  args, let initializers, and record field inits. A refinement violation
-  in a function's return expression is not currently detected at runtime;
-  add a call-site binding if you need the guarantee (`let r: Refined = f(x)`
-  triggers the let-boundary check).
 - **`f64` literal patterns in `match`.** Parse OK but don't fire — float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.

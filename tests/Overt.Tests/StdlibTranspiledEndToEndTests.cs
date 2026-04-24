@@ -698,6 +698,34 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_NonGenericRefinement_ReturnPosition_ThrowsOnBadValue()
+    {
+        // Closes the previously-open return-position hole: a function whose
+        // body yields an unvalidated value with a refinement return type
+        // gets a boundary check at the trailing expression. Here `launder(n)`
+        // returns `n: Int` as `Age` — the return boundary should trigger
+        // `Age__Check` and throw for n=200.
+        const string src = """
+            module ref_return_e2e
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn launder(n: Int) -> Age { n }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Age = launder(200)
+                Ok(())
+            }
+            """;
+
+        var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => CompileAndRun(src, "ref_return_e2e_bad"));
+        var inner = Assert.IsType<Overt.Runtime.RefinementViolation>(ex.InnerException);
+        Assert.Equal("Age", inner.AliasName);
+        Assert.Equal(200, inner.OffendingValue);
+    }
+
+    [Fact]
     public void Transpiled_NonGenericRefinement_ValidValue_Passes()
     {
         // Counterpart: a value inside the predicate range flows through

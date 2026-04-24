@@ -270,6 +270,18 @@ public sealed class TypeChecker
     private void CheckReturnType(FunctionDecl fn, TypeRef actualBodyType)
     {
         var declaredReturn = fn.ReturnType is null ? PrimitiveType.Unit : LowerType(fn.ReturnType);
+
+        // Refinement check at the return boundary. Covers `fn f(n: Int) -> Age { n }`
+        // where unfolding makes the type-equality check pass but the predicate still
+        // needs to run on the returned value. Only applies when the body has a single
+        // trailing expression (the natural boundary); early-returns inside nested
+        // control flow are the caller's responsibility to bind at a boundary.
+        if (fn.Body.TrailingExpression is { } trailing)
+        {
+            CheckRefinementAtBoundary(trailing, declaredReturn,
+                boundaryDescription: "return value");
+        }
+
         var declaredUnfolded = UnfoldAlias(declaredReturn);
         var actualUnfolded = UnfoldAlias(actualBodyType);
         if (!IsConcrete(declaredUnfolded) || !IsConcrete(actualUnfolded)) return;
