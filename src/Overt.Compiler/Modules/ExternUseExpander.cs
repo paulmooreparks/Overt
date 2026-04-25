@@ -45,19 +45,41 @@ public static class ExternUseExpander
 
     /// <summary>
     /// Run the expander over a parsed module. Returns the same module with
-    /// every <c>extern "platform" use "..."</c> declaration replaced by the
-    /// declarations the resolver supplied for it, plus any diagnostics
-    /// produced during resolution.
+    /// every <c>extern "platform" use "..."</c> declaration handled, plus
+    /// any synthetic modules produced for aliased uses, plus diagnostics.
+    ///
+    /// Two paths through the expander, by alias presence:
+    /// <list type="bullet">
+    ///   <item>
+    ///     <b>No alias</b>: the resolver-generated declarations are spliced
+    ///     directly into the user's module at the position of the original
+    ///     <c>extern use</c>. Method names land at top-level scope, mirroring
+    ///     C#'s <c>using static</c>.
+    ///   </item>
+    ///   <item>
+    ///     <b>With alias</b>: the resolver-generated source becomes a synthetic
+    ///     <see cref="ModuleGraph.LoadedModule"/>, returned via
+    ///     <see cref="Result.SyntheticModules"/> so the caller can add it to the
+    ///     compilation graph. The original <c>extern use</c> is replaced with a
+    ///     <see cref="UseDecl"/> that imports that synthetic module under the
+    ///     given alias. Method names land under the alias namespace, mirroring
+    ///     C#'s <c>using Alias = ...</c> form.
+    ///   </item>
+    /// </list>
+    /// Failures (missing target, parse errors, etc.) become module-level
+    /// diagnostics and the original use declaration is dropped from the
+    /// expanded module.
     /// </summary>
     public static Result Expand(ModuleDecl module, Resolver resolver)
     {
         if (module.Declarations.IsDefaultOrEmpty)
         {
-            return new Result(module, ImmutableArray<Diagnostic>.Empty);
+            return new Result(module, ImmutableArray<ModuleGraph.LoadedModule>.Empty, ImmutableArray<Diagnostic>.Empty);
         }
 
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         var newDecls = ImmutableArray.CreateBuilder<Declaration>(module.Declarations.Length);
+        var syntheticModules = ImmutableArray.CreateBuilder<ModuleGraph.LoadedModule>();
 
         foreach (var decl in module.Declarations)
         {
@@ -67,30 +89,50 @@ public static class ExternUseExpander
                 continue;
             }
 
-            var resolved = TryResolve(resolver, use, diagnostics);
-            if (resolved is null)
+            var resolution = TryResolveModule(resolver, use, diagnostics);
+            if (resolution is null)
             {
-                // Failure already reported via diagnostics. Drop the use
-                // declaration so downstream passes (typer, emitter) don't
-                // trip on a use directive they don't know how to handle.
+                // Failure already reported. Drop the use declaration so
+                // downstream passes don't trip on it.
                 continue;
             }
 
-            foreach (var generated in resolved)
+            if (use.Alias is null)
             {
-                newDecls.Add(generated);
+                // No-alias path: splice the generated declarations into the
+                // user's module at the position of the original `extern use`.
+                foreach (var generated in resolution.Value.Module.Ast.Declarations)
+                {
+                    newDecls.Add(generated);
+                }
+            }
+            else
+            {
+                // Aliased path: the generated declarations become a synthetic
+                // module; replace the `extern use` with a `use ... as alias`
+                // that imports it.
+                syntheticModules.Add(resolution.Value.Module);
+                newDecls.Add(new UseDecl(
+                    ModulePath: ImmutableArray.Create(resolution.Value.Module.Name),
+                    ImportedSymbols: ImmutableArray<string>.Empty,
+                    Alias: use.Alias,
+                    Span: use.Span));
             }
         }
 
         var expanded = module with { Declarations = newDecls.ToImmutable() };
-        return new Result(expanded, diagnostics.ToImmutable());
+        return new Result(expanded, syntheticModules.ToImmutable(), diagnostics.ToImmutable());
     }
 
     public sealed record Result(
         ModuleDecl Module,
+        ImmutableArray<ModuleGraph.LoadedModule> SyntheticModules,
         ImmutableArray<Diagnostic> Diagnostics);
 
-    private static ImmutableArray<Declaration>? TryResolve(
+    private readonly record struct ResolvedModule(
+        ModuleGraph.LoadedModule Module);
+
+    private static ResolvedModule? TryResolveModule(
         Resolver resolver,
         ExternUseDecl use,
         ImmutableArray<Diagnostic>.Builder diagnostics)
@@ -152,9 +194,17 @@ public static class ExternUseExpander
             return null;
         }
 
-        // The generated source is a full module; we want only its
-        // declarations. The synthetic module name is irrelevant to the
-        // surrounding code.
-        return parse.Module.Declarations;
+        // Build a synthetic LoadedModule from the parse result. The module
+        // name comes from the resolver-supplied `module` declaration; the
+        // source path is a marker indicating the module did not come from
+        // disk (so error reporting and IDE tooling can recognize it).
+        var syntheticPath = $"<extern:{use.Platform}:{use.Target}>";
+        var loaded = new ModuleGraph.LoadedModule(
+            Name: parse.Module.Name,
+            SourcePath: syntheticPath,
+            Source: source,
+            Tokens: lex.Tokens,
+            Ast: parse.Module);
+        return new ResolvedModule(loaded);
     }
 }

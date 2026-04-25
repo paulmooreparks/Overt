@@ -413,17 +413,23 @@ static class Cli
 
         // Expand `extern "csharp" use "..."` declarations against the
         // C# back end's BindGenerator before name resolution sees the
-        // module. Each module's AST is replaced with the expanded form
-        // (extern uses spliced into per-symbol extern fn declarations);
-        // any resolver failure becomes a module-level diagnostic.
+        // module. Each module's AST is replaced with the expanded form;
+        // for unaliased uses the resolver-generated declarations are
+        // spliced inline, for aliased uses they become a synthetic
+        // sibling module that the user's module imports via a UseDecl.
+        // Synthetic modules are inserted before user modules in the
+        // processing order so their exports populate before any user
+        // module that imports them is type-checked.
         var expandedModules = ImmutableArray.CreateBuilder<ModuleGraph.LoadedModule>(graph.Modules.Length);
+        var syntheticModules = ImmutableArray.CreateBuilder<ModuleGraph.LoadedModule>();
         foreach (var mod in graph.Modules)
         {
             var expansion = ExternUseExpander.Expand(mod.Ast, CSharpExternUseResolver.Resolve);
             allDiagnostics = allDiagnostics.AddRange(expansion.Diagnostics);
             expandedModules.Add(mod with { Ast = expansion.Module });
+            syntheticModules.AddRange(expansion.SyntheticModules);
         }
-        var modules = expandedModules.ToImmutable();
+        var modules = syntheticModules.ToImmutable().AddRange(expandedModules.ToImmutable());
 
         var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
         var moduleTypes = new Dictionary<string, TypeCheckResult>(StringComparer.Ordinal);

@@ -123,6 +123,55 @@ public class ExternUseExpanderTests
     }
 
     [Fact]
+    public void Expand_AliasedUse_ProducesSyntheticModuleAndUseDecl()
+    {
+        var module = Parse(
+            "module m\nextern \"csharp\" use \"System.Math\" as math\nfn other() -> Int { 1 }");
+
+        ExternUseExpander.Resolver resolver = (_, _) => """
+            module __synth_math
+            extern "csharp" fn pi() -> Float
+                binds "System.Math.PI"
+            """;
+
+        var result = ExternUseExpander.Expand(module, resolver);
+        Assert.Empty(result.Diagnostics);
+
+        // Aliased path should NOT splice declarations into the user's
+        // module; it should produce one synthetic module and one UseDecl.
+        Assert.Single(result.SyntheticModules);
+        Assert.Equal("__synth_math", result.SyntheticModules[0].Name);
+        Assert.Contains(result.SyntheticModules[0].Ast.Declarations, d => d is ExternDecl);
+
+        // The user's module now contains the UseDecl + the user's own fn,
+        // and no extern declarations of its own.
+        Assert.Equal(2, result.Module.Declarations.Length);
+        var useDecl = Assert.IsType<UseDecl>(result.Module.Declarations[0]);
+        Assert.Equal("__synth_math", useDecl.ModuleName);
+        Assert.Equal("math", useDecl.Alias);
+        var fn = Assert.IsType<FunctionDecl>(result.Module.Declarations[1]);
+        Assert.Equal("other", fn.Name);
+
+        Assert.DoesNotContain(result.Module.Declarations, d => d is ExternDecl);
+    }
+
+    [Fact]
+    public void Expand_UnaliasedUse_DoesNotProduceSyntheticModules()
+    {
+        var module = Parse("module m\nextern \"csharp\" use \"System.Math\"");
+
+        ExternUseExpander.Resolver resolver = (_, _) => """
+            module __synth
+            extern "csharp" fn pi() -> Float
+                binds "System.Math.PI"
+            """;
+
+        var result = ExternUseExpander.Expand(module, resolver);
+        Assert.Empty(result.Diagnostics);
+        Assert.Empty(result.SyntheticModules);
+    }
+
+    [Fact]
     public void Expand_ResolverReturnsMalformedSource_EmitsOV0173()
     {
         var module = Parse("module m\nextern \"csharp\" use \"Bad\"");
