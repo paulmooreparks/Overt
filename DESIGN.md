@@ -759,6 +759,16 @@ Same principle on the Go side: `Result<T, E>` becomes `(T, error)`, `Option<T>` 
 
 Anything outside this table is **disallowed from crossing the boundary** in v1. Force the agent to write a wrapper record or function rather than silently mismatch.
 
+### Principle: stdlib types preserve their Overt semantics across all backends
+
+Every row in the marshaling table reflects the same rule: Overt's stdlib types commit to specific semantics (immutable, value-equality, deterministic iteration where applicable), and each backend gets whatever target-language representation preserves those semantics. The choice of representation is per-target — `IReadOnlyList<T>` for C#, `[]T` for Go, `std::vector<T>` for C++ when it lands — but the contract those representations carry is identical: this is an Overt `List<T>`, immutable from Overt's perspective, value-equal by content, O(1)-indexable.
+
+When the target language has no construct to enforce Overt's semantics at compile time (Go has no `const`-ness on slices, C++ vectors are mutable by default), the contract is **immutable by convention, enforced at the boundary, documented in the API.** Trust on the host side; the host author knows they are holding an Overt value. This is the same compromise the Go ecosystem already makes for its own immutable-by-convention idioms; nothing more clever is possible at the type level when the language has no affordance for it.
+
+A target's own collection types are different things, reached through `use`. C#'s `System.Collections.Generic.List<T>` is the BCL's mutable list and is a separate type from Overt's `List<T>`; the program reaches it via `extern "csharp" use "System.Collections.Generic.List"` and disambiguates with an alias when the names collide. Same for `std::list<T>`, `std::vector<T>`, Python `list`, JavaScript `Array`. They are tools available to the program, not Overt-stdlib types.
+
+The same principle decides what earns a place in the Overt stdlib at all (§19): **only types whose Overt semantics meaningfully differ from every target's native equivalent.** `Result<T, E>` qualifies — no target has `Result` with these semantics. `Option<T>` qualifies — nullables behave differently across targets. `List<T>` qualifies — immutable + value-equal + structural-sharing differs from every target's default list. `String` does not qualify — every target has strings, they all work, wrapping them adds no information. `Int`, `Float`, `Bool` do not qualify for the same reason. This is the test for any future stdlib candidate: if the answer is "we just rename the target's type," it does not belong in stdlib.
+
 ### Bulk import: `use` and the convention layer
 
 The per-method `extern "csharp" fn ... binds "..."` form above scales linearly with surface area. For real programs, that's untenable: the BCL alone is thousands of types, and any project of substance pulls in five to fifty third-party NuGet packages. Hand-writing facades for each method is impossible. Curating an Overt-shipped stdlib that wraps it all is also impossible — the surface is too large, changes too often across versions, and forces every Overt program to drag the curation along whether it uses it or not.
@@ -1070,7 +1080,7 @@ The agent-RWRA tradeoff is real and accepted. Passthrough attributes are less ov
 
 **Truly-Overt-native types and helpers only; the bulk-import path (§17) covers everything else.**
 
-Overt's stdlib covers what is genuinely Overt and not reachable through `extern "csharp" use` (or its per-target equivalents). Anything that has a sensible target-language analog is reached through the bulk-import path, not curated as an Overt-shaped wrapper.
+Overt's stdlib covers what is genuinely Overt and not reachable through `extern "csharp" use` (or its per-target equivalents). The test for membership is the principle stated in §17: a type belongs in the Overt stdlib only if its semantics meaningfully differ from every target's native equivalent. Anything that has a sensible target-language analog is reached through the bulk-import path, not curated as an Overt-shaped wrapper.
 
 Stays curated:
 
