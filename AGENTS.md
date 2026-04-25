@@ -677,6 +677,20 @@ your specific use.
 resolver threw (OV0171), resolver returned source that fails to lex
 (OV0172) or parse (OV0173).
 
+**Discovery**: `overt inspect "<Target>"` prints the synthesized
+facade — the same Overt source the typer sees during compilation —
+without writing anything to disk. Use it to find the snake-cased
+overload-disambiguated names a `use` declaration brings into scope:
+
+```
+overt inspect "System.Math"
+overt inspect "System.IO.File"
+overt inspect "System.Text.Json.JsonSerializer"
+```
+
+`--platform <name>` selects the resolver; `csharp` is the default and
+the only one wired up today.
+
 **Scope today**: static methods, top-level static properties / fields,
 and instance methods that BindGenerator already supports. Convention
 refinements (nullable → Option from C# 8+ annotations, `Try*` pattern

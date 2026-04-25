@@ -46,6 +46,10 @@ if (args.Length >= 1 && args[0] == "bind")
 {
     return Cli.BindProgram(args.AsSpan(1).ToArray());
 }
+if (args.Length >= 1 && args[0] == "inspect")
+{
+    return Cli.InspectProgram(args.AsSpan(1).ToArray());
+}
 
 return Cli.Run(args);
 
@@ -67,6 +71,7 @@ static class Cli
                overt run <file.ov>
                overt fmt [--write] <file.ov>
                overt bind --type <FullName> [--module <name>] [--output <file>]
+               overt inspect <Target> [--platform <name>]
 
         commands:
           run              transpile, compile, and execute <file.ov>. Exits 0 on
@@ -76,6 +81,9 @@ static class Cli
           bind             reflect on a .NET type and emit an Overt facade
                            (extern declarations) for its public static methods.
                            Writes to stdout unless --output is given.
+          inspect          print the Overt source an `extern "csharp" use "..."`
+                           declaration would resolve to. Discovery surface for
+                           bulk-import; never writes to disk.
 
         options:
           --emit=<stage>   required for emit mode. one of:
@@ -780,6 +788,81 @@ static class Cli
         {
             Console.Out.Write(overtSource);
         }
+        return 0;
+    }
+
+    // `overt inspect <Target> [--platform csharp]` — print the synthesized
+    //   facade an `extern "<platform>" use "<Target>"` declaration would
+    //   resolve to. Output is the resolver's Overt source, never written
+    //   to disk; the same string the typer sees during compilation.
+    //
+    //   This is the discovery surface for bulk-import: agents asking
+    //   "what does `extern "csharp" use \"System.IO.File\"` expose?" run
+    //   `overt inspect "System.IO.File"` and read the result. Specced in
+    //   DESIGN.md §17 ("Discovery: `overt inspect`").
+    public static int InspectProgram(string[] args)
+    {
+        string? target = null;
+        var platform = "csharp";
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            switch (arg)
+            {
+                case "--help" or "-h":
+                    Console.Out.WriteLine(
+                        "usage: overt inspect <Target> [--platform <name>]\n\n"
+                        + "  <Target>        the target-language type to inspect\n"
+                        + "                  (e.g. \"System.IO.File\", \"System.Text.Json.JsonSerializer\").\n"
+                        + "  --platform      backend resolver to use. Default: csharp.\n"
+                        + "                  Today csharp is the only backend with a resolver.\n\n"
+                        + "Prints the Overt source that an `extern \"<platform>\" use \"<Target>\"`\n"
+                        + "declaration would resolve to. The output is identical to what the\n"
+                        + "compiler sees during type-checking; nothing is written to disk.");
+                    return 0;
+                case "--platform":
+                    if (++i >= args.Length) { Console.Error.WriteLine("overt inspect: --platform needs a value"); return 2; }
+                    platform = args[i];
+                    break;
+                default:
+                    if (arg.StartsWith("--", StringComparison.Ordinal))
+                    {
+                        Console.Error.WriteLine($"overt inspect: unknown option '{arg}'");
+                        return 2;
+                    }
+                    if (target is not null)
+                    {
+                        Console.Error.WriteLine("overt inspect: only one target may be inspected per invocation");
+                        return 2;
+                    }
+                    target = arg;
+                    break;
+            }
+        }
+        if (target is null)
+        {
+            Console.Error.WriteLine("overt inspect: a target type is required");
+            Console.Error.WriteLine("usage: overt inspect <Target> [--platform <name>]");
+            return 2;
+        }
+
+        // Same preload the bind / run paths use: BCL assemblies that don't
+        // get pulled in by touching our own code (System.Text.Json,
+        // System.Net.Http, etc.) need a force-load so reflection finds them.
+        PreloadCommonBclAssemblies();
+
+        var source = CSharpExternUseResolver.Resolve(platform, target);
+        if (source is null)
+        {
+            Console.Error.WriteLine(
+                $"overt inspect: cannot resolve `{platform}:{target}`. "
+                + (platform == "csharp"
+                    ? "Type not found in any loaded assembly. For NuGet types, ensure the package is referenced by a project the CLI has built against; bare BCL types should resolve directly."
+                    : $"No resolver registered for platform `{platform}`. Today only `csharp` is supported."));
+            return 1;
+        }
+
+        Console.Out.Write(source);
         return 0;
     }
 
