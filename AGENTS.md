@@ -637,6 +637,55 @@ native purity" rule.
 
 ---
 
+## 11.7. FFI bulk-import: `extern "csharp" use "..."`
+
+For target-language types whose surface is large enough that
+hand-writing per-method `extern "csharp" fn ... binds "..."`
+declarations is impractical (the BCL, NuGet packages, your own
+sibling assemblies), use the bulk-import form. The compiler reflects
+on the named target, generates Overt-shaped extern declarations for
+its public members, and splices them into your module:
+
+```overt
+extern "csharp" use "System.IO.File"
+extern "csharp" use "System.Text.Json.JsonSerializer" as json
+```
+
+Two shapes by alias presence:
+
+- **No alias**: the generated extern fns land at top-level scope.
+  `File.WriteAllText` becomes top-level `write_all_text`. Mirrors C#'s
+  `using static`. Two `extern use` declarations whose generated method
+  names overlap will collide; alias one or both to disambiguate.
+- **With alias**: the generated declarations live in a synthetic
+  module imported under the alias. Calls become `alias.method_name(...)`.
+  Mirrors C#'s `using Alias = ...` form.
+
+Method names are snake-cased and overload-disambiguated by parameter
+type (`max_double_double` for `Math.Max(double, double)`,
+`max_int_int` for the int overload, etc.). Static methods, properties,
+and instance methods are all reachable; instance methods take a
+`self: T` first parameter, e.g. `sb.append(self = builder, value = "x")`.
+
+**Compared to the per-method form**: `extern "csharp" fn name(...) binds "..."`
+is the explicit override. Where both apply to the same symbol, the
+per-method form wins. Use the per-method form when the default
+convention's effect row, error type, or signature shape is wrong for
+your specific use.
+
+**Diagnostics**: target not resolvable on this platform (OV0170),
+resolver threw (OV0171), resolver returned source that fails to lex
+(OV0172) or parse (OV0173).
+
+**Scope today**: static methods, top-level static properties / fields,
+and instance methods that BindGenerator already supports. Convention
+refinements (nullable → Option from C# 8+ annotations, `Try*` pattern
+recognition, async / Task lowering for instance methods) are
+incremental work tracked separately. The model and entry path are
+stable.
+
+---
+
 ## 12. Stdlib surface (runnable subset)
 
 ### Result / Option
