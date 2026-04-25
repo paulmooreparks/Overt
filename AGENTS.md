@@ -101,6 +101,12 @@ use stdlib.http.client as http
   resolves to `stdlib/http/client.ov` relative to the entry file's directory.
 - The `.ov` file's own `module` declaration must match the import name:
   `stdlib/http/client.ov` declares `module stdlib.http.client`.
+- **The module name is the emitted C# namespace.** A dotted name (`module
+  ParksComputing.SemVer`) emits to that namespace verbatim; consumers `using
+  ParksComputing.SemVer;` to reach the generated types. A single-identifier
+  name (`module greeter`) emits under `Overt.Generated.Greeter` so example
+  code, scripts, and tests don't claim names at the top of the namespace
+  tree. Library authors should always use a dotted name.
 - Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want
   (selective form) or alias the module (`as`).
 - Selective + alias together isn't supported; pick one.

@@ -268,6 +268,54 @@ public class CSharpEmitterTests
     }
 
     [Fact]
+    public void Emit_SingleIdentifierModule_PrefixesWithOvertGenerated()
+    {
+        // The single-identifier module name is treated as a short name
+        // needing scoping; emits under `Overt.Generated.` so example code
+        // and tests don't claim top-of-tree namespaces.
+        var csharp = EmitSource("module greeter\nfn hi() -> Int { 1 }");
+        Assert.Contains("namespace Overt.Generated.Greeter;", csharp);
+    }
+
+    [Fact]
+    public void Emit_DottedModule_EmitsNamespaceVerbatim()
+    {
+        // Library authors who write a fully-qualified module name (a dotted
+        // identifier) get exactly that as the emitted C# namespace, with no
+        // `Overt.Generated.` prefix. This is the namespace-emission-control
+        // mechanism for libraries that need a clean public API.
+        var csharp = EmitSource("module ParksComputing.SemVer\nfn parse() -> Int { 1 }");
+        Assert.Contains("namespace ParksComputing.SemVer;", csharp);
+        Assert.DoesNotContain("Overt.Generated.ParksComputing", csharp);
+    }
+
+    [Fact]
+    public void Emit_DottedModule_ImportingDottedModule_EmitsBothVerbatim()
+    {
+        // When a dotted-name module imports another dotted-name module,
+        // the `using static` line targets the imported module's verbatim
+        // namespace, not the prefixed one.
+        var csharp = EmitSource(
+            "module ParksComputing.SemVer.Tests\nuse ParksComputing.SemVer\nfn t() -> Int { 1 }");
+        Assert.Contains("namespace ParksComputing.SemVer.Tests;", csharp);
+        Assert.Contains("using static ParksComputing.SemVer.Module;", csharp);
+        Assert.DoesNotContain("Overt.Generated.ParksComputing", csharp);
+    }
+
+    [Fact]
+    public void Emit_DottedModule_ImportingSingleIdentifierModule_PrefixesImport()
+    {
+        // The prefix decision is per-target-module, not per-current-module.
+        // A dotted module importing a single-identifier module sees the
+        // imported one prefixed; only the importer's own namespace is
+        // verbatim.
+        var csharp = EmitSource(
+            "module ParksComputing.SemVer\nuse greeter\nfn hi() -> Int { 1 }");
+        Assert.Contains("namespace ParksComputing.SemVer;", csharp);
+        Assert.Contains("using static Overt.Generated.Greeter.Module;", csharp);
+    }
+
+    [Fact]
     public void Emit_DocComment_OnRecordField_RaisesError()
     {
         // V1 doesn't support @doc on record fields (no clean spot for inline XML

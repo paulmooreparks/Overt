@@ -197,14 +197,14 @@ public sealed class CSharpEmitter
         //     without any special-casing in the expression emitter.
         foreach (var use in module.Declarations.OfType<UseDecl>())
         {
-            var csharpPath = ModulePathToCSharp(use.ModulePath);
+            var ns = ToEmittedNamespace(use.ModulePath);
             if (use.Alias is { } alias)
             {
-                _w.WriteLine($"using {alias} = Overt.Generated.{csharpPath}.Module;");
+                _w.WriteLine($"using {alias} = {ns}.Module;");
             }
             else
             {
-                _w.WriteLine($"using static Overt.Generated.{csharpPath}.Module;");
+                _w.WriteLine($"using static {ns}.Module;");
             }
         }
 
@@ -222,7 +222,7 @@ public sealed class CSharpEmitter
         }
 
         _w.WriteLine();
-        _w.WriteLine($"namespace Overt.Generated.{ModuleNameToCSharp(module.Name)};");
+        _w.WriteLine($"namespace {ToEmittedNamespace(module.Name)};");
         _w.WriteLine();
 
         // Type aliases emit as file-scoped using-directives at the top. C# requires them
@@ -2630,9 +2630,7 @@ public sealed class CSharpEmitter
     }
 
     /// <summary>Render a dotted Overt module path as a C# dotted namespace —
-    /// <c>["stdlib", "http"]</c> becomes <c>Stdlib.Http</c>, matching the
-    /// <c>namespace Overt.Generated.&lt;path&gt;</c> form each imported module
-    /// emits.</summary>
+    /// <c>["stdlib", "http"]</c> becomes <c>Stdlib.Http</c>.</summary>
     private static string ModulePathToCSharp(ImmutableArray<string> path)
         => string.Join(".", path.Select(PascalCase));
 
@@ -2640,6 +2638,33 @@ public sealed class CSharpEmitter
     /// namespace. Strings with no dots behave like <see cref="PascalCase"/>.</summary>
     private static string ModuleNameToCSharp(string name)
         => string.Join(".", name.Split('.').Select(PascalCase));
+
+    /// <summary>
+    /// Resolve an Overt module name to the C# namespace it emits into.
+    /// A dotted name (e.g. <c>ParksComputing.SemVer</c>) is treated as a
+    /// fully-qualified namespace the author has chosen and emits verbatim —
+    /// the generated <c>namespace</c> declaration matches the module name
+    /// exactly. A single-identifier name (e.g. <c>greeter</c>) is treated
+    /// as a short name needing scoping; it emits under the <c>Overt.Generated.</c>
+    /// prefix so example code, scripts, and tests don't collide with anything
+    /// at the top of the namespace tree.
+    /// </summary>
+    private static string ToEmittedNamespace(string moduleName)
+        => moduleName.Contains('.', StringComparison.Ordinal)
+            ? ModuleNameToCSharp(moduleName)
+            : $"Overt.Generated.{ModuleNameToCSharp(moduleName)}";
+
+    /// <summary>
+    /// Resolve an imported Overt module path (a parsed <c>use</c> path) to the
+    /// C# namespace the import targets. Same heuristic as
+    /// <see cref="ToEmittedNamespace"/>: multi-segment paths are
+    /// fully-qualified and emit verbatim; single-segment paths get the
+    /// <c>Overt.Generated.</c> prefix.
+    /// </summary>
+    private static string ToEmittedNamespace(ImmutableArray<string> modulePath)
+        => modulePath.Length > 1
+            ? ModulePathToCSharp(modulePath)
+            : $"Overt.Generated.{ModulePathToCSharp(modulePath)}";
 
     private static bool IsLikelyEnumVariantRef(FieldAccessExpr fa)
         => fa.Target is IdentifierExpr id
