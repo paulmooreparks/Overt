@@ -383,6 +383,13 @@ public static class BindGenerator
             ? "()"
             : MapInstanceType(method.ReturnType, targetType, knownOpaques);
         if (returnOvertType is null) return;
+
+        // Convention layer (DESIGN.md §17): nullable returns -> Option<T>
+        // first, then Result<_, IoError> for impure methods. Result wraps
+        // around Option so a failing call still surfaces an Err, not a
+        // None-as-failure ambiguity.
+        var nullCtx = new NullabilityInfoContext();
+        returnOvertType = ApplyNullableWrap(returnOvertType, method, nullCtx);
         var retText = (pure || returnOvertType == "()")
             ? returnOvertType
             : $"Result<{returnOvertType}, IoError>";
@@ -496,9 +503,16 @@ public static class BindGenerator
             if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
             if (MapCSharpTypeToOvert(p.ParameterType) is null) return false;
         }
-        if (method.ReturnType != typeof(void)
-            && MapCSharpTypeToOvert(method.ReturnType) is null)
-            return false;
+        if (method.ReturnType != typeof(void))
+        {
+            // Either a primitive (mapped directly) or a Task / Task<T>
+            // recognised by the convention layer.
+            if (MapCSharpTypeToOvert(method.ReturnType) is null
+                && AsyncInnerOvertType(method.ReturnType) is null)
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -543,11 +557,19 @@ public static class BindGenerator
         }
 
         string? returnOvertType = null;
+        var isAsync = false;
         if (canRender)
         {
             if (method.ReturnType == typeof(void))
             {
                 returnOvertType = "()";
+            }
+            else if (AsyncInnerOvertType(method.ReturnType) is { } innerAsync)
+            {
+                // Task / Task<T> return: lower to Overt Task<T>, mark as
+                // async so the effect row picks it up below.
+                returnOvertType = $"Task<{innerAsync}>";
+                isAsync = true;
             }
             else
             {
@@ -566,6 +588,19 @@ public static class BindGenerator
             return;
         }
 
+        // Convention layer (DESIGN.md §17): nullable returns -> Option<T>
+        // first, then Result<_, IoError> for impure methods. Skip both
+        // for void returns, which lower to () directly. Skip the Result
+        // wrap for Task returns: async methods communicate failure via
+        // task exceptions, not Result, and double-wrapping (Task<Result<T,E>>
+        // synthesised from Task<T>) would diverge from what `.await`
+        // semantics expect.
+        if (returnOvertType is not null && returnOvertType != "()" && !isAsync)
+        {
+            var nullCtx = new NullabilityInfoContext();
+            returnOvertType = ApplyNullableWrap(returnOvertType, method, nullCtx);
+        }
+
         // Multi-arg calls in Overt use named args; single-arg is permitted
         // positional but the named form is still legal. Signature stays the
         // same in both cases — the rule is at the *call site*, not declaration.
@@ -575,13 +610,20 @@ public static class BindGenerator
         sb.Append(string.Join(", ", paramList));
         sb.Append(')');
 
-        if (effects.Length > 0)
+        // Effect row: union of namespace-derived effects and `async` if
+        // the return is a Task. Dedup so we don't emit `!{io, async, async}`
+        // for a System.Net method that's already async-effected by namespace.
+        var allEffects = isAsync
+            ? effects.Append("async").Distinct().ToArray()
+            : effects;
+        if (allEffects.Length > 0)
         {
-            sb.Append($" !{{{string.Join(", ", effects)}}}");
+            sb.Append($" !{{{string.Join(", ", allEffects)}}}");
         }
 
-        // Result-wrap non-pure returns that aren't already Unit-valued.
-        var retText = (pure || returnOvertType == "()")
+        // Result-wrap non-pure returns that aren't already Unit-valued or
+        // already Task-valued (async methods carry their own failure path).
+        var retText = (pure || returnOvertType == "()" || isAsync)
             ? returnOvertType
             : $"Result<{returnOvertType}, IoError>";
         sb.Append($" -> {retText}");
@@ -605,6 +647,74 @@ public static class BindGenerator
         if (t == typeof(double) || t == typeof(float)) return "Float";
         if (t == typeof(bool)) return "Bool";
         return null;
+    }
+
+    /// <summary>
+    /// Detect a <c>Task&lt;T&gt;</c> return type and return the Overt-mapped
+    /// inner type. The convention layer lowers async returns to
+    /// <c>Task&lt;T&gt;</c> in Overt with an <c>async</c> effect; callers
+    /// extract the value via the postfix <c>.await</c> operator.
+    ///
+    /// Non-generic <c>Task</c> is intentionally NOT recognised in v1: the
+    /// C# emitter does not yet bridge a <c>Task</c> return into
+    /// <c>Task&lt;Unit&gt;</c>, and surfacing one without the bridge
+    /// produces calls that fail Roslyn's type check. Methods returning
+    /// non-generic Task get skipped with the standard "unsupported return
+    /// type" message; hand-write an explicit <c>extern fn</c> if you need
+    /// one.
+    /// </summary>
+    private static string? AsyncInnerOvertType(Type returnType)
+    {
+        if (!returnType.IsGenericType) return null;
+        if (returnType.GetGenericTypeDefinition() != typeof(System.Threading.Tasks.Task<>)) return null;
+        var inner = returnType.GetGenericArguments()[0];
+        return MapCSharpTypeToOvert(inner);
+    }
+
+    /// <summary>
+    /// Wrap a return-type Overt name in <c>Option&lt;T&gt;</c> when the
+    /// underlying C# return is nullable. Honors C# 8+ nullable reference
+    /// type annotations (read via <see cref="NullabilityInfoContext"/>) and
+    /// <c>Nullable&lt;T&gt;</c> value-type wrappers. Methods on assemblies
+    /// compiled without nullable annotations report <c>Unknown</c>; we
+    /// treat that as non-nullable rather than blanketing every reference
+    /// return in Option, on the rationale that under-claiming is the more
+    /// dangerous failure mode for return optionality (see DESIGN.md §17,
+    /// "Nullable returns become Option").
+    /// </summary>
+    private static string ApplyNullableWrap(string overtType, MethodInfo method, NullabilityInfoContext nullCtx)
+    {
+        if (overtType == "()") return overtType;
+
+        // Nullable<T> value-type wrapper: the unwrapped type is what
+        // MapCSharpTypeToOvert sees, so the wrap signal is the surface
+        // ParameterType being a generic Nullable.
+        var ret = method.ReturnType;
+        if (ret.IsGenericType && ret.GetGenericTypeDefinition() == typeof(Nullable<>))
+        {
+            return $"Option<{overtType}>";
+        }
+
+        // Reference-type nullability: inspect the return parameter's
+        // nullability info. WriteState reports the declared return-side
+        // nullability; ReadState would report what callers may pass as
+        // input.
+        try
+        {
+            var info = nullCtx.Create(method.ReturnParameter);
+            if (info.WriteState == NullabilityState.Nullable)
+            {
+                return $"Option<{overtType}>";
+            }
+        }
+        catch
+        {
+            // NullabilityInfoContext throws on some unusual reflection
+            // shapes (open generics, certain runtime types). Fall back to
+            // the non-nullable form rather than break facade generation.
+        }
+
+        return overtType;
     }
 
     /// <summary>Look up the effects for a .NET namespace. Longest-prefix-match

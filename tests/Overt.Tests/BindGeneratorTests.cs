@@ -154,4 +154,102 @@ public class BindGeneratorTests
         var src = BindGenerator.Generate("path", typeof(System.IO.Path));
         Assert.Contains("fn exists(", src);
     }
+
+    [Fact]
+    public void Generate_NullableReferenceReturn_LowersToOption()
+    {
+        // System.Environment.GetEnvironmentVariable is annotated to return
+        // `string?` in modern BCL nullable-annotated builds. The convention
+        // layer should lower that to `Option<String>` (then wrapped in
+        // Result for impure namespaces).
+        var src = BindGenerator.Generate("env", typeof(System.Environment));
+        Assert.Contains(
+            "fn get_environment_variable(variable: String) !{io} -> Result<Option<String>, IoError>",
+            src);
+    }
+
+    [Fact]
+    public void Generate_NonNullableReturn_StaysUnwrapped()
+    {
+        // System.IO.Path.Combine(string, string) is annotated as non-nullable;
+        // it should land as bare String, not Option<String>. Path is a pure
+        // namespace so no Result wrap either. (Other methods on Path —
+        // ChangeExtension, GetDirectoryName — DO return string?, so a global
+        // "no Option" assertion would over-reach.)
+        var src = BindGenerator.Generate("path", typeof(System.IO.Path));
+        Assert.Contains(
+            "fn combine_string_string(path1: String, path2: String) -> String",
+            src);
+    }
+
+    [Fact]
+    public void Generate_NullableReturn_OnPureNamespace_IsBareOption()
+    {
+        // Path.ChangeExtension(string?, string?) returns string?. Path is
+        // pure (its rule says no Result wrap), so the return should be a
+        // bare Option<String>, not Result<Option<String>, ...>.
+        var src = BindGenerator.Generate("path", typeof(System.IO.Path));
+        Assert.Contains(
+            "-> Option<String>",
+            src);
+        Assert.DoesNotContain("Result<Option<String>", src);
+    }
+
+    /// <summary>Synthetic surface for async-lowering tests — three method
+    /// shapes the convention layer needs to recognise: `Task&lt;T&gt;` for
+    /// primitive T, non-generic `Task` (currently skipped), and a sync
+    /// reference for comparison.</summary>
+    public static class AsyncFixture
+    {
+        public static System.Threading.Tasks.Task<int> FetchInt(string source) =>
+            System.Threading.Tasks.Task.FromResult(42);
+
+        public static System.Threading.Tasks.Task DoSomething() =>
+            System.Threading.Tasks.Task.CompletedTask;
+
+        public static int SyncSibling(int x) => x;
+    }
+
+    [Fact]
+    public void Generate_TaskOfTReturn_LowersToOvertTaskWithAsyncEffect()
+    {
+        var src = BindGenerator.Generate("fixture", typeof(AsyncFixture));
+        // Task<int> -> Task<Int>. async picks up in the effect row. The
+        // async path skips the Result wrap (the task itself carries the
+        // failure channel via exceptions caught at .await time).
+        Assert.Contains(
+            "fn fetch_int(source: String) !{io, fails, async} -> Task<Int>",
+            src);
+    }
+
+    [Fact]
+    public void Generate_NonGenericTaskReturn_IsSkipped()
+    {
+        // Non-generic Task is intentionally not lowered in v1; the C#
+        // emitter does not yet bridge Task -> Task<Unit>. Surfacing it
+        // would produce calls that fail to type-check downstream.
+        var src = BindGenerator.Generate("fixture", typeof(AsyncFixture));
+        Assert.Contains(
+            "// skipped " + typeof(AsyncFixture).FullName + ".DoSomething",
+            src);
+    }
+
+    [Fact]
+    public void Generate_SyncReturn_DoesNotPickUpAsyncEffect()
+    {
+        var src = BindGenerator.Generate("fixture", typeof(AsyncFixture));
+        // Negative control: sync method on the same type doesn't get
+        // `async` in its effect row.
+        Assert.Contains(
+            "fn sync_sibling(x: Int)",
+            src);
+        // The `async` token must appear only on the FetchInt line.
+        var asyncLines = src
+            .Split('\n')
+            .Where(l => l.Contains("async", StringComparison.Ordinal)
+                     && l.TrimStart().StartsWith("extern", StringComparison.Ordinal))
+            .ToList();
+        Assert.Single(asyncLines);
+        Assert.Contains("fetch_int", asyncLines[0]);
+    }
 }

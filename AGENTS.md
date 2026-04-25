@@ -693,10 +693,23 @@ the only one wired up today.
 
 **Scope today**: static methods, top-level static properties / fields,
 and instance methods that BindGenerator already supports. Convention
-refinements (nullable → Option from C# 8+ annotations, `Try*` pattern
-recognition, async / Task lowering for instance methods) are
-incremental work tracked separately. The model and entry path are
-stable.
+refinements:
+
+- **Nullable → Option**: methods whose C# return is annotated nullable
+  (`string?`, `T?`) lower to `Option<T>` in Overt. Honors C# 8+ nullable
+  reference type annotations via `NullabilityInfoContext`. Methods on
+  assemblies compiled without nullable annotations stay non-nullable.
+- **Async / Task<T> → Task<T> with `async` effect**: methods returning
+  `Task<T>` lower to Overt `Task<T>`, with `async` added to the effect
+  row. Callers extract values via postfix `.await`. Non-generic
+  `Task` is skipped in v1 (would need an emitter-side
+  `Task → Task<Unit>` bridge).
+- **`Try*` pattern recognition**: deferred. Recognising the
+  signature shape is straightforward but useful emission requires
+  multi-statement codegen (declare an out-temp, branch on the bool,
+  return Some/None) that the current static-call emit path can't
+  express. Hand-write an explicit `extern fn` for `TryParse`-style
+  methods until that lands.
 
 ---
 
