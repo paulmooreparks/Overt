@@ -759,6 +759,137 @@ Same principle on the Go side: `Result<T, E>` becomes `(T, error)`, `Option<T>` 
 
 Anything outside this table is **disallowed from crossing the boundary** in v1. Force the agent to write a wrapper record or function rather than silently mismatch.
 
+### Bulk import: `use` and the convention layer
+
+The per-method `extern "csharp" fn ... binds "..."` form above scales linearly with surface area. For real programs, that's untenable: the BCL alone is thousands of types, and any project of substance pulls in five to fifty third-party NuGet packages. Hand-writing facades for each method is impossible. Curating an Overt-shipped stdlib that wraps it all is also impossible — the surface is too large, changes too often across versions, and forces every Overt program to drag the curation along whether it uses it or not.
+
+The model: **`use` declarations bring target-language symbols into Overt scope; the compiler resolves calls against target metadata, applying a convention layer that converts each call shape to its Overt analog.** No `.ov` facade artifacts are generated; no curated stdlib mediates the bulk surface. The Overt program is the program; the C# (or Go, etc.) library is the library. The boundary is a thin translation layer, not a curated wrapper.
+
+This is the "promiscuous passthrough" rule (§18) applied to the FFI surface. Each backend gets a passthrough mechanism into its native ecosystem, opaque about the target's idioms, with conventions that govern only the call-shape conversion. Native vocabulary stays narrow.
+
+#### The `use` declaration
+
+```overt
+// Bring a single type into scope.
+extern "csharp" use "System.IO.File"
+
+// Bring a whole namespace into scope.
+extern "csharp" use "System.Text.Json"
+
+// Aliased, for shorter call sites or to disambiguate.
+extern "csharp" use "System.Text.Json.JsonSerializer" as json
+
+// At call sites:
+fn write_log(path: String, message: String) !{io, fails} -> Result<Unit, FfiError> {
+    File.WriteAllText(path = path, contents = message)?
+}
+
+fn parse_user(wire: String) -> Result<User, FfiError> {
+    json.Deserialize<User>(json = wire)?
+}
+```
+
+`use` is module-scoped: it brings symbols into the current `.ov` file's namespace. Two `use` declarations that introduce conflicting names trigger a compile-time diagnostic; the alias form (`as N`) is the resolution.
+
+A `use` declaration does not generate `.ov` source. Resolution happens in the typer against target-language metadata directly. There is no facade artifact in `obj/`, no checked-in `.ov` file, no parallel surface to maintain. The single source of truth for "what's available" is the target assembly.
+
+#### Type identity at the boundary
+
+Primitive and well-known types map per the §17 marshaling table (`Int` ↔ `long`, `String` ↔ `string`, etc.). Reference types from a `use` declaration become **opaque Overt nominal types**: the C# type `System.IO.FileStream` enters the Overt namespace as `FileStream`, identifiable by name but with no Overt-visible field shape. Methods invoked on it dispatch through the convention layer; field access is not exposed (use a method or a hand-written `extern fn`).
+
+Generic types from the target follow the §17 rules already documented for `extern fn`: `List<T>` maps as written (inner T must be a primitive or another already-bound type), per-use-site monomorphization for generic methods.
+
+Records and enums declared in Overt and exposed via `pub` continue to round-trip per the §17 "Being called" rules.
+
+#### Method-shape mapping
+
+The convention is target-agnostic in shape, target-specific in fill-in.
+
+| Target shape | Overt call shape |
+|---|---|
+| Static method `T.M(a, b)` | `T.M(a = ..., b = ...)` |
+| Instance method `obj.M(a, b)` on receiver type `T` | `T.M(self = obj, a = ..., b = ...)` |
+| Constructor `new T(a, b)` | `T.new(a = ..., b = ...)` |
+| Property getter `obj.P` | `T.P(self = obj)` |
+| Property setter `obj.P = v` | `T.set_P(self = obj, value = v)` |
+| Indexer `obj[i]` | not auto-bound in v1; write an explicit `extern fn` |
+| Generic method `M<U>(a)` | `M<U>(a = ...)` (monomorphized per use site) |
+
+Every multi-argument call requires named arguments at the Overt call site, matching §6's existing rule. The convention layer mechanically maps the target's positional parameters to their declared names.
+
+C#-specific rules layered on top of the general shape:
+
+- **Async / Task-returning methods.** A method with return type `Task<T>` lowers to an Overt fn returning `Task<T>` (Overt's own type). The Overt caller invokes `.await` to extract the value at a known `async`-effect call site, per §7's existing async semantics. The Overt fn enclosing the `.await` carries `async` in its effect row and emits as `async` in C#.
+- **Out / ref parameters.** Lifted to a tuple return: `bool TryParse(string s, out int n)` lowers to an Overt fn returning `Result<(Bool, Int), FfiError>` or, more idiomatically, `Result<Option<Int>, FfiError>` with the Bool collapsed into Option (the convention layer recognizes the `Try*` pattern; see below).
+- **`Try*` pattern recognition.** A C# method named `TryX(...)` returning `bool` with a single trailing `out` parameter is recognized as the BCL's standard "succeed-or-not" idiom and lowered to `Result<T, FfiError>` directly (or `Option<T>` if the convention is configured for it). This is the single concession to .NET-specific naming convention; everything else is purely structural.
+- **Indexers, operators, events, conversions.** Not auto-bound in v1. Surface them by writing explicit `extern fn` declarations against the underlying method names if needed.
+
+#### Throwing methods become `Result`
+
+Every C# method, by default, is treated as potentially throwing and lowers to a `Result`-returning Overt signature. This makes the failure point overt at every call site, consistent with §11's "errors as values" rule, at the cost of a `?` at every FFI boundary in source.
+
+Error type:
+
+- **Default: `FfiError`**, an Overt-runtime type that preserves the underlying target-language exception (or error value) opaquely. `FfiError` carries the target-language type name, message, and the original exception object as an opaque field for inspection. This is the v1 default and is deliberately coarse — pretending we know how to map every BCL exception type to a specific Overt error variant is fiction.
+- **Refinement (deferred):** authors can write specific `extern fn` declarations with a narrower error type when the target API has well-defined failure modes. The default exists so the bulk surface is usable today; the refinement path exists so high-traffic surfaces can be tightened without touching the language.
+
+A method that the agent knows cannot throw (`Math.Max`, `String.IsNullOrEmpty`) still emits as `Result`-returning under the default rule. The `?` is then redundant but harmless. A future opt-out (`extern "csharp" use "..." with throws = false`) can suppress the wrapping for known-pure surfaces; not part of v1.
+
+#### Nullable returns become `Option`
+
+Methods declared with C# nullable return types (`string? Something(...)`) lower to Overt fns returning `Option<String>`. C# 8+ nullable annotations are read from assembly metadata where present. Methods predating nullable annotations (or where the metadata is absent) are treated as non-nullable; the agent can override with an explicit `extern fn` declaring `Option<T>` if the underlying API truly returns null.
+
+This is an asymmetric rule: nullable-aware code converts faithfully; null-oblivious legacy code is treated optimistically. The asymmetry is deliberate. The alternative (treating every reference return as possibly-null) makes every BCL call on a string, list, or object require Option unwrapping, which is far more friction than the metadata is informative.
+
+#### Effect rows for FFI'd calls
+
+The default effect row for any FFI call lowered through the convention layer is `!{io, fails}`. Both effects are pessimistic:
+
+- `io` because most BCL methods can touch I/O directly or transitively, and the metadata doesn't reliably distinguish.
+- `fails` because every method is wrapped in `Result` per the rule above; an effect-row marker for "this can fail" is consistent with the existing `fails` semantics in §7.
+
+Authors who know a use-site is pure can override with an explicit `extern fn` that declares an empty effect row. The default favors over-stating effects rather than missing them; under-claiming I/O is the more dangerous failure mode.
+
+#### Override mechanism: explicit `extern fn` wins
+
+The bulk-import path coexists with the per-method form. Where both apply to the same symbol, the explicit `extern fn` declaration takes precedence. This is the escape hatch:
+
+- An author who wants a non-default error type (`Result<T, FileNotFoundError>` instead of `Result<T, FfiError>`) writes the explicit form.
+- An author who wants to mark a known-pure method `!{}` writes the explicit form.
+- An author who wants to rename a method into Overt style (`File.read_text` instead of `File.ReadAllText`) writes the explicit form.
+
+The convention layer applies to symbols that have not been explicitly bound. The two coexist; `use` is the bulk surface, `extern fn ... binds` is the override.
+
+#### Discovery: `overt inspect`
+
+Bulk-import resolution happens in the typer; there is no `.ov` artifact to read. To compensate, the toolchain ships `overt inspect`:
+
+```
+overt inspect "System.IO.File"
+```
+
+prints, on stdout, the synthesized facade for the named target type — the Overt-shaped signatures that calls against `File` will resolve through. The output is `.ov`-syntax and reads like a hand-written facade. It is read-only — the file does not exist on disk and is not a build artifact — but it gives an agent (or a human) the means to discover what surface a `use` declaration brings into scope.
+
+`overt inspect` is part of the v1 deliverable, not a future polish item. Without it, agents have no way to learn what `use "System.IO.File"` exposes; with it, the bulk-import surface is as discoverable as a curated facade would have been, with no maintenance cost.
+
+#### What this replaces in the existing curated stdlib
+
+The current `stdlib/csharp/system/*.ov` files were the seed of the original curated approach. Under this model they shrink dramatically. The principle:
+
+- **Stays curated:** Overt-flavored types and helpers that are truly Overt (`Result`, `Option`, `List`, `Unit`, the trace/event helpers, `println`/`eprintln`). These are runtime types and helpers, not BCL wrappers; they don't lower through the convention layer because they don't *come from* the BCL.
+- **Goes:** hand-written `.ov` facades for `System.IO.File`, `System.Text.StringBuilder`, `System.Convert`, `System.DateTime`, etc. These become `use` targets. Any code that wants them writes one `use` line and calls them directly.
+- **Migration:** programs that depended on the old curated path replace `use { ... } from stdlib_path` with `extern "csharp" use "..."`. Mechanical edit, not a redesign.
+
+The shrunken stdlib is healthier: the surface Overt commits to maintaining is exactly the surface that's truly Overt-native. Everything else is a `use` away, with no maintenance liability.
+
+#### Multi-target structure
+
+The rules in this subsection are stated in two layers, on purpose. The **shape rules** (named arguments, instance-as-self, constructors as `T.new`, throws-become-Result, nullable-becomes-Option) are target-agnostic — they describe how Overt's shape conventions map onto any target's call shape. The **fill-in** is target-specific: which metadata source provides nullable annotations, which method-naming patterns get convention recognition (`Try*` for C#), how async maps (Task for C#, error-tuple for Go).
+
+When a Go binding generator lands, it specializes the same shape rules against Go's metadata: instance methods become methods-with-receiver-as-self, returns of `(T, error)` collapse into `Result<T, GoError>`, returns of `*T` become `Option<T>`, etc. The shape spec stays put; only the per-target column gets filled in.
+
+This is the §18 two-tier compiler architecture extended to FFI: tier-1 shape rules are backend-independent, tier-2 fill-in is per-backend. Same principle, same partition.
+
 ### The `"c"` tag, specifically
 
 C FFI is strategically enormous: every OS exposes syscalls through a C ABI, every GPU API goes through C, every legacy library is reachable through C, and *every language with a C FFI* (essentially all of them) can call Overt through C. This makes Overt a library producer for the entire native-interop ecosystem, not just a transpile target.
@@ -937,25 +1068,24 @@ The agent-RWRA tradeoff is real and accepted. Passthrough attributes are less ov
 
 ### Standard library scope
 
-**Focused core; FFI for everything else.**
+**Truly-Overt-native types and helpers only; the bulk-import path (§17) covers everything else.**
 
-Overt's stdlib covers primitives every program needs, nothing more:
+Overt's stdlib covers what is genuinely Overt and not reachable through `extern "csharp" use` (or its per-target equivalents). Anything that has a sensible target-language analog is reached through the bulk-import path, not curated as an Overt-shaped wrapper.
 
-- **Collections:** `List`, `Map`, `Set`, `Seq`, plus their iteration/transformation combinators
-- **Core types:** `Option`, `Result`, `RaceAllFailed`, tuples, ranges
-- **Strings:** formatting, parsing, UTF-8 operations, interpolation runtime
-- **Math:** basic arithmetic, ordering, random, numeric conversions
-- **Basic I/O:** stdin/stdout/stderr, file read/write, environment
-- **Time:** instants, durations, timezone-aware timestamps
-- **HTTP client:** GET/POST/headers/status — enough for ~90% of calls, nothing more
-- **JSON:** parse, stringify, via `Serialize`/`Deserialize` derives
-- **Task groups:** the `parallel`/`race`/`par_map` primitives and `RaceAllFailed`
-- **Errors:** causal-chain helpers
-- **Trace:** `TraceEvent` sum type and subscription API
+Stays curated:
 
-**Out of scope for stdlib** (use FFI or a future third-party registry): specific databases, protobuf, crypto beyond what HTTP needs, OS-specific syscalls, image processing, cryptographically-secure RNG specialties, anything driver-like, XML, GraphQL, gRPC, RPC frameworks generally.
+- **Core types:** `Option`, `Result`, `Unit`, `Tuple`, `Range`, `RaceAllFailed`. These are Overt-side types with no faithful target-language equivalent (every backend has *something* called `Option` or `Result`, but the semantics differ enough that we do not pretend they're interchangeable).
+- **Collections (Overt-flavored):** `List`, `Map`, `Set`, `Seq` and their iteration / transformation combinators (`map`, `filter`, `fold`, `par_map`, etc.). These are Overt-side because their semantics (immutable, value-equality records) deliberately differ from the target's mutable-collection norms. A program that wants `System.Collections.Generic.List<T>` directly can `use` it; the Overt stdlib `List<T>` is the canonical immutable form.
+- **`println` / `eprintln` / interpolation runtime.** Pinning these in stdlib makes the smallest "hello world" possible without a `use` declaration. Without these the entry-level program has more ceremony than it deserves.
+- **Task groups:** `parallel` / `race` / `par_map` primitives and `RaceAllFailed`. These are Overt-language constructs that lower to TPL on C# and goroutines on Go; the abstraction is genuinely Overt's.
+- **Errors:** the `Error` trait surface and causal-chain helpers (`with_cause`, `chain`).
+- **Trace:** `TraceEvent` sum type and subscription API.
 
-The principle: anything that has a clear canonical implementation in the .NET or Go ecosystem is reached through FFI (§17), not wrapped. This keeps Overt's surface small, avoids the "Overt's JSON is subtly different from .NET's" class of bug, and lets agents leverage their existing .NET/Go training priors when the stdlib doesn't cover a need.
+That's the entire native surface. Notably absent: file I/O (use `extern "csharp" use "System.IO.File"` or per-target equivalent), HTTP (use the host's HTTP client), JSON (use `System.Text.Json` or `encoding/json`), strings beyond interpolation (use the host's string library), math beyond basic arithmetic (use `System.Math`), time (use `System.DateTime` or `time`), env access (use `System.Environment` or `os`).
+
+The principle restated: **anything that has a canonical implementation in the target ecosystem is reached through `use`, not wrapped.** Wrapping invites the "Overt's JSON is subtly different from .NET's" class of bug, multiplies the surface Overt commits to maintaining, and forces every Overt program to drag the curation along whether it uses it or not. Bulk-import keeps the curated surface honest and keeps agents in the territory their training priors already cover.
+
+The historical `stdlib/csharp/system/*.ov` curated facades (Console, Convert, DateTime, Environment, File, Math, Path, StringBuilder, TimeSpan, Uri, ...) belong on the bulk-import path. They were the seed of an approach this document now retires; their content moves into `use` targets and the files themselves go.
 
 ### Rejected options (with reasoning)
 
