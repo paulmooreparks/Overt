@@ -154,6 +154,7 @@ public static class Formatter
             case TypeAliasDecl ta: FormatTypeAlias(ta, ctx); break;
             case ExternDecl ex: FormatExtern(ex, ctx); break;
             case ExternTypeDecl xt: FormatExternType(xt, ctx); break;
+            case ExternUseDecl xu: FormatExternUse(xu, ctx); break;
             case UseDecl u: FormatUse(u, ctx); break;
             default:
                 ctx.Line($"// TODO: unformatted decl {decl.GetType().Name}");
@@ -283,6 +284,12 @@ public static class Formatter
     private static void FormatExternType(ExternTypeDecl xt, FormatContext ctx)
     {
         ctx.Line($"extern \"{xt.Platform}\" type {xt.Name} binds \"{xt.BindsTarget}\"");
+    }
+
+    private static void FormatExternUse(ExternUseDecl xu, FormatContext ctx)
+    {
+        var aliasSuffix = xu.Alias is null ? "" : $" as {xu.Alias}";
+        ctx.Line($"extern \"{xu.Platform}\" use \"{xu.Target}\"{aliasSuffix}");
     }
 
     private static void FormatExtern(ExternDecl ex, FormatContext ctx)

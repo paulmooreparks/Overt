@@ -209,6 +209,22 @@ public sealed class Parser
             return ParseExternTypeDeclRest(platform, startPos);
         }
 
+        // `extern "platform" use "Target"` (optional `as Alias`) — bulk-import
+        // declaration. Brings the named target-language symbol into scope;
+        // resolution against target metadata happens in the typer per the
+        // convention layer (DESIGN.md §17 "Bulk import: `use` and the
+        // convention layer").
+        if (Check(TokenKind.KeywordUse))
+        {
+            if (isUnsafe)
+            {
+                ReportError("OV0157",
+                    "`unsafe` is not applicable to `extern \"...\" use` declarations",
+                    new SourceSpan(startPos, Current.Span.End));
+            }
+            return ParseExternUseDeclRest(platform, startPos);
+        }
+
         // Optional extern kind: `instance` or `ctor` between the platform
         // string and `fn`. Default is Static. These are contextual keywords
         // — normal identifier names elsewhere.
@@ -307,6 +323,34 @@ public sealed class Parser
             nameToken.Lexeme,
             bindsTarget,
             new SourceSpan(startPos, bindsToken.Span.End));
+    }
+
+    /// <summary>
+    /// Parse the `use "Target" (as Alias)?` tail of an
+    /// <c>extern "platform" use ...</c> declaration. The platform string
+    /// has already been consumed by <see cref="ParseExternDecl"/>; the
+    /// `use` keyword is at <c>Current</c>.
+    /// </summary>
+    private ExternUseDecl ParseExternUseDeclRest(string platform, SourcePosition startPos)
+    {
+        Expect(TokenKind.KeywordUse, "extern use declaration");
+        var targetToken = Expect(TokenKind.StringLiteral, "extern use target string (e.g. \"System.IO.File\")");
+        var target = StripQuotes(targetToken.Lexeme);
+        var endPos = targetToken.Span.End;
+
+        string? alias = null;
+        if (Match(TokenKind.KeywordAs))
+        {
+            var aliasToken = Expect(TokenKind.Identifier, "extern use alias name");
+            alias = aliasToken.Lexeme;
+            endPos = aliasToken.Span.End;
+        }
+
+        return new ExternUseDecl(
+            platform,
+            target,
+            alias,
+            new SourceSpan(startPos, endPos));
     }
 
     private void ExpectContextualKeyword(string word, string context)

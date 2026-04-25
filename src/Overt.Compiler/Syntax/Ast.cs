@@ -125,6 +125,21 @@ public sealed record ExternDecl(
     SourceSpan Span,
     ExternKind Kind = ExternKind.Static) : Declaration(Span);
 
+/// <summary>
+/// Bulk-import declaration: <c>extern "csharp" use "System.IO.File"</c>
+/// (optionally <c>as Alias</c>). Brings the named target-language symbol
+/// into Overt scope without per-method <c>extern fn ... binds "..."</c>
+/// declarations. Resolution against target-language metadata happens in
+/// the typer; the convention layer (DESIGN.md §17) governs the call-shape
+/// translation. See DESIGN.md "Bulk import: `use` and the convention
+/// layer" for the full model.
+/// </summary>
+public sealed record ExternUseDecl(
+    string Platform,
+    string Target,
+    string? Alias,
+    SourceSpan Span) : Declaration(Span);
+
 public sealed record RecordDecl(
     string Name,
     ImmutableArray<Annotation> Annotations,

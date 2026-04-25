@@ -1030,6 +1030,50 @@ public class ParserTests
         Assert.Equal("libc", ext.FromLibrary);
     }
 
+    [Fact]
+    public void Parse_ExternUse_Csharp_NoAlias()
+    {
+        var lex = Lexer.Lex("module m\nextern \"csharp\" use \"System.IO.File\"");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var xu = Assert.IsType<ExternUseDecl>(result.Module.Declarations[0]);
+        Assert.Equal("csharp", xu.Platform);
+        Assert.Equal("System.IO.File", xu.Target);
+        Assert.Null(xu.Alias);
+    }
+
+    [Fact]
+    public void Parse_ExternUse_Csharp_WithAlias()
+    {
+        var lex = Lexer.Lex("module m\nextern \"csharp\" use \"System.Text.Json.JsonSerializer\" as json");
+        var result = Parser.Parse(lex.Tokens);
+        Assert.Empty(result.Diagnostics);
+
+        var xu = Assert.IsType<ExternUseDecl>(result.Module.Declarations[0]);
+        Assert.Equal("csharp", xu.Platform);
+        Assert.Equal("System.Text.Json.JsonSerializer", xu.Target);
+        Assert.Equal("json", xu.Alias);
+    }
+
+    [Fact]
+    public void Parse_ExternUse_Unsafe_RejectedByOV0157()
+    {
+        // `unsafe` on a `use` declaration makes no sense — there's no
+        // call-site code being declared, just a symbol import. The parser
+        // emits OV0157 and continues.
+        var lex = Lexer.Lex("module m\nunsafe extern \"csharp\" use \"System.IO.File\"");
+        var result = Parser.Parse(lex.Tokens);
+        var diag = Assert.Single(result.Diagnostics);
+        Assert.Equal("OV0157", diag.Code);
+
+        // Even with the diagnostic, the declaration is still produced so
+        // downstream passes can treat the platform/target as if it were
+        // valid. Same recovery shape as `unsafe` on `extern type`.
+        var xu = Assert.IsType<ExternUseDecl>(result.Module.Declarations[0]);
+        Assert.Equal("System.IO.File", xu.Target);
+    }
+
     // -------------------------------------------------- smoke-parse goldens
 
     [Theory]

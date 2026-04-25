@@ -57,6 +57,7 @@ public class OvertBuildNuGetTests
                     <add key="local" value="{feedDir}" />
                   </packageSources>
                   <packageSourceMapping>
+                    <clear />
                     <packageSource key="local">
                       <package pattern="*" />
                     </packageSource>
