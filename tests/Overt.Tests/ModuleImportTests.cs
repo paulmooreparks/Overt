@@ -174,42 +174,12 @@ public class ModuleImportTests
         Assert.Empty(use.ImportedSymbols);
     }
 
-    [Fact]
-    public void Graph_FindsBlessedStdlibViaSearchPath()
-    {
-        // Shape test: a program that uses `stdlib.csharp.system.io.path` is
-        // resolvable only when the search path includes the repo root
-        // (containing `stdlib/csharp/system/io/path.ov`). Verifies the
-        // per-backend subtree lookup works via an explicit search dir.
-        using var tmp = new TempDir();
-        tmp.Write("app.ov", """
-            module app
-
-            use stdlib.csharp.system.io.path as p
-
-            fn main() !{io} -> Result<(), IoError> { Ok(()) }
-            """);
-
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
-
-        var graph = ModuleGraph.Resolve(
-            Path.Combine(tmp.Path, "app.ov"),
-            ImmutableArray.Create(repoRoot!));
-        Assert.Empty(graph.Diagnostics);
-        Assert.Contains(graph.Modules, m => m.Name == "stdlib.csharp.system.io.path");
-    }
-
-    private static string? FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        for (var i = 0; i < 8 && dir is not null; i++)
-        {
-            if (Directory.Exists(Path.Combine(dir.FullName, "stdlib"))) return dir.FullName;
-            dir = dir.Parent;
-        }
-        return null;
-    }
+    // Note: a previous `Graph_FindsBlessedStdlibViaSearchPath` test was
+    // removed when the curated `stdlib/csharp/system/*.ov` facades were
+    // retired in favor of `extern "csharp" use "..."` bulk-import. The
+    // search-path mechanism it exercised still exists for any future
+    // Overt-native .ov stdlib modules; if such a thing lands, restore a
+    // shape-equivalent test against it.
 
     [Fact]
     public void Parser_WildcardImportReportsOV0163()

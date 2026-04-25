@@ -195,15 +195,15 @@ overt run examples/hello.ov
 
 The end-to-end Roslyn compile + exec happens in-process; there is no intermediate file.
 
-### Using blessed stdlib facades
+### Reaching the BCL via bulk-import
 
-The CLI auto-discovers [`stdlib/csharp/`](stdlib/csharp/) next to the compiler. Overt programs `use` the facades directly:
+`extern "csharp" use "..."` brings target-language types into Overt scope without per-method declarations. The compiler reflects on the named target at compile time and synthesizes the extern bindings:
 
 ```overt
 module app
 
-use stdlib.csharp.system.environment as env
-use stdlib.csharp.system.math as math
+extern "csharp" use "System.Environment" as env
+extern "csharp" use "System.Math" as math
 
 fn main() !{io} -> Result<(), IoError> {
     let cpus: Int = env.processor_count()?
@@ -212,16 +212,13 @@ fn main() !{io} -> Result<(), IoError> {
 }
 ```
 
-To generate a new facade:
+See [AGENTS.md §11.7](AGENTS.md) for the full model — alias vs. no-alias semantics, the per-method override path, and how the convention layer translates each target shape.
 
-```
-overt bind --type System.DateTime --module stdlib.csharp.system.datetime \
-           --output stdlib/csharp/system/datetime.ov
-```
+`overt bind --type System.DateTime` still exists for one-off generation when you want to inspect what the synthesized facade looks like or commit a hand-edited variant.
 
 ### Installing on PATH
 
-`tooling/install.ps1` publishes the CLI into `$HOME\bin` (or any `-Bin <path>`) and copies the blessed `stdlib/` alongside it. Re-run whenever you want the on-PATH copy to reflect new changes.
+`tooling/install.ps1` publishes the CLI into `$HOME\bin` (or any `-Bin <path>`). Re-run whenever you want the on-PATH copy to reflect new changes.
 
 ---
 
@@ -258,7 +255,7 @@ Working end-to-end on C#:
 
 - **Language.** Records, enums (including struct-like variants), pattern matching with cartesian-product exhaustiveness on tuples of enums, effect rows, refinement types with runtime-checked boundaries, immutable records with `with`-updates, `let mut` rebinding, full imperative control flow (`for each`, `while`, `loop`, `break`, `continue`, literal patterns), `?` and `|>?` propagation (including inside nested `if`/`match` arms), `.await` on `Task<T>` with async-effect fns emitting as `async Task<T>`.
 - **FFI.** `extern "csharp"` with three explicit kinds (static, `instance`, and `ctor`), plus generic methods via angle-bracket binds targets (`Deserialize<MyType>`). Go and C placeholders parse and diagnose clearly; only C# executes today.
-- **Stdlib.** Facades under `stdlib/csharp/system.*` for path, file, console, environment, math, convert, DateTime, TimeSpan, Guid, StringBuilder, and Uri, generated from reflection via `overt bind`, auto-discovered by the CLI. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/json.ov`](examples/json.ov).
+- **Stdlib.** Genuinely-Overt-native types and helpers only (`Result`, `Option`, `List`, `Map`, `Set`, task groups, trace, `println`); see DESIGN.md §19 for the membership rule. Everything else (file I/O, HTTP, JSON, math, time, env access) is reached through `extern "csharp" use "..."` (AGENTS.md §11.7), which reflects on a target type and synthesizes the bindings at compile time. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/json.ov`](examples/json.ov).
 - **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens, ast, resolved, typed, csharp). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
 - **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs are produced and tested; neither is published to nuget.org yet ([`ROLLOUT.md`](ROLLOUT.md) Phase 2).
 - **Not yet.** Go back-end emission, LSP server, cross-file module system beyond the current in-repo graph, and self-hosted compiler, all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).

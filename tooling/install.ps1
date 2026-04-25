@@ -71,20 +71,21 @@ Get-ChildItem -Path $Bin -File |
 Write-Host ""
 Write-Host "Installed to $Bin ($replaced replaced, $added added)." -ForegroundColor Green
 
-# Also publish the blessed stdlib — facade files that the CLI auto-discovers
-# when resolving `use stdlib.*`. Robocopy'd into `$Bin\stdlib\` so the CLI's
-# walk-up search (see DiscoverSearchDirs) finds them next to overt.exe.
+# Stdlib copy: kept conditional in case future Overt-native .ov stdlib
+# modules ship here. Today the directory is empty; the previous curated
+# `stdlib/csharp/system/*.ov` facades were retired in favor of the
+# `extern "csharp" use "..."` bulk-import path (DESIGN.md §17).
 $stdlibSrc = Join-Path $repoRoot 'stdlib'
 $stdlibDst = Join-Path $Bin 'stdlib'
 if (Test-Path $stdlibSrc) {
-    if (-not (Test-Path $stdlibDst)) {
-        New-Item -ItemType Directory -Path $stdlibDst | Out-Null
+    $sourceCount = (Get-ChildItem -Path $stdlibSrc -Recurse -Filter '*.ov' -ErrorAction SilentlyContinue).Count
+    if ($sourceCount -gt 0) {
+        if (-not (Test-Path $stdlibDst)) {
+            New-Item -ItemType Directory -Path $stdlibDst | Out-Null
+        }
+        Copy-Item -Path (Join-Path $stdlibSrc '*') -Destination $stdlibDst -Recurse -Force
+        Write-Host "Installed stdlib to $stdlibDst ($sourceCount modules)." -ForegroundColor Green
     }
-    # Copy-Item recursively. -Force overwrites existing files (intended — this
-    # script always replaces).
-    Copy-Item -Path (Join-Path $stdlibSrc '*') -Destination $stdlibDst -Recurse -Force
-    $facadeCount = (Get-ChildItem -Path $stdlibDst -Recurse -Filter '*.ov').Count
-    Write-Host "Installed stdlib to $stdlibDst ($facadeCount facades)." -ForegroundColor Green
 }
 
 Write-Host "Check: overt --version"

@@ -1,6 +1,6 @@
 module app
 
-use stdlib.csharp.system.text.stringbuilder as sb
+extern "csharp" use "System.Text.StringBuilder" as sb
 
 fn main() !{io} -> Result<(), IoError> {
     let b1: StringBuilder = sb.new_()

@@ -68,16 +68,16 @@ public class OvertCliToolTests
                 + $"--tool-path \"{toolPath}\" --configfile \"{configPath}\"",
                 scratch);
 
-            // Write a sample .ov that uses the bundled stdlib (so we
-            // verify discovery walks up from the install path and finds
-            // `tools/net9.0/any/stdlib/`).
+            // Write a sample .ov that exercises FFI bulk-import. Verifies
+            // the installed tool can resolve `extern "csharp" use "..."`
+            // against the BCL types loaded into its own AppDomain.
             var sampleDir = Path.Combine(scratch, "sample");
             Directory.CreateDirectory(sampleDir);
             var samplePath = Path.Combine(sampleDir, "hello.ov");
             File.WriteAllText(samplePath, """
                 module hello_tool
 
-                use stdlib.csharp.system.math as math
+                extern "csharp" use "System.Math" as math
 
                 fn main() !{io} -> Result<(), IoError> {
                     let root: Float = math.sqrt(d = 25.0)
@@ -93,8 +93,8 @@ public class OvertCliToolTests
                 : Path.Combine(toolPath, "overt");
             Assert.True(File.Exists(overtExe), $"expected overt binary at {overtExe}");
 
-            var (code, stdout, _) = Run(overtExe, $"run \"{samplePath}\"", sampleDir);
-            Assert.Equal(0, code);
+            var (code, stdout, stderr) = Run(overtExe, $"run \"{samplePath}\"", sampleDir);
+            Assert.True(code == 0, $"exit={code}\nstdout:{stdout}\nstderr:{stderr}");
             Assert.Contains("sqrt(25) = 5", stdout);
         }
         finally
