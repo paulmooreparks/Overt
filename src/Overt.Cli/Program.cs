@@ -411,6 +411,20 @@ static class Cli
         var graph = ModuleGraph.Resolve(entryFile, searchDirs);
         var allDiagnostics = graph.Diagnostics;
 
+        // Expand `extern "csharp" use "..."` declarations against the
+        // C# back end's BindGenerator before name resolution sees the
+        // module. Each module's AST is replaced with the expanded form
+        // (extern uses spliced into per-symbol extern fn declarations);
+        // any resolver failure becomes a module-level diagnostic.
+        var expandedModules = ImmutableArray.CreateBuilder<ModuleGraph.LoadedModule>(graph.Modules.Length);
+        foreach (var mod in graph.Modules)
+        {
+            var expansion = ExternUseExpander.Expand(mod.Ast, CSharpExternUseResolver.Resolve);
+            allDiagnostics = allDiagnostics.AddRange(expansion.Diagnostics);
+            expandedModules.Add(mod with { Ast = expansion.Module });
+        }
+        var modules = expandedModules.ToImmutable();
+
         var moduleResolutions = new Dictionary<string, ResolutionResult>(StringComparer.Ordinal);
         var moduleTypes = new Dictionary<string, TypeCheckResult>(StringComparer.Ordinal);
         var exportedSymbols = new Dictionary<string, ImmutableDictionary<string, Symbol>>(
@@ -418,7 +432,7 @@ static class Cli
         var symbolTypesByModule = new Dictionary<string, ImmutableDictionary<Symbol, TypeRef>>(
             StringComparer.Ordinal);
 
-        foreach (var mod in graph.Modules)
+        foreach (var mod in modules)
         {
             var importable = exportedSymbols.ToImmutableDictionary(StringComparer.Ordinal);
             var resolved = NameResolver.Resolve(mod.Ast, importable);
@@ -434,7 +448,7 @@ static class Cli
             symbolTypesByModule[mod.Name] = typed.SymbolTypes;
         }
 
-        return new CompiledGraph(graph.Modules, moduleResolutions, moduleTypes, allDiagnostics);
+        return new CompiledGraph(modules, moduleResolutions, moduleTypes, allDiagnostics);
     }
 
     // ------------------------------------------- bind helpers
