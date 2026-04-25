@@ -316,6 +316,24 @@ public class CSharpEmitterTests
     }
 
     [Fact]
+    public void Emit_TryPatternExtern_GeneratesMultiStatementBody()
+    {
+        // `extern "csharp" try fn ...` lowers to a body that declares an
+        // out temp, calls the bind target with `out`, and returns Some/None
+        // based on the bool return.
+        var source = """
+            module m
+            extern "csharp" try fn try_parse(s: String) !{io, fails} -> Option<Int>
+                binds "System.Int32.TryParse"
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("int __overt_tryout = default!;", csharp);
+        Assert.Contains("global::System.Int32.TryParse(s, out __overt_tryout)", csharp);
+        Assert.Contains("OptionSome<int>(__overt_tryout)", csharp);
+        Assert.Contains("OptionNone<int>", csharp);
+    }
+
+    [Fact]
     public void Emit_DocComment_OnRecordField_RaisesError()
     {
         // V1 doesn't support @doc on record fields (no clean spot for inline XML

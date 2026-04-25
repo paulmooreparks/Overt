@@ -235,6 +235,19 @@ public class BindGeneratorTests
     }
 
     [Fact]
+    public void Generate_TryPattern_LowersToOptionWithTryKeyword()
+    {
+        // Int32.TryParse(string, out int) is the canonical Try-pattern
+        // method. The convention layer drops the trailing out parameter
+        // and emits `try` to flag the Try kind for the emitter, which
+        // generates the corresponding multi-statement body.
+        var src = BindGenerator.Generate("int32", typeof(int));
+        Assert.Contains(
+            "extern \"csharp\" try fn try_parse(s: String) !{io, fails} -> Option<Int>",
+            src);
+    }
+
+    [Fact]
     public void Generate_SyncReturn_DoesNotPickUpAsyncEffect()
     {
         var src = BindGenerator.Generate("fixture", typeof(AsyncFixture));

@@ -225,9 +225,9 @@ public sealed class Parser
             return ParseExternUseDeclRest(platform, startPos);
         }
 
-        // Optional extern kind: `instance` or `ctor` between the platform
-        // string and `fn`. Default is Static. These are contextual keywords
-        // — normal identifier names elsewhere.
+        // Optional extern kind: `instance`, `ctor`, or `try` between the
+        // platform string and `fn`. Default is Static. These are contextual
+        // keywords — normal identifier names elsewhere.
         var externKind = ExternKind.Static;
         if (Check(TokenKind.Identifier) && Current.Lexeme == "instance")
         {
@@ -238,6 +238,11 @@ public sealed class Parser
         {
             Advance();
             externKind = ExternKind.Constructor;
+        }
+        else if (Check(TokenKind.Identifier) && Current.Lexeme == "try")
+        {
+            Advance();
+            externKind = ExternKind.Try;
         }
 
         Expect(TokenKind.KeywordFn, "extern function signature");

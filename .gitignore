@@ -26,3 +26,4 @@ dist/
 # *-build-counter files are tracked; this is for any per-machine
 # overrides like OVERT_PUBLISH_SKIP_INSTALL).
 scripts/publish.env
+scripts/local-build-counter

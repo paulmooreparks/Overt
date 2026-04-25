@@ -300,6 +300,7 @@ public static class Formatter
         {
             ExternKind.Instance => " instance",
             ExternKind.Constructor => " ctor",
+            ExternKind.Try => " try",
             _ => "",
         };
         ctx.Write($"extern \"{ex.Platform}\"{kindKw} fn {ex.Name}(");

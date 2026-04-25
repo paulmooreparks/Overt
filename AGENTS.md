@@ -704,12 +704,23 @@ refinements:
   row. Callers extract values via postfix `.await`. Non-generic
   `Task` is skipped in v1 (would need an emitter-side
   `Task → Task<Unit>` bridge).
-- **`Try*` pattern recognition**: deferred. Recognising the
-  signature shape is straightforward but useful emission requires
-  multi-statement codegen (declare an out-temp, branch on the bool,
-  return Some/None) that the current static-call emit path can't
-  express. Hand-write an explicit `extern fn` for `TryParse`-style
-  methods until that lands.
+- **`Try*` pattern recognition**: methods matching the BCL's
+  `bool TryX(..., out T result)` shape lower to
+  `extern "csharp" try fn try_x(...) -> Option<T>`. The Overt-side
+  signature drops the trailing out parameter; the emitter generates
+  a body that calls the underlying method with an out-temp and
+  returns `Some(temp)` or `None` based on the bool channel. Static
+  Try methods only in v1 (instance Try-pattern such as
+  `Dictionary.TryGetValue` is not yet recognised).
+
+  **Current gap**: matching the result of an aliased Try call
+  (`extern "csharp" use "X" as alias` + `match alias.try_x(...)`)
+  hits a typer issue where `Some` / `None` patterns don't resolve
+  through the alias. As a workaround, use the unaliased form
+  (`extern "csharp" use "System.Int32"` then call `try_parse`
+  directly). This is a pre-existing typer bug, not specific to Try
+  — any Option-returning aliased call sees the same shape — and is
+  tracked separately.
 
 ---
 

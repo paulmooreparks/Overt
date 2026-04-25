@@ -492,12 +492,67 @@ public static class BindGenerator
         return ToSnakeCase(t.Name);
     }
 
+    /// <summary>
+    /// Detect the BCL's <c>bool TryX(..., out T result)</c> idiom and return
+    /// the out parameter's element type. Recognised methods drop the out
+    /// parameter from the Overt signature and lower to <c>Option&lt;T&gt;</c>;
+    /// the C# emitter generates the matching multi-statement body
+    /// (see <c>CSharpEmitter.EmitTryPatternBody</c>).
+    ///
+    /// Recognition rule:
+    /// <list type="bullet">
+    ///   <item>Method name starts with "Try" (case-sensitive).</item>
+    ///   <item>Return type is exactly <c>bool</c>.</item>
+    ///   <item>Exactly one out / by-ref parameter, in the trailing position.</item>
+    ///   <item>Out parameter's element type maps to an Overt primitive.</item>
+    ///   <item>Static-only in v1; instance Try-pattern (Dictionary.TryGetValue
+    ///     etc.) needs separate emitter work and is not in this pass.</item>
+    /// </list>
+    /// </summary>
+    private static Type? TryPatternOutType(MethodInfo method)
+    {
+        if (!method.IsStatic) return null;
+        if (!method.Name.StartsWith("Try", StringComparison.Ordinal)) return null;
+        if (method.ReturnType != typeof(bool)) return null;
+        var parameters = method.GetParameters();
+        if (parameters.Length == 0) return null;
+
+        var last = parameters[^1];
+        if (!last.IsOut || !last.ParameterType.IsByRef) return null;
+        for (var i = 0; i < parameters.Length - 1; i++)
+        {
+            var p = parameters[i];
+            if (p.IsOut || p.ParameterType.IsByRef) return null;
+        }
+
+        var elem = last.ParameterType.GetElementType();
+        if (elem is null) return null;
+        if (MapCSharpTypeToOvert(elem) is null) return null;
+        return elem;
+    }
+
     /// <summary>Pre-check: would <see cref="EmitMethod"/> succeed on this
     /// method? Mirrors EmitMethod's checks so we can count emitted overloads
     /// without actually rendering them.</summary>
     private static bool IsRenderable(MethodInfo method)
     {
         if (method.IsGenericMethod) return false;
+
+        // Try-pattern methods are renderable even though they have an
+        // out parameter; the convention layer collapses them to
+        // Option<T> and the emitter generates the matching body.
+        if (TryPatternOutType(method) is not null)
+        {
+            var parameters = method.GetParameters();
+            for (var i = 0; i < parameters.Length - 1; i++)
+            {
+                var p = parameters[i];
+                if (p.IsOptional) return false;
+                if (MapCSharpTypeToOvert(p.ParameterType) is null) return false;
+            }
+            return true;
+        }
+
         foreach (var p in method.GetParameters())
         {
             if (p.IsOptional || p.IsOut || p.ParameterType.IsByRef) return false;
@@ -520,12 +575,22 @@ public static class BindGenerator
         StringBuilder sb, Type targetType, MethodInfo method, string[] effects, bool pure,
         string overtName, HashSet<string> topLevelNames)
     {
+        // Try-pattern recognition: bool TryX(..., out T result) collapses
+        // to a `try` extern (ExternKind.Try) with Option<T> return.
+        var tryOutType = TryPatternOutType(method);
+
         var paramList = new List<string>();
         var canRender = true;
         var skipReason = "";
 
-        foreach (var p in method.GetParameters())
+        var parameters = method.GetParameters();
+        // For Try-pattern methods, walk every parameter except the trailing
+        // out one. For everything else, walk every parameter.
+        var paramsToWalk = tryOutType is null ? parameters.Length : parameters.Length - 1;
+
+        for (var pi = 0; pi < paramsToWalk; pi++)
         {
+            var p = parameters[pi];
             var overtType = MapCSharpTypeToOvert(p.ParameterType);
             if (overtType is null)
             {
@@ -560,7 +625,14 @@ public static class BindGenerator
         var isAsync = false;
         if (canRender)
         {
-            if (method.ReturnType == typeof(void))
+            if (tryOutType is not null)
+            {
+                // Try-pattern: return collapses to Option<TOut>; the bool
+                // success channel becomes Some/None at the call boundary.
+                var outOvert = MapCSharpTypeToOvert(tryOutType);
+                returnOvertType = $"Option<{outOvert}>";
+            }
+            else if (method.ReturnType == typeof(void))
             {
                 returnOvertType = "()";
             }
@@ -590,12 +662,9 @@ public static class BindGenerator
 
         // Convention layer (DESIGN.md §17): nullable returns -> Option<T>
         // first, then Result<_, IoError> for impure methods. Skip both
-        // for void returns, which lower to () directly. Skip the Result
-        // wrap for Task returns: async methods communicate failure via
-        // task exceptions, not Result, and double-wrapping (Task<Result<T,E>>
-        // synthesised from Task<T>) would diverge from what `.await`
-        // semantics expect.
-        if (returnOvertType is not null && returnOvertType != "()" && !isAsync)
+        // for void returns and for the Task / Try paths, which already
+        // encode their own success/fail semantics.
+        if (returnOvertType is not null && returnOvertType != "()" && !isAsync && tryOutType is null)
         {
             var nullCtx = new NullabilityInfoContext();
             returnOvertType = ApplyNullableWrap(returnOvertType, method, nullCtx);
@@ -604,7 +673,8 @@ public static class BindGenerator
         // Multi-arg calls in Overt use named args; single-arg is permitted
         // positional but the named form is still legal. Signature stays the
         // same in both cases — the rule is at the *call site*, not declaration.
-        sb.Append("extern \"csharp\" fn ");
+        var kindKw = tryOutType is not null ? " try" : "";
+        sb.Append($"extern \"csharp\"{kindKw} fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));
@@ -621,9 +691,9 @@ public static class BindGenerator
             sb.Append($" !{{{string.Join(", ", allEffects)}}}");
         }
 
-        // Result-wrap non-pure returns that aren't already Unit-valued or
-        // already Task-valued (async methods carry their own failure path).
-        var retText = (pure || returnOvertType == "()" || isAsync)
+        // Result-wrap non-pure returns that aren't already Unit-valued,
+        // Task-valued, or Option-valued via the Try pattern.
+        var retText = (pure || returnOvertType == "()" || isAsync || tryOutType is not null)
             ? returnOvertType
             : $"Result<{returnOvertType}, IoError>";
         sb.Append($" -> {retText}");

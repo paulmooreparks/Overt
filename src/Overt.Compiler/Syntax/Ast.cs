@@ -111,6 +111,13 @@ public enum ExternKind
     /// <summary>Constructor. Binds target is just the type's full name;
     /// emitter produces <c>new global::&lt;binds&gt;(args)</c>.</summary>
     Constructor,
+    /// <summary>Try-pattern static method: <c>bool TryX(args, out T result)</c>.
+    /// The Overt signature drops the out parameter and returns
+    /// <c>Option&lt;T&gt;</c>; the emitter generates a body that calls the
+    /// underlying method, declares an out temp, and returns
+    /// <c>Some(temp)</c> or <c>None</c> based on the bool channel. Static-only
+    /// in v1 (no instance Try-pattern support yet).</summary>
+    Try,
 }
 
 public sealed record ExternDecl(

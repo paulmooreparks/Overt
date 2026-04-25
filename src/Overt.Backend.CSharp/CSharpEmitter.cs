@@ -690,6 +690,16 @@ public sealed class CSharpEmitter
         var returnsResult = x.ReturnType is NamedType
         { Name: "Result", TypeArguments.Length: 2 };
 
+        // Try-pattern body is multi-statement (declare an out temp, call
+        // the underlying method, branch on the bool, return Some/None);
+        // it doesn't fit the single-callExpr machinery used by the other
+        // kinds, so handle it here and return early.
+        if (x.Kind == ExternKind.Try)
+        {
+            EmitTryPatternBody(x);
+            return;
+        }
+
         string callExpr;
         switch (x.Kind)
         {
@@ -786,6 +796,74 @@ public sealed class CSharpEmitter
         }
         _w.WriteLine("}");
     }
+
+    /// <summary>
+    /// Emit the body of a Try-pattern extern (<see cref="ExternKind.Try"/>):
+    /// declare an out temp typed for the underlying C# out parameter, call
+    /// the bind target, and branch on its bool return into <c>Some</c> or
+    /// <c>None</c>.
+    ///
+    /// Required shape from the AST:
+    /// <list type="bullet">
+    ///   <item>Return type is <c>Option&lt;T&gt;</c> for some Overt T.</item>
+    ///   <item>Bind target is a static method <c>Ns.Type.TryX</c>.</item>
+    ///   <item>Overt parameters match the underlying method's input parameters
+    ///     (the trailing out parameter is dropped at the Overt level).</item>
+    /// </list>
+    /// Anything else is a generator bug — emit a runtime exception so the
+    /// failure surfaces clearly during testing rather than producing
+    /// silently-wrong code.
+    /// </summary>
+    private void EmitTryPatternBody(ExternDecl x)
+    {
+        if (x.ReturnType is not NamedType { Name: "Option", TypeArguments.Length: 1 } optType)
+        {
+            _w.WriteLine(
+                "throw new global::System.InvalidOperationException("
+                + $"\"extern try '{x.Name}' must return Option<T>; got something else (generator bug)\");");
+            return;
+        }
+
+        var innerOvert = optType.TypeArguments[0];
+        var innerCs = LowerTypeToCSharpString(innerOvert);
+        if (innerCs is null)
+        {
+            _w.WriteLine(
+                "throw new global::System.InvalidOperationException("
+                + $"\"extern try '{x.Name}' has unsupported Option inner type (generator bug)\");");
+            return;
+        }
+
+        var args = string.Join(", ", x.Parameters.Select(p => EscapeId(p.Name)));
+        var argSep = x.Parameters.Length > 0 ? ", " : "";
+        var prefixedTarget = "global::" + x.BindsTarget;
+
+        _w.WriteLine($"{innerCs} __overt_tryout = default!;");
+        _w.WriteLine($"return {prefixedTarget}({args}{argSep}out __overt_tryout)");
+        using (_w.Indent())
+        {
+            _w.WriteLine($"? (global::Overt.Runtime.Option<{innerCs}>)new global::Overt.Runtime.OptionSome<{innerCs}>(__overt_tryout)");
+            _w.WriteLine($": (global::Overt.Runtime.Option<{innerCs}>)new global::Overt.Runtime.OptionNone<{innerCs}>();");
+        }
+    }
+
+    /// <summary>
+    /// Render an Overt <see cref="TypeExpr"/> as the equivalent C# type
+    /// spelling, used by helpers that need to emit raw C# fragments
+    /// (e.g. the Try-pattern body declaring its out temp). Reuses the
+    /// emitter's existing type-mapping rules but produces a string instead
+    /// of writing to <see cref="_w"/>. Returns null when the input is
+    /// outside the supported shape (caller surfaces a clear runtime error).
+    /// </summary>
+    private static string? LowerTypeToCSharpString(TypeExpr type) => type switch
+    {
+        NamedType { Name: "Int" } => "int",
+        NamedType { Name: "Int64" } => "long",
+        NamedType { Name: "Float" } => "double",
+        NamedType { Name: "Bool" } => "bool",
+        NamedType { Name: "String" } => "string",
+        _ => null,
+    };
 
     /// <summary>
     /// Emit the Err-side of an extern's exception-to-Result conversion. We
