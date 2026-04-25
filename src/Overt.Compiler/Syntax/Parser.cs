@@ -127,13 +127,13 @@ public sealed class Parser
 
         if (Check(TokenKind.KeywordFn))
         {
-            // Only @csharp attributes are meaningful on fn; @derive targets types.
+            // @csharp and @doc are meaningful on fn; @derive targets types.
             foreach (var attr in attributes)
             {
-                if (attr.Name != "csharp")
+                if (attr.Name != "csharp" && attr.Name != "doc")
                 {
                     ReportError("OV0157",
-                        $"attribute `@{attr.Name}` on `fn` declarations is not supported; only `@csharp(\"...\")` attributes pass through to the emitted C# method",
+                        $"attribute `@{attr.Name}` on `fn` declarations is not supported; supported attributes are `@csharp(\"...\")` and `@doc(\"...\")`",
                         attr.Span);
                 }
             }
@@ -350,12 +350,13 @@ public sealed class Parser
         var endPos = nameToken.Span.End;
         if (Match(TokenKind.LeftParen))
         {
-            if (nameToken.Lexeme == "csharp")
+            if (IsStringArgAnnotation(nameToken.Lexeme))
             {
-                // @csharp("<raw attribute content>"): exactly one string literal arg.
-                // The string is emitted opaquely as `[<content>]` on the generated
-                // C# member; Overt performs no semantic check on the content.
-                var lit = Expect(TokenKind.StringLiteral, "C# attribute content as a string literal");
+                // String-arg annotations carry one string-literal argument:
+                //   @csharp("<raw C# attribute content>") -> emitted opaquely.
+                //   @doc("<documentation prose>")        -> lowered per backend
+                //                                            (e.g. /// for C#).
+                var lit = Expect(TokenKind.StringLiteral, $"`@{nameToken.Lexeme}` argument as a string literal");
                 stringArgument = DecodeStringLiteral(lit.Lexeme);
             }
             else
@@ -381,6 +382,15 @@ public sealed class Parser
 
         return new Annotation(nameToken.Lexeme, arguments, stringArgument, new SourceSpan(at.Span.Start, endPos));
     }
+
+    /// <summary>
+    /// Annotations whose argument is a single string literal (rather than the
+    /// `@derive`-style identifier list). <c>@csharp</c> takes raw C# attribute
+    /// content for opaque emission; <c>@doc</c> takes documentation prose
+    /// lowered per backend (XML doc comment for C#, comment block for Go, etc.).
+    /// </summary>
+    private static bool IsStringArgAnnotation(string name)
+        => name == "csharp" || name == "doc";
 
     /// <summary>
     /// Strip the surrounding quotes and resolve backslash escapes on a
@@ -483,6 +493,10 @@ public sealed class Parser
 
     private EnumVariant ParseEnumVariant()
     {
+        var attributes = Check(TokenKind.At)
+            ? ParseAnnotationList()
+            : ImmutableArray<Annotation>.Empty;
+        var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         var nameToken = Expect(TokenKind.Identifier, "enum variant name");
         var endPos = nameToken.Span.End;
         var fields = ImmutableArray<RecordField>.Empty;
@@ -511,18 +525,24 @@ public sealed class Parser
         return new EnumVariant(
             nameToken.Lexeme,
             fields,
-            new SourceSpan(nameToken.Span.Start, endPos));
+            attributes,
+            new SourceSpan(startPos, endPos));
     }
 
     private RecordField ParseRecordFieldDecl()
     {
+        var attributes = Check(TokenKind.At)
+            ? ParseAnnotationList()
+            : ImmutableArray<Annotation>.Empty;
+        var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         var nameToken = Expect(TokenKind.Identifier, "field name");
         Expect(TokenKind.Colon, "field type annotation");
         var type = ParseTypeExpr();
         return new RecordField(
             nameToken.Lexeme,
             type,
-            new SourceSpan(nameToken.Span.Start, type.Span.End));
+            attributes,
+            new SourceSpan(startPos, type.Span.End));
     }
 
     private FunctionDecl ParseFunctionDecl(ImmutableArray<Annotation> attributes = default)

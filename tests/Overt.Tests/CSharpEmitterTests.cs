@@ -173,4 +173,115 @@ public class CSharpEmitterTests
         var csharp = EmitSource(source);
         Assert.Contains("[JsonPropertyName(\"name\")]", csharp);
     }
+
+    [Fact]
+    public void Emit_CSharpAttribute_OnRecord_EmitsBeforeRecordClass()
+    {
+        var source = """
+            module m
+            @csharp("Serializable")
+            record Point { x: Int, y: Int }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[Serializable]", csharp);
+        var attrIdx = csharp.IndexOf("[Serializable]", StringComparison.Ordinal);
+        var classIdx = csharp.IndexOf("public sealed record Point", StringComparison.Ordinal);
+        Assert.True(attrIdx < classIdx, "attribute must precede the record class");
+    }
+
+    [Fact]
+    public void Emit_CSharpAttribute_OnRecordField_EmitsAsPropertyTarget()
+    {
+        // Record fields lower to positional ctor parameters; the attribute
+        // attaches to the synthesized property, so the emitter must wrap it
+        // in a `[property: ...]` target specifier.
+        var source = """
+            module m
+            record User {
+                @csharp("JsonPropertyName(\"display_name\")")
+                name: String,
+                age: Int,
+            }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[property: JsonPropertyName(\"display_name\")] string name", csharp);
+    }
+
+    [Fact]
+    public void Emit_CSharpAttribute_OnEnumVariant_EmitsBeforeVariantClass()
+    {
+        var source = """
+            module m
+            enum Status {
+                @csharp("Obsolete")
+                Pending,
+                Shipped,
+            }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("[Obsolete]", csharp);
+        var attrIdx = csharp.IndexOf("[Obsolete]", StringComparison.Ordinal);
+        var pendingIdx = csharp.IndexOf("Status_Pending", StringComparison.Ordinal);
+        Assert.True(attrIdx < pendingIdx, "attribute must precede the variant class");
+    }
+
+    [Fact]
+    public void Emit_DocComment_OnFn_EmitsXmlSummary()
+    {
+        var source = """
+            module m
+            @doc("Adds two integers and returns the sum.")
+            fn add(a: Int, b: Int) -> Int { a + b }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("/// <summary>", csharp);
+        Assert.Contains("/// Adds two integers and returns the sum.", csharp);
+        Assert.Contains("/// </summary>", csharp);
+    }
+
+    [Fact]
+    public void Emit_DocComment_OnRecord_EmitsXmlSummary()
+    {
+        var source = """
+            module m
+            @doc("A 2D point in cartesian coordinates.")
+            record Point { x: Int, y: Int }
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("/// <summary>", csharp);
+        Assert.Contains("/// A 2D point in cartesian coordinates.", csharp);
+    }
+
+    [Fact]
+    public void Emit_DocComment_EscapesXmlSpecials()
+    {
+        var source = """
+            module m
+            @doc("Compares a < b in 5 < 10 sense; returns true.")
+            fn lt() -> Bool { true }
+            """;
+        var csharp = EmitSource(source);
+        // `<` must be escaped to &lt; so the emitted comment is valid XML.
+        Assert.Contains("a &lt; b", csharp);
+        Assert.Contains("5 &lt; 10", csharp);
+        Assert.DoesNotContain("a < b", csharp);
+    }
+
+    [Fact]
+    public void Emit_DocComment_OnRecordField_RaisesError()
+    {
+        // V1 doesn't support @doc on record fields (no clean spot for inline XML
+        // comment in the positional ctor parameter list). Verify a clear error
+        // surfaces rather than silent failure.
+        var source = """
+            module m
+            record User {
+                @doc("the user's display name")
+                name: String,
+            }
+            """;
+        var ex = Assert.Throws<InvalidOperationException>(() => EmitSource(source));
+        Assert.Contains("@doc", ex.Message);
+        Assert.Contains("name", ex.Message);
+    }
 }

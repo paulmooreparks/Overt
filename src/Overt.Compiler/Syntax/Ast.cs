@@ -134,6 +134,7 @@ public sealed record RecordDecl(
 public sealed record RecordField(
     string Name,
     TypeExpr Type,
+    ImmutableArray<Annotation> Annotations,
     SourceSpan Span) : SyntaxNode(Span);
 
 /// <summary>
@@ -150,6 +151,7 @@ public sealed record EnumDecl(
 public sealed record EnumVariant(
     string Name,
     ImmutableArray<RecordField> Fields,
+    ImmutableArray<Annotation> Annotations,
     SourceSpan Span) : SyntaxNode(Span);
 
 /// <summary>

@@ -532,10 +532,10 @@ path) is demonstrated in [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 ## 11.5. Platform passthrough: `@csharp("...")`
 
 Target-specific metadata (test-framework markers, serialization hints,
-DI markers, routing, etc.) is reachable via `@csharp("...")` on a
-function declaration. The string content is emitted opaquely as a C#
-attribute `[...]` on the generated method. Overt does no semantic check
-on the content; the C# compiler is the only validator.
+DI markers, routing, etc.) is reachable via `@csharp("...")`. The
+string content is emitted opaquely as a C# attribute `[...]` on the
+generated declaration. Overt does no semantic check on the content;
+the C# compiler is the only validator.
 
 ```overt
 @csharp("Fact")
@@ -550,26 +550,84 @@ fn test_each(n: Int) -> Int {
     n
 }
 
-@csharp("JsonPropertyName(\"name\")")
-fn field_name() -> String {
-    "name"
+@csharp("Serializable")
+record Point { x: Int, y: Int }
+
+record User {
+    @csharp("JsonPropertyName(\"display_name\")")
+    name: String,
+    age: Int,
+}
+
+enum Status {
+    @csharp("Obsolete")
+    Pending,
+    Shipped,
 }
 ```
 
 Each `@csharp(...)` becomes one `[...]` attribute, emitted on its own
-line before the method signature. Stack them by writing multiple
-`@csharp` attributes. Use `\"` to escape embedded quotes in the string.
+line before the declaration (or inline as `[property: ...]` when the
+attribute lives on a record field, which lowers to a positional ctor
+parameter that synthesizes a property). Stack them by writing multiple
+`@csharp` attributes. Use `\"` to escape embedded quotes in the
+string.
 
-**Scope in v1**: function declarations only. Attributes on records,
-record fields, enum variants, and type aliases are not yet supported;
-use `@csharp` on free functions while that scope is expanded in a
-future release. Non-`@csharp` attributes on `fn` (e.g. `@derive`) are
-still rejected by **OV0157**; `@derive` applies only to records and
-enums.
+**Scope in v1**: function declarations, record declarations, record
+fields, enum declarations, and enum variants. Type aliases don't take
+attributes (C# `using`-aliases can't carry them). Non-`@csharp` /
+non-`@doc` attributes on `fn` are rejected by **OV0157**; `@derive`
+applies only to records and enums.
 
-**`@go("...")` and other backends**: not yet implemented. The passthrough
-escape hatch is scoped per-target; when the Go backend comes online,
-its attribute vocabulary will live under its own prefix.
+**`@go("...")` and other backends**: not yet implemented. The
+passthrough escape hatch is scoped per-target; when the Go backend
+comes online, its attribute vocabulary lives under its own prefix.
+
+---
+
+## 11.6. Documentation: `@doc("...")`
+
+Native (cross-target portable) attribute carrying documentation prose
+about a declaration. The C# back end lowers `@doc("...")` to an XML
+documentation comment (`/// <summary>...</summary>`); future back ends
+lower to their target's documentation convention.
+
+```overt
+@doc("Parses a SemVer 2.0.0 version string. Returns Ok with the parsed Version on success, or Err with a typed ParseError on any failure mode.")
+fn parse(input: String) -> Result<Version, ParseError> { ... }
+
+@doc("A 2D point in cartesian coordinates.")
+record Point { x: Int, y: Int }
+
+@doc("HTTP request lifecycle states the server tracks.")
+enum RequestState {
+    @doc("Connection accepted, headers not yet read.")
+    Pending,
+    Active,
+}
+```
+
+The string content is escaped for XML when emitted (`<` becomes
+`&lt;`, etc.), so prose with comparison operators or angle brackets
+renders correctly without the user thinking about it. Stacking
+multiple `@doc` annotations concatenates their text inside one
+`<summary>` block.
+
+**Scope in v1**: functions, records, enums, enum variants. `@doc` on
+record fields is **not** supported in v1 — the positional-record
+parameter list is single-line and an inline XML comment has no clean
+spot to land; the emitter raises a clear error if `@doc` appears on a
+field. Move the documentation to the enclosing record, or use
+`@csharp("/// <param ...>...</param>")` as a passthrough until v2
+elevates field docs to first-class.
+
+**Why `@doc` is native rather than a `@csharp` passthrough**:
+documentation passes the cross-target test cleanly. Every supported
+backend has a documentation convention, and every convention serves
+the same role to the same audience. That's the bar a feature must
+clear to land in the native vocabulary instead of the per-target
+passthrough — see DESIGN.md §18 on the "promiscuous passthrough,
+native purity" rule.
 
 ---
 

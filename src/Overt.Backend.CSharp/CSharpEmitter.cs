@@ -293,12 +293,16 @@ public sealed class CSharpEmitter
     private void EmitRecord(RecordDecl rec)
     {
         EmitAnnotationComments(rec.Annotations);
+        EmitDocComment(rec.Annotations);
+        EmitCSharpAttributes(rec.Annotations);
+        RejectDocOnRecordFields(rec.Fields);
         _w.Write("public sealed record ");
         _w.Write(rec.Name);
         _w.Write("(");
         for (var i = 0; i < rec.Fields.Length; i++)
         {
             if (i > 0) _w.Write(", ");
+            EmitInlineCSharpAttributesForRecordField(rec.Fields[i].Annotations);
             EmitType(rec.Fields[i].Type);
             _w.Write(" ");
             _w.Write(EscapeId(rec.Fields[i].Name));
@@ -309,10 +313,15 @@ public sealed class CSharpEmitter
     private void EmitEnum(EnumDecl e)
     {
         EmitAnnotationComments(e.Annotations);
+        EmitDocComment(e.Annotations);
+        EmitCSharpAttributes(e.Annotations);
         _w.Write($"public abstract record {e.Name}");
         _w.WriteLine(";");
         foreach (var variant in e.Variants)
         {
+            EmitDocComment(variant.Annotations);
+            EmitCSharpAttributes(variant.Annotations);
+            RejectDocOnRecordFields(variant.Fields);
             _w.Write("public sealed record ");
             _w.Write($"{e.Name}_{variant.Name}");
             if (variant.Fields.Length > 0)
@@ -321,6 +330,7 @@ public sealed class CSharpEmitter
                 for (var i = 0; i < variant.Fields.Length; i++)
                 {
                     if (i > 0) _w.Write(", ");
+                    EmitInlineCSharpAttributesForRecordField(variant.Fields[i].Annotations);
                     EmitType(variant.Fields[i].Type);
                     _w.Write(" ");
                     _w.Write(EscapeId(variant.Fields[i].Name));
@@ -329,6 +339,29 @@ public sealed class CSharpEmitter
             }
             _w.Write($" : {e.Name}");
             _w.WriteLine(";");
+        }
+    }
+
+    /// <summary>
+    /// Field-level <c>@doc("...")</c> isn't supported in v1 because the
+    /// positional-record parameter list is single-line and an inline XML
+    /// doc comment has no clean spot to land. Field-level <c>@csharp</c>
+    /// works inline. Flag a clear emitter-time error if anyone tries
+    /// <c>@doc</c> on a field; future versions can switch to multi-line
+    /// emission when @doc is present and remove this guard.
+    /// </summary>
+    private static void RejectDocOnRecordFields(ImmutableArray<RecordField> fields)
+    {
+        foreach (var field in fields)
+        {
+            foreach (var ann in field.Annotations)
+            {
+                if (ann.Name == "doc")
+                {
+                    throw new InvalidOperationException(
+                        $"`@doc(\"...\")` is not supported on record fields in v1; saw it on field `{field.Name}`. Move the documentation to the enclosing record or use `@csharp(\"...\")` for a passthrough form.");
+                }
+            }
         }
     }
 
@@ -489,6 +522,7 @@ public sealed class CSharpEmitter
     private void EmitFunction(FunctionDecl fn)
     {
         EmitEffectRowComment(fn.Effects);
+        EmitDocComment(fn.Annotations);
         EmitCSharpAttributes(fn.Annotations);
         EmitLineDirective(fn.Span);
 
@@ -2518,6 +2552,74 @@ public sealed class CSharpEmitter
             _w.WriteLine($"[{ann.StringArgument}]");
         }
     }
+
+    /// <summary>
+    /// Emit <c>@doc("...")</c> annotations as a C# XML documentation comment
+    /// (<c>/// &lt;summary&gt;...&lt;/summary&gt;</c>) immediately before the
+    /// member. <c>@doc</c> is native (cross-target portable) rather than
+    /// passthrough; this helper owns the C# lowering. Multiple <c>@doc</c>
+    /// annotations on the same declaration concatenate into a single summary
+    /// separated by whitespace.
+    /// </summary>
+    private void EmitDocComment(ImmutableArray<Annotation> annotations)
+    {
+        if (annotations.IsDefaultOrEmpty)
+        {
+            return;
+        }
+        var first = true;
+        foreach (var ann in annotations)
+        {
+            if (ann.Name != "doc" || ann.StringArgument is null)
+            {
+                continue;
+            }
+            var text = EscapeXmlText(ann.StringArgument);
+            if (first)
+            {
+                _w.WriteLine("/// <summary>");
+                first = false;
+            }
+            foreach (var line in text.Split('\n'))
+            {
+                _w.WriteLine($"/// {line.TrimEnd('\r')}");
+            }
+        }
+        if (!first)
+        {
+            _w.WriteLine("/// </summary>");
+        }
+    }
+
+    /// <summary>
+    /// Inline form of @csharp emission for a positional record parameter.
+    /// Writes <c>[property: X] </c> tokens into the parameter list so the
+    /// attribute attaches to the synthesized property, not the constructor
+    /// parameter. <c>@doc</c> on record fields is rejected upstream because
+    /// the inline form has no clean spot for an XML doc comment; if a future
+    /// version needs it, the record-emission path can switch to multi-line
+    /// when any field carries <c>@doc</c>.
+    /// </summary>
+    private void EmitInlineCSharpAttributesForRecordField(ImmutableArray<Annotation> annotations)
+    {
+        if (annotations.IsDefaultOrEmpty)
+        {
+            return;
+        }
+        foreach (var ann in annotations)
+        {
+            if (ann.Name != "csharp" || ann.StringArgument is null)
+            {
+                continue;
+            }
+            _w.Write($"[property: {ann.StringArgument}] ");
+        }
+    }
+
+    private static string EscapeXmlText(string s)
+        => s.Replace("&", "&amp;", StringComparison.Ordinal)
+            .Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal);
 
     private static string PascalCase(string snake)
     {

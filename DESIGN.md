@@ -923,6 +923,18 @@ The defense is to make the generated code **structurally inferior** to the Overt
 
 The principle, stated sharply: **a bug in Overt-authored code must be cheaper to fix in the `.ov` source than in the `.cs` output, for every audience — the agent, the human reviewer, and the production oncall staring at a stack trace.** Every piece of tooling that processes the output needs to route back to `.ov`.
 
+### Design principle: promiscuous passthrough, native purity
+
+Some target features have no portable analog. .NET's attribute model, Go's struct tags, Rust's `#[derive]` and `#[cfg]`, JavaScript decorators — each is deeply tied to its host's runtime conventions and tooling, and none of them mean the same thing across targets. The temptation under "transpile to source" is to invent a portable Overt construct that lowers to all of them. **Resist.** That path produces either a shallow Esperanto layer that papers over real semantic differences, or a vast portable surface that replicates each ecosystem in Overt's model. Either way, the language grows past what serves agent-RWRA.
+
+The rule, stated sharply:
+
+- **Passthrough vocabularies are promiscuous.** Each backend gets its own free-form `@<backend>("...")` attribute that carries raw target-language metadata, opaquely emitted, with no Overt-side semantic check. `@csharp("Fact")` becomes `[Fact]`. `@csharp("JsonPropertyName(\"name\")")` becomes `[JsonPropertyName("name")]`. The C# compiler is the only validator; the agent author owns the attribute grammar. Future backends bring `@go("json:\"foo\"")`, `@rust("derive(Serialize)")`, etc. Cheap to add, narrow in scope, honest about being target-specific.
+- **Native vocabularies stay pure.** A construct lands in Overt's native attribute set (alongside `@derive` and `@doc`) only when it passes the cross-target test cleanly: meaningful in every backend Overt supports, meaningful in the same way to the same audience, and worth the Overt compiler knowing about. `@doc("...")` qualifies — every target has docs and they serve the same role. `@deprecated` probably qualifies too. Most candidates do not.
+- **The qualifier itself is the documentation.** `@csharp(...)` reads as "platform-specific, not portable" — the prefix is honest about the constraint. A construct named `@json_field("...")` would feel portable but wouldn't be, and would mislead. Refuse that syntactic shape. If something is platform-specific, name it after the platform.
+
+The agent-RWRA tradeoff is real and accepted. Passthrough attributes are less overt than native ones — an agent reading `@csharp("Fact")` has to know C# attribute conventions. But the alternative (a portable abstraction) ends up either shallow or sprawling, and neither serves the thesis. Honest passthrough beats clever abstraction. Native vocabulary remains the high bar; passthrough is where everything else lives.
+
 ### Standard library scope
 
 **Focused core; FFI for everything else.**
