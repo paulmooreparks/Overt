@@ -3,6 +3,7 @@
     "displayName": "Overt",
     "description": "Syntax highlighting and language configuration for Overt",
     "version": "0.1.0",
+    "publisher": "paulmooreparks",
     "icon": "icon.png",
     "engines": {
         "vscode": "^1.70.0"
