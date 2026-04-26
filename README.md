@@ -109,9 +109,9 @@ A few of the decisions that define the language. Full rationale in [`DESIGN.md`]
 - **Errors as values with `Result<T, E>` and `?` propagation** (§11). Exceptions convert only at FFI boundaries.
 - **Effect rows declared on every function**, row-polymorphic via effect-row type variables (§7). Core effects: `io`, `async`, `inference`, `fails`.
 - **Immutable records.** `let mut` rebinds local names; `with` produces modified copies (§10). No shared mutable state.
-- **No method-call syntax.** Pipes (`|>`, `|>?`) for composition; bare calls otherwise (§7). Dots mean field access or module-qualified call, nothing else.
+- **Method-call syntax routes through stdlib namespaces and instance externs.** `s.chars()` resolves to `String.chars(s)`; `xs.map(f)` resolves to `map(list = xs, f = f)`. Dots mean either field access, module-qualified call, or method-call resolution by the type checker.
 - **No literal integer indexing at source level** (§13). Zero-cost iteration or proven-index as the numeric-kernel escape hatch.
-- **Transpile to source, not IR.** C# via Roslyn (primary); Go as conformance target (§18, §20). LLVM explicitly rejected for v1.
+- **Transpile to source, not IR.** C# via Roslyn (primary); Go via direct emit (now feature-parity-with-C# on portable code, plus full FFI for non-portable; see §18, §20). LLVM explicitly rejected for v1.
 - **One canonical form**, enforced by the formatter. No per-project or per-developer style config (§4, §21).
 - **Defined behavior, no UB** (§8). Integer overflow traps by default. Every classical UB source from C/C++ is designed out structurally.
 - **Runtime errors point at Overt source.** The C# emitter writes `#line` directives so exceptions, debuggers, and stack traces resolve to the original `.ov` file, not the generated `.cs`. Editing the generated code is structurally discouraged; see §18's debug-mapping subsection.
@@ -136,8 +136,8 @@ flowchart TB
 
     subgraph tier2 ["<code>Overt.Backend.*</code>"]
         direction LR
-        cs["<b>C#</b> (today)<br/>Emitter · Runtime<br/>BindGen · Runner<br/>#line + PDB · NuGet"]
-        go["<b>Go</b> (scaffold)"]
+        cs["<b>C#</b> (primary)<br/>Emitter · Runtime<br/>BindGen · Runner<br/>#line + PDB · NuGet"]
+        go["<b>Go</b> (working)<br/>Emitter · Runtime<br/>FFI: extern types,<br/>functions, instance<br/>methods, fn-typed params,<br/>(T, error) → Result"]
         future["<b>Future: TypeScript, Rust, C++, etc.</b>"]
     end
 
@@ -156,29 +156,50 @@ CARRYOVER.md                        Session handoff: next-session queue and lock
 ROLLOUT.md                          Phased plan for taking Overt public
 docs/
   grammar/                          Authoritative lexical + precedence grammars
+  concurrency.md                    Design space for goroutines / channels / select
+                                    (gated next major language arc)
+  ffi.md                            FFI design memo for the Go target (opaque types,
+                                    function-typed extern parameters, etc.)
+  samples/chat-relay.md             Phase-by-phase design for the Tela-shape sample
+  tooling/lsp.md                    Scoping doc for a future Overt language server
 examples/                           Example programs (living test cases)
-                                    Root contains portable examples (Overt prelude only).
-                                    csharp/ contains examples that reach `extern "csharp"`.
+                                    Root: portable examples (Overt prelude only).
+                                    csharp/: examples reaching `extern "csharp"`.
 samples/
   msbuild-smoke/                    C# project consuming .ov files via Overt.Build
+  chat-relay/                       Phase-1 WebSocket echo server: Overt source +
+                                    hand-written Go FFI shims + go.mod, transpiled
+                                    via `overt --emit=go`. Builds with `go build`.
+runtime/
+  go/                               Go-side prelude for transpiled programs:
+                                    Result, Option, List, Unit, IoError, Println /
+                                    Eprintln / Map / Filter / Fold / Int.range / ...
 stdlib/
   csharp/                           Blessed BCL facades (auto-discovered by CLI)
     system/                           Mirrors .NET's System.* namespace structure
 tooling/
   install.ps1                       Publish-and-install script for the `overt` CLI (dev workflow)
   ov.ps1                            Dev-mode wrapper that targets the Debug build dir
-vscode-extension/                   TextMate grammar + language config for .ov files
-                                    (a full LSP server is scoped in docs/tooling/lsp.md)
+vscode-extension/                   Published Marketplace extension: TextMate grammar
+                                    + language config + CI .vsix builds. A full LSP
+                                    server is scoped in docs/tooling/lsp.md.
 src/
   Overt.Compiler/                   Tier 1: lexer, parser, resolver, type-checker, formatter
     Modules/                          Module-graph resolution for cross-file `use`
   Overt.Backend.CSharp/             Tier 2: C# emitter, BindGenerator, extern runtime wiring
-  Overt.Backend.Go/                 Tier 2: Go back end (scaffold; no emission yet)
+  Overt.Backend.Go/                 Tier 2: Go emitter (working) — records, enums, match
+                                    (incl. tuple-of-enums), if/else, for-each, with /
+                                    while, full FFI (extern "go" type / fn / instance fn /
+                                    function-typed params, Result and Option boundary
+                                    wrap)
   Overt.Build/                      MSBuild integration: OvertTranspileTask + targets + NuGet packaging
   Overt.Cli/                        Thin dispatcher: `run`, `fmt`, `bind`, `--emit=<stage>`
   Overt.Runtime/                    Runtime prelude for transpiled programs (C# back end)
 tests/
-  Overt.Tests/                      xUnit suite (lexer goldens, emitter compile-checks, e2e tool install)
+  Overt.Tests/                      xUnit suite (lexer goldens, parser/resolver/typecheck
+                                    sweeps, emitter compile-checks for both back ends,
+                                    end-to-end transpile-and-run for both, sample
+                                    bring-up tests).
   Overt.EndToEnd/                   Roslyn compile + exec harness for hello.ov
 ```
 
@@ -193,7 +214,7 @@ dotnet build
 dotnet test
 ```
 
-Tests are comprehensive: lexer token-stream goldens, parser AST shape assertions, name-resolver scoping tests, type-checker annotation tests, C# emitter shape tests, Roslyn-based compile-check for every example, a `#line`-mapping verification, and an end-to-end run of `hello.ov` through the full pipeline.
+Tests cover both back ends end-to-end: lexer token-stream goldens, parser / resolver / type-checker sweeps over every portable example, C# emitter shape tests + Roslyn compile-check + transpile-and-run for every example that fits the target, Go emitter compile-check (`go build` against the in-repo runtime) for every portable example the Go target supports, FFI e2e tests covering all five extern-"go" patterns, and bring-up tests for the published samples. Running `dotnet test` runs all of them; `go` on PATH unlocks the Go-target tests, otherwise they skip silently.
 
 ### The compiler CLI
 
@@ -211,7 +232,7 @@ Emit stages, each writing to stdout with diagnostics on stderr:
 - `--emit=resolved`: identifier → symbol resolutions
 - `--emit=typed`: declaration and expression types
 - `--emit=csharp`: transpiled C# source (compiles against [`Overt.Runtime`](src/Overt.Runtime))
-- `--emit=go`: not yet implemented
+- `--emit=go`: transpiled Go source (compiles against [`runtime/go`](runtime/go) plus any `extern "go" use` packages)
 
 All emit stages (plus `run`) walk the full module graph, so a file with `use` declarations compiles correctly even in stage-dump mode.
 
@@ -282,14 +303,29 @@ The compiler host language is **C#**, chosen for iteration speed given the prima
 
 ## Status
 
-Working end-to-end on C#:
+### Working end-to-end on the C# back end
 
-- **Language.** Records, enums (including struct-like variants), pattern matching with cartesian-product exhaustiveness on tuples of enums, effect rows, refinement types with runtime-checked boundaries, immutable records with `with`-updates, `let mut` rebinding, full imperative control flow (`for each`, `while`, `loop`, `break`, `continue`, literal patterns), `?` and `|>?` propagation (including inside nested `if`/`match` arms), `.await` on `Task<T>` with async-effect fns emitting as `async Task<T>`.
-- **FFI.** `extern "csharp"` with three explicit kinds (static, `instance`, and `ctor`), plus generic methods via angle-bracket binds targets (`Deserialize<MyType>`). Go and C placeholders parse and diagnose clearly; only C# executes today.
-- **Stdlib.** Genuinely-Overt-native types and helpers only (`Result`, `Option`, `List`, `Map`, `Set`, task groups, trace, `println`); see DESIGN.md §19 for the membership rule. Everything else (file I/O, HTTP, JSON, math, time, env access) is reached through `extern "csharp" use "..."` (AGENTS.md §11.7), which reflects on a target type and synthesizes the bindings at compile time. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/csharp/json.ov`](examples/csharp/json.ov).
-- **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens, ast, resolved, typed, csharp). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
-- **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs are produced and tested; neither is published to nuget.org yet ([`ROLLOUT.md`](ROLLOUT.md) Phase 2).
-- **Not yet.** Go back-end emission, LSP server, cross-file module system beyond the current in-repo graph, and self-hosted compiler, all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).
+- **Language.** Records, enums (including struct-like variants), pattern matching with cartesian-product exhaustiveness on tuples of enums, effect rows, refinement types with runtime-checked boundaries, immutable records with `with`-updates, `let mut` rebinding, full imperative control flow (`for x in iter`, `while`, `loop`, `break`, `continue`, literal patterns), `?` and `|>?` propagation (including inside nested `if`/`match` arms), `.await` on `Task<T>` with async-effect fns emitting as `async Task<T>`, method-call syntax routing through stdlib namespaces and instance externs.
+- **FFI.** `extern "csharp"` with three explicit kinds (static, `instance`, and `ctor`), plus generic methods via angle-bracket binds targets (`Deserialize<MyType>`), plus `extern "csharp" use "..."` bulk-import with reflection-driven facades.
+- **Stdlib.** Genuinely-Overt-native types and helpers only (`Result`, `Option`, `List`, `Map`, `Set`, task groups, trace, `println`, `String.chars` / `String.starts_with` / `Int.range` / `Option.unwrap_or` / etc.); see DESIGN.md §19 for the membership rule. Everything else (file I/O, HTTP, JSON, math, time, env access) is reached through `extern "csharp" use "..."` (AGENTS.md §11.7). JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/csharp/json.ov`](examples/csharp/json.ov).
+- **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens / ast / resolved / typed / csharp / go). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
+- **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs publish to nuget.org through the dev/beta/stable channel pipeline.
+
+### Working on the Go back end
+
+- **Language coverage.** Records, enums with bare and data-bearing variants, match (single-enum, stdlib `Result`/`Option`, tuple-of-enums), if/else and `else if` chains in statement and return position, `for x in iter` over `List<T>`, `while`, `loop`, `break`, `continue`, `let mut` + assignment, `with`-updates including nested withs, integer / boolean / string / unit literals, full arithmetic / comparison / logical operators, string interpolation via `fmt.Sprintf`, `?`-propagation in let-init and statement positions with return-type threading.
+- **FFI.** `extern "go" type` for opaque host types (binds-string carries the verbatim Go type expression including pointer markers); `extern "go" fn` for static functions with `from "<import-path>"` for non-stdlib paths; `extern "go" instance fn` for receiver-method calls; function-typed extern parameters (Overt `fn(...)` lowers to Go `func(...)`); automatic `(T, error)` → `Result<T, IoError>` and nil-pointer → `Option<T>` boundary wrapping.
+- **Sample.** [`samples/chat-relay/`](samples/chat-relay/) — Phase 1 single-connection WebSocket echo server, written in Overt against `gorilla/websocket` via `extern "go" fn`. Builds with `go build` after `overt --emit=go`. The full chat-relay Phase 2–5 design (with concurrency primitives) is in [`docs/samples/chat-relay.md`](docs/samples/chat-relay.md).
+
+### Not yet
+
+- **Concurrency primitives** in the language (goroutines, channels, `select`, shared-mutable-state primitive). The biggest remaining language arc; design space scoped in [`docs/concurrency.md`](docs/concurrency.md). Required for chat-relay Phase 2+ and any real Tela-shape program.
+- **`extern "go" use "<package>"` bulk-import.** The auto-binding equivalent of `extern "csharp" use`. A Go-side helper using `go/types` reflection would generate the facades automatically; today every method needs a hand-written `extern "go" fn` declaration. Roughly 2–3 weeks; deferred until concurrency settles.
+- **Pipe operators (`|>`, `|>?`)** in the Go target. Land on the C# back end; not yet desugared in the Go emitter.
+- **Refinement runtime checks** in the Go target. The C# back end injects boundary validations; the Go emitter doesn't.
+- **`parallel` / `race` / `trace` blocks** in the Go target. Gated on the concurrency design.
+- **LSP server.** Scoped in [`docs/tooling/lsp.md`](docs/tooling/lsp.md) but not started; the VS Code extension currently ships TextMate grammar only.
+- **Self-hosted compiler.** On the long-term roadmap; gated on language stabilization.
 
 ---
 
