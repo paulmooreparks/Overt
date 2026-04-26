@@ -146,12 +146,18 @@ public static class GoEmitter
             }
 
             // Compose the final import set. `os` is always needed
-            // (main wrapper or library stub uses os.Exit); the
-            // runtime is always needed (Result / Option types).
-            // `fmt` and any `extern "go"`-driven imports flow in from
-            // the body's emit pass.
+            // (main wrapper or library stub uses os.Exit). The
+            // runtime import is added only when the body actually
+            // references it; a pure-record library that never uses
+            // Result / Option / Unit / Ok / Err / runtime helpers
+            // wouldn't compile with an unused-import error if we
+            // imported it unconditionally.
             _imports.Add("os");
-            _imports.Add("overt-runtime/overt");
+            var body = _sb.ToString();
+            if (body.Contains("overt."))
+            {
+                _imports.Add("overt-runtime/overt");
+            }
             if (_usesFmt) _imports.Add("fmt");
 
             // Now assemble the final file: header + computed imports + body.
@@ -438,6 +444,14 @@ public static class GoEmitter
                     _sb.AppendLine();
                     return;
                 }
+                if (asReturn && block.TrailingExpression is WithExpr trailingWith)
+                {
+                    var tempName = EmitWithExprAsTemp(trailingWith, indent);
+                    _sb.Append(new string('\t', indent));
+                    _sb.Append("return ");
+                    _sb.AppendLine(tempName);
+                    return;
+                }
                 if (asReturn)
                 {
                     _sb.Append("return ");
@@ -468,6 +482,10 @@ public static class GoEmitter
                     {
                         EmitForEach(fe, indent);
                     }
+                    else if (es.Expression is WhileExpr we)
+                    {
+                        EmitWhile(we, indent);
+                    }
                     else
                     {
                         EmitExpression(es.Expression);
@@ -476,6 +494,10 @@ public static class GoEmitter
 
                 case LetStmt ls:
                     EmitLet(ls, indent);
+                    break;
+
+                case AssignmentStmt asn:
+                    EmitAssignment(asn, indent);
                     break;
 
                 case DiscardStmt ds:
@@ -521,6 +543,24 @@ public static class GoEmitter
                 _sb.Append(".Value");
                 return;
             }
+            // `let x: T = target with { ... }` — multi-statement
+            // hoist of the with-expression, then bind x to the
+            // resulting temp.
+            if (ls.Initializer is WithExpr we)
+            {
+                var withTemp = EmitWithExprAsTemp(we, indent);
+                _sb.Append(new string('\t', indent));
+                _sb.Append("var ");
+                _sb.Append(ip.Name);
+                if (ls.Type is not null)
+                {
+                    _sb.Append(' ');
+                    _sb.Append(LowerType(ls.Type));
+                }
+                _sb.Append(" = ");
+                _sb.Append(withTemp);
+                return;
+            }
             _sb.Append("var ");
             _sb.Append(ip.Name);
             if (ls.Type is not null)
@@ -557,6 +597,122 @@ public static class GoEmitter
             EmitBlock(fe.Body, indent + 1, asReturn: false);
             _sb.Append(pad);
             _sb.Append('}');
+        }
+
+        /// <summary>
+        /// Lower `name = expr` to Go's `name = expr`. The Overt-side
+        /// resolver has already verified `name` was declared with
+        /// `let mut`; the emitter just trusts that. WithExpr on the
+        /// RHS is multi-statement-shape, so it pre-hoists into a
+        /// temp before the assignment line.
+        /// </summary>
+        private void EmitAssignment(AssignmentStmt asn, int indent)
+        {
+            if (asn.Value is WithExpr we)
+            {
+                var temp = EmitWithExprAsTemp(we, indent);
+                _sb.Append(asn.Name);
+                _sb.Append(" = ");
+                _sb.Append(temp);
+                return;
+            }
+            _sb.Append(asn.Name);
+            _sb.Append(" = ");
+            EmitExpression(asn.Value);
+        }
+
+        /// <summary>
+        /// Lower `while cond { body }` to Go's `for cond { body }`.
+        /// Go has no `while` keyword; the bare-condition `for` is
+        /// the same construct. Body emits as a statement block (the
+        /// while-expression's value is always Unit).
+        /// </summary>
+        private void EmitWhile(WhileExpr we, int indent)
+        {
+            var pad = new string('\t', indent);
+            _sb.Append("for ");
+            EmitExpression(we.Condition);
+            _sb.AppendLine(" {");
+            EmitBlock(we.Body, indent + 1, asReturn: false);
+            _sb.Append(pad);
+            _sb.Append('}');
+        }
+
+        /// <summary>
+        /// Lower `target with { f1 = v1, f2 = v2, ... }` to a
+        /// temp-and-mutate sequence:
+        ///
+        ///   __w_N := target
+        ///   __w_N.f1 = v1
+        ///   __w_N.f2 = v2
+        ///
+        /// Returns the temp's name so the caller can use it as an
+        /// expression in the slot the with-expression occupied.
+        /// Nested WithExprs in field-init values are pre-hoisted
+        /// recursively, so the outer's field assignments reference
+        /// the inner temps by name.
+        ///
+        /// Calling contract (matches EmitPropagateHoist):
+        ///   - caller writes one `pad` (`indent` tabs) on _sb before
+        ///     invocation
+        ///   - helper consumes that pad for its first emitted line
+        ///   - helper writes its own pads for every subsequent line
+        ///   - helper ends with cursor at column 0 (no trailing pad)
+        ///   - caller is responsible for writing pad on the next line
+        ///     before its continuation
+        /// </summary>
+        private string EmitWithExprAsTemp(WithExpr we, int indent)
+        {
+            var pad = new string('\t', indent);
+
+            // Pre-hoist nested WithExprs first. The first one consumes
+            // the caller-supplied pad; subsequent ones write their own.
+            var hoisted = new Dictionary<string, string>(StringComparer.Ordinal);
+            var consumedCallerPad = false;
+            foreach (var fi in we.Updates)
+            {
+                if (fi.Value is WithExpr nested)
+                {
+                    if (consumedCallerPad)
+                    {
+                        _sb.Append(pad);
+                    }
+                    consumedCallerPad = true;
+                    hoisted[fi.Name] = EmitWithExprAsTemp(nested, indent);
+                }
+            }
+
+            // Outer with's first line. If we had any pre-hoists, we
+            // need fresh pad here (since the helper recursion left us
+            // at column 0). If we didn't, the caller-supplied pad is
+            // still on _sb and we use it directly.
+            if (consumedCallerPad)
+            {
+                _sb.Append(pad);
+            }
+            var tempName = $"__w_{_qCounter++}";
+            _sb.Append(tempName);
+            _sb.Append(" := ");
+            EmitExpression(we.Target);
+            _sb.AppendLine();
+            foreach (var fi in we.Updates)
+            {
+                _sb.Append(pad);
+                _sb.Append(tempName);
+                _sb.Append('.');
+                _sb.Append(fi.Name);
+                _sb.Append(" = ");
+                if (hoisted.TryGetValue(fi.Name, out var nestedTemp))
+                {
+                    _sb.AppendLine(nestedTemp);
+                }
+                else
+                {
+                    EmitExpression(fi.Value);
+                    _sb.AppendLine();
+                }
+            }
+            return tempName;
         }
 
         private void EmitIfStatement(IfExpr ie, int indent)

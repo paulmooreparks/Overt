@@ -40,14 +40,6 @@ public class GoCompileCheckTests
     // each one hits, observed by running this sweep against every
     // portable example):
     //
-    //   - mutation.ov         `with`-expression, AssignmentStmt, `let
-    //                         mut`, `while` loop. WithExpr requires a
-    //                         multi-statement lowering for the
-    //                         struct-copy + field-override pattern;
-    //                         AssignmentStmt is one new case; while is
-    //                         a Go `for cond {}`. Most of mutation
-    //                         lands in one focused commit once
-    //                         WithExpr's lowering shape is decided.
     //   - state_machine.ov    `match (state, event) { ... }` — tuple-
     //                         of-enums scrutinee. EmitMatch's path
     //                         resolution only handles single-enum and
@@ -89,6 +81,7 @@ public class GoCompileCheckTests
     [InlineData("greeter.ov")]
     [InlineData("arith_eval.ov")]
     [InlineData("bst.ov")]
+    [InlineData("mutation.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())
