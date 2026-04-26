@@ -139,6 +139,56 @@ public static class GoEmitter
         }
 
         /// <summary>
+        /// Rewrite an opaque-type binds-string from import-path form
+        /// (`*net/http.Request`, `github.com/gorilla/websocket.Conn`)
+        /// to Go-source-use form (`*http.Request`,
+        /// `websocket.Conn`). The package selector at the use site
+        /// is the LAST segment of the import path, not the full
+        /// path itself; Go's syntax doesn't allow `/` in type
+        /// expressions.
+        ///
+        /// Algorithm: peel off any leading `*` indirection markers,
+        /// split the remainder at the LAST `.` (which separates
+        /// the import path from the in-package type name), then take
+        /// the last `/`-segment of the path as the selector. Composite
+        /// type expressions (`[]T`, `map[K]V`, `chan T`, `func(...)`)
+        /// pass through verbatim — they don't follow the package-qualified
+        /// shape this rewrite targets.
+        /// </summary>
+        private static string OpaqueTypeToGo(string binds)
+        {
+            var prefix = new StringBuilder();
+            var s = binds;
+            while (s.StartsWith("*", StringComparison.Ordinal))
+            {
+                prefix.Append('*');
+                s = s[1..];
+            }
+            if (s.StartsWith("[", StringComparison.Ordinal)
+                || s.StartsWith("map[", StringComparison.Ordinal)
+                || s.StartsWith("chan ", StringComparison.Ordinal)
+                || s.StartsWith("func", StringComparison.Ordinal))
+            {
+                return binds;
+            }
+            var lastDot = s.LastIndexOf('.');
+            if (lastDot <= 0)
+            {
+                // Bare universe-block name (`int`, `string`, `error`,
+                // etc.) — no rewrite needed.
+                return binds;
+            }
+            var path = s[..lastDot];
+            var typeName = s[(lastDot + 1)..];
+            var lastSlash = path.LastIndexOf('/');
+            var selector = lastSlash < 0 ? path : path[(lastSlash + 1)..];
+            prefix.Append(selector);
+            prefix.Append('.');
+            prefix.Append(typeName);
+            return prefix.ToString();
+        }
+
+        /// <summary>
         /// Extract the Go import path from an opaque-type binds-string
         /// like <c>"*net/http.Request"</c> → <c>"net/http"</c>. Returns
         /// null when the string is a built-in Go type expression
@@ -708,11 +758,13 @@ public static class GoEmitter
                 => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             // Opaque host types: declared by `extern "go" type N binds
-            // "..."`. The binds-string IS the Go-side type expression
-            // (including pointer markers, package qualifiers, etc.); we
-            // emit it verbatim at every use site. See docs/ffi.md §2.
+            // "..."`. The binds-string is the Go-side type expression
+            // in import-path form (e.g. `*net/http.Request`); the
+            // emitter rewrites it to use-site form (`*http.Request`)
+            // where the package is referenced by its declared name,
+            // not its import path. See docs/ffi.md §2 and OpaqueTypeToGo.
             NamedType nt when nt.TypeArguments.Length == 0
-                && _externTypes.TryGetValue(nt.Name, out var binds) => binds,
+                && _externTypes.TryGetValue(nt.Name, out var binds) => OpaqueTypeToGo(binds),
             // Function types: lower to Go's `func(P1, P2, ...) R`. Effect
             // rows erase at the FFI boundary (Go has no concept of them);
             // a `()`-returning Overt fn becomes a Go fn with no return
@@ -753,9 +805,41 @@ public static class GoEmitter
                     _sb.AppendLine();
                     return;
                 }
-                if (asReturn && block.TrailingExpression is MatchExpr trailingMatch)
+                if (block.TrailingExpression is MatchExpr trailingMatch)
                 {
-                    EmitMatch(trailingMatch, indent, asReturn: true);
+                    // Match in trailing position. asReturn flag passes
+                    // through: return-position fn body recurses with
+                    // each arm becoming a return; statement-position
+                    // (Unit-returning fn body, or non-final block use)
+                    // emits the match as a control-flow statement
+                    // with arm bodies as plain statements.
+                    EmitMatch(trailingMatch, indent, asReturn);
+                    _sb.AppendLine();
+                    return;
+                }
+                if (block.TrailingExpression is WhileExpr trailingWhile)
+                {
+                    EmitWhile(trailingWhile, indent);
+                    _sb.AppendLine();
+                    return;
+                }
+                if (block.TrailingExpression is LoopExpr trailingLoop)
+                {
+                    EmitLoop(trailingLoop, indent);
+                    _sb.AppendLine();
+                    return;
+                }
+                if (block.TrailingExpression is ForEachExpr trailingForEach)
+                {
+                    EmitForEach(trailingForEach, indent);
+                    _sb.AppendLine();
+                    return;
+                }
+                if (block.TrailingExpression is IfExpr trailingIfStmt && !asReturn)
+                {
+                    // If-as-trailing in a Unit-typed body. The earlier
+                    // path only handled return-position (asReturn = true).
+                    EmitIfStatement(trailingIfStmt, indent);
                     _sb.AppendLine();
                     return;
                 }
@@ -801,10 +885,22 @@ public static class GoEmitter
                     {
                         EmitWhile(we, indent);
                     }
+                    else if (es.Expression is LoopExpr le)
+                    {
+                        EmitLoop(le, indent);
+                    }
                     else
                     {
                         EmitExpression(es.Expression);
                     }
+                    break;
+
+                case BreakStmt:
+                    _sb.Append("break");
+                    break;
+
+                case ContinueStmt:
+                    _sb.Append("continue");
                     break;
 
                 case LetStmt ls:
@@ -959,6 +1055,20 @@ public static class GoEmitter
             EmitExpression(we.Condition);
             _sb.AppendLine(" {");
             EmitBlock(we.Body, indent + 1, asReturn: false);
+            _sb.Append(pad);
+            _sb.Append('}');
+        }
+
+        /// <summary>
+        /// Lower `loop { body }` to Go's bare `for { body }`. Same
+        /// construct as `while true`; the loop terminates only when
+        /// the body executes a `break` or the surrounding fn returns.
+        /// </summary>
+        private void EmitLoop(LoopExpr le, int indent)
+        {
+            var pad = new string('\t', indent);
+            _sb.AppendLine("for {");
+            EmitBlock(le.Body, indent + 1, asReturn: false);
             _sb.Append(pad);
             _sb.Append('}');
         }
@@ -1590,6 +1700,17 @@ public static class GoEmitter
             if (body is PropagateExpr pe)
             {
                 EmitPropagate(pe, indent);
+                _sb.AppendLine();
+                return;
+            }
+            // A `()` arm body in statement position is a no-op. Without
+            // this, the emitter would write `overt.UnitValue` as a
+            // bare statement, which Go rejects (expressions aren't
+            // valid statements). In return position, a Unit-typed
+            // body still wants `return overt.UnitValue` so the fn
+            // returns something; that case keeps the standard path.
+            if (body is UnitExpr && !asReturn)
+            {
                 _sb.AppendLine();
                 return;
             }

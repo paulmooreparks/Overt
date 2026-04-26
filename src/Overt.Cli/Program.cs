@@ -160,7 +160,7 @@ static class Cli
             "resolved" => EmitResolved(source, inputFile),
             "typed" => EmitTyped(source, inputFile),
             "csharp" => EmitCSharp(source, inputFile),
-            "go" => NotYetImplemented("go"),
+            "go" => EmitGo(source, inputFile),
             _ => UnknownStage(emit),
         };
     }
@@ -913,6 +913,21 @@ static class Cli
 
         var combined = compiled.Diagnostics;
         return WriteDiagnostics(inputFile, combined);
+    }
+
+    static int EmitGo(string source, string inputFile)
+    {
+        // Mirror EmitCSharp's shape: shared multi-module pipeline,
+        // emit the entry module's Go source. The Go back end's
+        // current scope is per-module (no cross-module imports), so
+        // multi-file projects use the entry file plus hand-written
+        // sibling Go files for FFI shims.
+        var compiled = CompileGraph(inputFile);
+        var entry = compiled.Modules[^1];
+        var go = global::Overt.Backend.Go.GoEmitter.Emit(entry.Ast);
+        Console.Out.Write(go);
+
+        return WriteDiagnostics(inputFile, compiled.Diagnostics);
     }
 
     static int EmitTokens(string source, string inputFile)

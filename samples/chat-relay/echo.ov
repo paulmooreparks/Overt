@@ -1,0 +1,100 @@
+// Phase 1 of the Tela-shape chat-relay sample (see
+// docs/samples/chat-relay.md for the full design). This is the
+// smallest meaningful WebSocket program: a single-connection echo
+// server. Every message a connected client sends comes back
+// verbatim; closing the socket terminates the loop.
+//
+// Goals exercised end-to-end:
+//   * extern "go" type    (Conn, Upgrader, ResponseWriter, Request)
+//   * extern "go" fn      (HTTP handler registration, listen)
+//   * extern "go" instance fn   (conn.read_message / write_message)
+//   * Function-typed extern parameters   (the HandleFunc handler)
+//   * Result<T, IoError> wrap   (every fallible Go call)
+//
+// Concurrency is NOT exercised: a single goroutine per HTTP
+// request is provided by net/http, the handler runs synchronously
+// in that goroutine, and the read/write loop blocks. Multiple
+// concurrent clients each get their own request goroutine, but
+// from Overt's perspective the program is purely sequential.
+// Phases 2-4 of the chat-relay design require the language's
+// concurrency primitives (goroutines, channels, select, shared
+// mutable state); see docs/concurrency.md.
+
+module chat_relay
+
+// --- Opaque host types --------------------------------------------------
+
+extern "go" type ResponseWriter binds "net/http.ResponseWriter"
+extern "go" type Request        binds "*net/http.Request"
+extern "go" type Conn           binds "*github.com/gorilla/websocket.Conn"
+extern "go" type Upgrader       binds "github.com/gorilla/websocket.Upgrader"
+
+// --- HTTP server bindings -----------------------------------------------
+
+extern "go" fn http_handle(pattern: String, handler: fn(ResponseWriter, Request) !{io} -> ())
+    !{io} -> () binds "http.HandleFunc" from "net/http"
+
+extern "go" fn http_listen_and_serve(addr: String) !{io} -> Result<(), IoError>
+    binds "ListenAndServeNoHandler" from ""
+
+// --- WebSocket bindings -------------------------------------------------
+//
+// Three thin Go-side helpers (helpers.go) adapt the websocket library's
+// rough edges to Overt-friendly shapes:
+//   * NewUpgrader builds the zero-value Upgrader (struct literals can't
+//     be expressed across the FFI today).
+//   * ReadMessageString collapses ReadMessage's `(messageType, []byte,
+//     error)` triple-return into `(string, error)`.
+//   * WriteMessageString picks websocket.TextMessage and converts the
+//     string to []byte, returning the same error.
+// All three are five-line functions; the application logic stays
+// in Overt.
+
+// These bind to top-level helpers in helpers.go that take the
+// would-be receiver as a regular first parameter. We use static
+// `extern "go" fn` (not `instance fn`) because `instance fn`
+// emits `self.Method(...)`, which only works when the binds-target
+// is a real Go method on the receiver type. Adapters can't be
+// methods on types from other packages, so static-fn-with-receiver-
+// as-first-arg is the working pattern. Call sites use bare calls
+// (`read_message(self = conn)`) instead of method-call syntax.
+
+extern "go" fn new_upgrader() -> Upgrader binds "NewUpgrader" from ""
+
+extern "go" fn upgrade(self: Upgrader, w: ResponseWriter, r: Request)
+    !{io} -> Result<Conn, IoError> binds "UpgradeConn" from ""
+
+extern "go" fn read_message(self: Conn) !{io} -> Result<String, IoError>
+    binds "ReadMessageString" from ""
+
+extern "go" fn write_message(self: Conn, msg: String) !{io} -> Result<(), IoError>
+    binds "WriteMessageString" from ""
+
+// --- Handler logic ------------------------------------------------------
+
+fn echo_handler(w: ResponseWriter, r: Request) !{io} -> () {
+    let upgrader: Upgrader = new_upgrader()
+    match upgrade(self = upgrader, w = w, r = r) {
+        Ok(conn) => echo_loop(conn = conn),
+        Err(_)   => (),
+    }
+}
+
+fn echo_loop(conn: Conn) !{io} -> () {
+    loop {
+        match read_message(self = conn) {
+            Ok(msg) => {
+                match write_message(self = conn, msg = msg) {
+                    Ok(_)  => (),
+                    Err(_) => { break },
+                }
+            }
+            Err(_) => { break },
+        }
+    }
+}
+
+fn main() !{io} -> Result<(), IoError> {
+    http_handle(pattern = "/echo", handler = echo_handler)
+    http_listen_and_serve(addr = ":8080")
+}
