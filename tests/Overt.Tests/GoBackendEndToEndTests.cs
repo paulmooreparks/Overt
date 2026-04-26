@@ -65,6 +65,49 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_FunctionTypedParameter()
+    {
+        // Exercises a function-typed parameter on an `extern "go" fn`.
+        // The Overt-side declaration uses `fn(String) -> String` as
+        // the callback type; the GoEmitter lowers it to a Go
+        // `func(string) string` parameter. The Overt-side named fn
+        // (`shout`) is passed by name as the argument; the existing
+        // IdentifierExpr emit produces `shout` in Go, which is a
+        // valid function-value reference because Overt-side fns
+        // emit at the same name on the Go side.
+        //
+        // The Go-side helper file (helper.go) provides the
+        // RunCallback function the binding targets. Stdlib doesn't
+        // have a clean string→string callback shape to bind to, so
+        // the test ships its own.
+        AssertOvertProgramPrints(
+            """
+            module fnparam_e2e
+
+            extern "go" fn run_callback(name: String, cb: fn(String) -> String) -> String
+                binds "RunCallback" from ""
+
+            fn shout(s: String) -> String {
+                "${s}!"
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let result: String = run_callback(name = "hello", cb = shout)
+                println(result)?
+                Ok(())
+            }
+            """,
+            expectedStdout: "hello!\n",
+            extraGoSource: """
+                package main
+
+                func RunCallback(name string, cb func(string) string) string {
+                    return cb(name)
+                }
+                """);
+    }
+
+    [Fact]
     public void Transpiled_ExternGo_OpaqueHostType()
     {
         // Exercises `extern "go" type` for an opaque host-type
@@ -354,8 +397,15 @@ public class GoBackendEndToEndTests
     /// Lex / parse / emit / `go build` / run / assert. Skips the whole
     /// pipeline when `go` is not on PATH; intentionally silent so the
     /// suite stays green for contributors without Go installed.
+    ///
+    /// <paramref name="extraGoSource"/>, when non-null, is written to a
+    /// sibling <c>helper.go</c> next to the emitted <c>main.go</c>.
+    /// Used by tests that need a small Go-side helper to bind into
+    /// (e.g. function-typed extern parameters where stdlib doesn't
+    /// have a clean callback shape to test against).
     /// </summary>
-    private static void AssertOvertProgramPrints(string overtSource, string expectedStdout)
+    private static void AssertOvertProgramPrints(
+        string overtSource, string expectedStdout, string? extraGoSource = null)
     {
         if (!IsGoOnPath())
         {
@@ -386,6 +436,10 @@ public class GoBackendEndToEndTests
                 replace overt-runtime => {{runtimePath.Replace("\\", "/")}}
                 """);
             File.WriteAllText(Path.Combine(workDir, "main.go"), goSource);
+            if (extraGoSource is not null)
+            {
+                File.WriteAllText(Path.Combine(workDir, "helper.go"), extraGoSource);
+            }
 
             // `go mod tidy` to populate go.sum (Go 1.21+ refuses to build
             // without one even for a replace-only require).

@@ -101,6 +101,33 @@ public static class GoEmitter
         }
 
         /// <summary>
+        /// Lower an Overt FunctionType to a Go `func(...) R` type
+        /// expression. Used both for function-typed parameters in
+        /// `extern "go" fn` declarations and for any other context
+        /// where a function-typed value crosses the FFI boundary.
+        /// Effect rows are erased at this point — Go has no concept
+        /// of them; the type checker validates calling-context on
+        /// the Overt side. A `()`-returning function emits with no
+        /// return slot. See docs/ffi.md §4.
+        /// </summary>
+        private string LowerFunctionType(FunctionType ft)
+        {
+            var sb = new StringBuilder("func(");
+            for (var i = 0; i < ft.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(LowerType(ft.Parameters[i]));
+            }
+            sb.Append(')');
+            if (ft.ReturnType is not UnitType)
+            {
+                sb.Append(' ');
+                sb.Append(LowerType(ft.ReturnType));
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Extract the Go import path from an opaque-type binds-string
         /// like <c>"*net/http.Request"</c> → <c>"net/http"</c>. Returns
         /// null when the string is a built-in Go type expression
@@ -322,15 +349,37 @@ public static class GoEmitter
 
         private void EmitExternGoShim(ExternDecl ext)
         {
-            // Resolve the import path. Without `from`, the package
-            // selector itself is the path (correct for stdlib). With
-            // `from`, the path is whatever the user supplied; the Go
-            // import statement will alias it under the selector
-            // automatically because Go aliases packages by their
-            // declared `package <name>` directive, not by path.
-            var (selector, member) = SplitBindsTarget(ext.BindsTarget);
-            var importPath = ext.FromLibrary ?? selector;
-            _imports.Add(importPath);
+            // Two binding shapes:
+            //   - `binds "pkg.Member"` (with optional `from "<path>"`):
+            //     out-of-package; emit `pkg.Member(args)`.
+            //   - `binds "Member" from ""` (or any binds-string with no
+            //     dot): the bound function lives in the SAME Go package
+            //     as the emitted code (`package main`). Emit
+            //     `Member(args)` unqualified. Useful for hand-written
+            //     Go-side shims that sit alongside the emitted file.
+            string? selector;
+            string member;
+            if (ext.BindsTarget.Contains('.'))
+            {
+                (selector, member) = SplitBindsTarget(ext.BindsTarget);
+                // Empty `from ""` means "no import needed because the
+                // selector already names a symbol in the current
+                // package's universe." Otherwise the import is the
+                // selector for stdlib or the explicit `from` path.
+                if (ext.FromLibrary != "")
+                {
+                    _imports.Add(ext.FromLibrary ?? selector);
+                }
+            }
+            else
+            {
+                selector = null;
+                member = ext.BindsTarget;
+                if (!string.IsNullOrEmpty(ext.FromLibrary))
+                {
+                    _imports.Add(ext.FromLibrary);
+                }
+            }
 
             _sb.Append($"func {ext.Name}(");
             for (var i = 0; i < ext.Parameters.Length; i++)
@@ -349,8 +398,11 @@ public static class GoEmitter
             _sb.Append('\t');
             var hasReturnSlot = ext.ReturnType is not null && ext.ReturnType is not UnitType;
             if (hasReturnSlot) _sb.Append("return ");
-            _sb.Append(selector);
-            _sb.Append('.');
+            if (selector is not null)
+            {
+                _sb.Append(selector);
+                _sb.Append('.');
+            }
             _sb.Append(member);
             _sb.Append('(');
             for (var i = 0; i < ext.Parameters.Length; i++)
@@ -470,6 +522,11 @@ public static class GoEmitter
             // emit it verbatim at every use site. See docs/ffi.md §2.
             NamedType nt when nt.TypeArguments.Length == 0
                 && _externTypes.TryGetValue(nt.Name, out var binds) => binds,
+            // Function types: lower to Go's `func(P1, P2, ...) R`. Effect
+            // rows erase at the FFI boundary (Go has no concept of them);
+            // a `()`-returning Overt fn becomes a Go fn with no return
+            // slot. See docs/ffi.md §4.
+            FunctionType ft => LowerFunctionType(ft),
             // User-declared record / enum types: NamedType with zero type
             // arguments. Refer to it by its source name (single-package layout).
             NamedType nt when nt.TypeArguments.Length == 0 => nt.Name,
