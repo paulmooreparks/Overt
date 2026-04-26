@@ -457,6 +457,97 @@ public static class Int
     }
 }
 
+/// <summary>
+/// File I/O companion. Mirrors the small set of file operations that Overt
+/// programs need without pulling in an extern binding per call. All
+/// fallible operations return <c>Result&lt;T, IoError&gt;</c>; the
+/// host-side exceptions are converted to <c>IoError</c> at the boundary
+/// per DESIGN.md §17. Pure path-string helpers live on <see cref="Path"/>.
+/// </summary>
+public static class File
+{
+    /// <summary>Read the file at <paramref name="path"/> as UTF-8 and
+    /// return its contents. Errors (file not found, permission denied,
+    /// encoding failure) surface as <c>Err(IoError)</c>.</summary>
+    public static Result<string, IoError> read_to_string(string path)
+    {
+        try
+        {
+            return new ResultOk<string, IoError>(global::System.IO.File.ReadAllText(path));
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<string, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Write <paramref name="contents"/> to <paramref name="path"/>
+    /// as UTF-8, overwriting any existing file. Returns
+    /// <c>Ok(())</c> on success, <c>Err(IoError)</c> on failure.</summary>
+    public static Result<Unit, IoError> write_all_text(string path, string contents)
+    {
+        try
+        {
+            global::System.IO.File.WriteAllText(path, contents);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>True iff <paramref name="path"/> names an existing file
+    /// (not a directory). Predicates don't return Result; pair with
+    /// <see cref="read_to_string"/> when you actually want the contents.</summary>
+    public static bool exists(string path) => global::System.IO.File.Exists(path);
+}
+
+/// <summary>
+/// Pure path-string helpers. None of these touch the filesystem — they
+/// operate on the path string itself. For real file existence checks /
+/// reads / writes, see <see cref="File"/>.
+/// </summary>
+public static class Path
+{
+    /// <summary>Join two path segments with the platform-appropriate
+    /// separator. <c>Path.join("dir", "file.txt")</c> yields
+    /// <c>"dir/file.txt"</c> on Unix or <c>"dir\\file.txt"</c> on
+    /// Windows. The Go runtime does the same, so output round-trips
+    /// across back ends on each platform.</summary>
+    public static string join(string parent, string child)
+        => global::System.IO.Path.Combine(parent, child);
+
+    /// <summary>Directory portion of <paramref name="path"/>. Returns
+    /// <c>None</c> when the path has no parent (a bare filename or
+    /// the empty string).</summary>
+    public static Option<string> parent(string path)
+    {
+        var dir = global::System.IO.Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(dir)) return new OptionNone<string>();
+        return new OptionSome<string>(dir);
+    }
+
+    /// <summary>Final component of <paramref name="path"/>. Returns
+    /// <c>None</c> for the empty string; otherwise the segment after
+    /// the last separator.</summary>
+    public static Option<string> file_name(string path)
+    {
+        var name = global::System.IO.Path.GetFileName(path);
+        if (string.IsNullOrEmpty(name)) return new OptionNone<string>();
+        return new OptionSome<string>(name);
+    }
+
+    /// <summary>File extension including the leading dot, e.g. <c>".ov"</c>.
+    /// Returns <c>None</c> when the path has no extension.</summary>
+    public static Option<string> extension(string path)
+    {
+        var ext = global::System.IO.Path.GetExtension(path);
+        if (string.IsNullOrEmpty(ext)) return new OptionNone<string>();
+        return new OptionSome<string>(ext);
+    }
+}
+
 public sealed record Map<K, V>(System.Collections.Immutable.ImmutableDictionary<K, V> Items)
     where K : notnull;
 

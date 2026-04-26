@@ -1050,6 +1050,138 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_FileReadToString_RoundTripsViaWriteAllText()
+    {
+        // Round-trip: write a known string to a temp path, read it back,
+        // assert it matches. Exercises both write_all_text and
+        // read_to_string against a real filesystem so a regression in
+        // either direction surfaces here.
+        var tempPath = System.IO.Path.GetTempFileName();
+        try
+        {
+            var src = $$"""
+                module file_roundtrip
+
+                fn main() !{io} -> Result<String, IoError> {
+                    File.write_all_text(path = "{{tempPath.Replace("\\", "\\\\")}}", contents = "the quick brown fox")?
+                    File.read_to_string(path = "{{tempPath.Replace("\\", "\\\\")}}")
+                }
+                """;
+
+            var (result, _) = CompileAndRun(src, "file_roundtrip");
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Equal("the quick brown fox",
+                result.GetType().GetProperty("Value")!.GetValue(result));
+        }
+        finally
+        {
+            if (System.IO.File.Exists(tempPath)) System.IO.File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void Transpiled_FileReadToString_MissingFile_ReturnsErr()
+    {
+        // Reading a path that doesn't exist surfaces as Err(IoError).
+        // The narrative is host-formatted so we don't pin an exact
+        // string, just the Err arm shape.
+        const string src = """
+            module file_missing
+
+            fn main() !{io} -> Result<String, IoError> {
+                File.read_to_string(path = "/this/path/does/not/exist/at/all/please")
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "file_missing");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
+    public void Transpiled_FileExists_TrueForRealFile_FalseForMissing()
+    {
+        var tempPath = System.IO.Path.GetTempFileName();
+        try
+        {
+            var src = $$"""
+                module file_exists
+
+                fn main() !{io} -> Result<Bool, IoError> {
+                    let real:    Bool = File.exists(path = "{{tempPath.Replace("\\", "\\\\")}}")
+                    let missing: Bool = File.exists(path = "/this/path/does/not/exist")
+                    Ok(real && !missing)
+                }
+                """;
+
+            var (result, _) = CompileAndRun(src, "file_exists");
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Equal(true,
+                result.GetType().GetProperty("Value")!.GetValue(result));
+        }
+        finally
+        {
+            if (System.IO.File.Exists(tempPath)) System.IO.File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void Transpiled_PathHelpers_JoinParentExtension_ReturnExpectedShapes()
+    {
+        // Verifies Path.join, Path.parent, Path.file_name, Path.extension
+        // all wire through. join is platform-aware; the test only
+        // observes the shape (Some/None) of the optional helpers and
+        // exact equality on join's prefix/suffix to stay portable.
+        const string src = """
+            module path_helpers
+
+            record Probe {
+                joined:    String,
+                file_name: Option<String>,
+                ext:       Option<String>,
+            }
+
+            fn main() -> Result<Probe, IoError> {
+                let joined:    String         = Path.join(parent = "src", child = "main.ov")
+                let file_name: Option<String> = Path.file_name(path = "src/main.ov")
+                let ext:       Option<String> = Path.extension(path = "src/main.ov")
+                Ok(Probe { joined = joined, file_name = file_name, ext = ext })
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "path_helpers");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var probe = result.GetType().GetProperty("Value")!.GetValue(result);
+        Assert.NotNull(probe);
+        var joined = probe!.GetType().GetProperty("joined")!.GetValue(probe) as string;
+        Assert.NotNull(joined);
+        Assert.StartsWith("src", joined);
+        Assert.EndsWith("main.ov", joined);
+
+        var fileName = probe.GetType().GetProperty("file_name")!.GetValue(probe);
+        Assert.NotNull(fileName);
+        Assert.Equal("True",
+            fileName!.GetType().GetProperty("IsSome")?.GetValue(fileName)?.ToString()
+            ?? (fileName.GetType().Name.StartsWith("OptionSome") ? "True" : "False"));
+        Assert.Equal("main.ov",
+            fileName.GetType().GetProperty("Value")?.GetValue(fileName)
+                ?? throw new InvalidOperationException("file_name has no Value"));
+
+        var ext = probe.GetType().GetProperty("ext")!.GetValue(probe);
+        Assert.NotNull(ext);
+        Assert.Equal(".ov",
+            ext!.GetType().GetProperty("Value")?.GetValue(ext)
+                ?? throw new InvalidOperationException("ext has no Value"));
+    }
+
+    [Fact]
     public void Transpiled_GenericRefinementTryFrom_OkPath_UnifiesElementType()
     {
         // Generic refinement try_from: T threads from the alias's

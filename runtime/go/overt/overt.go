@@ -15,6 +15,7 @@ package overt
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -364,6 +365,86 @@ func (e RefinementError) String() string {
 // code if the user mixes idioms. The default narrative matches the C#
 // runtime's RefinementError.ToString output verbatim.
 func (e RefinementError) Error() string { return e.String() }
+
+// FileReadToString reads the file at path as UTF-8 and returns its
+// contents as a Result. Errors (not found, permission, encoding)
+// surface as Err with the host's error message in the IoError
+// narrative — same convention as the C# runtime, so a program reading
+// the same path against the same file gets equivalent telemetry on
+// either back end.
+func FileReadToString(path string) Result[string, IoError] {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return Err[string, IoError](IoError{Narrative: err.Error()})
+	}
+	return Ok[string, IoError](string(bytes))
+}
+
+// FileWriteAllText writes contents to path as UTF-8, overwriting any
+// existing file. Permissions are 0644 (rw-r--r--), matching the C#
+// runtime's File.WriteAllText default.
+func FileWriteAllText(path string, contents string) Result[Unit, IoError] {
+	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+		return Err[Unit, IoError](IoError{Narrative: err.Error()})
+	}
+	return Ok[Unit, IoError](UnitValue)
+}
+
+// FileExists is true iff path names an existing file (not a directory).
+// A directory at the path returns false; an unreadable path also
+// returns false (the OS-level distinguishing of "doesn't exist" vs
+// "exists but unreadable" is a sharper edge than v1 carves out).
+func FileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
+}
+
+// PathJoin joins two path segments with the platform-appropriate
+// separator. Mirrors C# Path.Combine semantics.
+func PathJoin(parent string, child string) string {
+	return filepath.Join(parent, child)
+}
+
+// PathParent returns the directory portion of path, or None when
+// the path has no parent.
+func PathParent(path string) Option[string] {
+	dir := filepath.Dir(path)
+	// filepath.Dir returns "." for paths with no directory, "/" for
+	// the root, and the path itself for unrooted single segments.
+	// Treat "." (no parent) as None to match the C# runtime's
+	// "string.IsNullOrEmpty(GetDirectoryName)" behavior.
+	if dir == "." || dir == "" {
+		return None[string]()
+	}
+	return Some(dir)
+}
+
+// PathFileName returns the final segment of path, or None for the
+// empty string. Mirrors filepath.Base except None instead of "."
+// for paths consisting only of separators.
+func PathFileName(path string) Option[string] {
+	if path == "" {
+		return None[string]()
+	}
+	name := filepath.Base(path)
+	if name == "." || name == string(filepath.Separator) {
+		return None[string]()
+	}
+	return Some(name)
+}
+
+// PathExtension returns the file extension including the leading
+// dot (e.g. ".ov"), or None when the path has no extension.
+func PathExtension(path string) Option[string] {
+	ext := filepath.Ext(path)
+	if ext == "" {
+		return None[string]()
+	}
+	return Some(ext)
+}
 
 // StringParseInt parses a decimal integer string into a Result. Mirrors
 // the C# Prelude.String.parse_int contract: invariant-formatted (no

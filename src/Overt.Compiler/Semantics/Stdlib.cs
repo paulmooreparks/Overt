@@ -64,6 +64,13 @@ public static class Stdlib
         b["String.contains"] = ImmutableArray.Create("s", "needle");
         b["String.parse_int"] = ImmutableArray.Create("s");
         b["String.parse_float"] = ImmutableArray.Create("s");
+        b["File.read_to_string"] = ImmutableArray.Create("path");
+        b["File.write_all_text"] = ImmutableArray.Create("path", "contents");
+        b["File.exists"] = ImmutableArray.Create("path");
+        b["Path.join"] = ImmutableArray.Create("parent", "child");
+        b["Path.parent"] = ImmutableArray.Create("path");
+        b["Path.file_name"] = ImmutableArray.Create("path");
+        b["Path.extension"] = ImmutableArray.Create("path");
         b["Option.unwrap_or"] = ImmutableArray.Create("opt", "default_value");
         b["Option.unwrap_or_else"] = ImmutableArray.Create("opt", "default_fn");
         b["Result.unwrap_or"] = ImmutableArray.Create("result", "default_value");
@@ -122,6 +129,8 @@ public static class Stdlib
         e.Add(Type("Task"));  // async-boundary wrapper; see AGENTS.md §9
         e.Add(Type("String")); // namespace shape for String.split / String.join / etc.
         e.Add(Type("Int"));    // namespace shape for Int.range / etc.
+        e.Add(Type("File"));   // namespace shape for File.read_to_string / etc.
+        e.Add(Type("Path"));   // namespace shape for Path.join / etc.
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -424,6 +433,67 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Result", PrimitiveType.Float, Named("IoError"))));
+
+        // ---- File I/O -----------------------------------------------------------
+        // All operations that touch the filesystem carry !{io}; pure
+        // path-string helpers on `Path` don't.
+
+        // File.read_to_string(path: String) !{io} -> Result<String, IoError>
+        // Read whole file as UTF-8. Errors (not found, permission, encoding)
+        // surface as Err with the host's exception message in the narrative.
+        e.Add(Fn("File.read_to_string",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.String, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.write_all_text(path: String, contents: String) !{io} -> Result<(), IoError>
+        // Overwrite or create the target file with the given contents,
+        // UTF-8 encoded.
+        e.Add(Fn("File.write_all_text",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.exists(path: String) !{io} -> Bool
+        // True iff the path names an existing file (not a directory). The
+        // !{io} effect is for observability — a caller's effect row has to
+        // declare it watches process state.
+        e.Add(Fn("File.exists",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Bool,
+            effects: new[] { "io" }));
+
+        // ---- Pure path-string helpers (no effect row) --------------------------
+
+        // Path.join(parent: String, child: String) -> String
+        e.Add(Fn("Path.join",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.String));
+
+        // Path.parent(path: String) -> Option<String>
+        // None when the path has no parent component (bare filename or empty).
+        e.Add(Fn("Path.parent",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Option", PrimitiveType.String)));
+
+        // Path.file_name(path: String) -> Option<String>
+        // None for the empty string; otherwise the segment after the last separator.
+        e.Add(Fn("Path.file_name",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Option", PrimitiveType.String)));
+
+        // Path.extension(path: String) -> Option<String>
+        // Includes the leading dot (`.ov`); None when there's no extension.
+        e.Add(Fn("Path.extension",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Option", PrimitiveType.String)));
 
         // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
         // Returns the inner T on Some, otherwise the default. The
