@@ -44,10 +44,6 @@ public class GoCompileCheckTests
     //                         polymorphism. Needs the emitter to
     //                         thread `func(...) T` types through
     //                         user-fn signatures.
-    //   - pipeline.ov         Pipe operators (`|>`, `|>?`). The
-    //                         emitter throws on PipeCompose /
-    //                         PipePropagate today; they want a
-    //                         desugar pass into ordinary calls.
     //   - dashboard.ov        `parallel { ... }` task groups. Would
     //                         lower to goroutines + channels; no
     //                         lowering yet (and a real one wants the
@@ -76,6 +72,7 @@ public class GoCompileCheckTests
     [InlineData("bst.ov")]
     [InlineData("mutation.ov")]
     [InlineData("state_machine.ov")]
+    [InlineData("pipeline.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())

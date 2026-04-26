@@ -805,6 +805,18 @@ public static class GoEmitter
                     _sb.AppendLine();
                     return;
                 }
+                // A trailing pipe chain that includes `|>?` somewhere
+                // needs to hoist the propagated stage(s) to temps,
+                // emit the early-return on Err, then emit the rest of
+                // the chain as nested calls. This is the only place
+                // `|>?` is currently handled; using it in non-trailing
+                // expression positions throws via the bare BinaryExpr
+                // path below.
+                if (asReturn && IsPipeChainContainingPropagate(block.TrailingExpression, out var pipeChain))
+                {
+                    EmitPipeChainAsReturn(pipeChain, indent);
+                    return;
+                }
                 if (block.TrailingExpression is MatchExpr trailingMatch)
                 {
                     // Match in trailing position. asReturn flag passes
@@ -1847,6 +1859,14 @@ public static class GoEmitter
                     _sb.Append("overt.UnitValue");
                     break;
 
+                case BinaryExpr be when be.Op == BinaryOp.PipeCompose:
+                    // `x |> f(args)` rewrites to `f(x, args)`. If the
+                    // RHS is a name (`|> Ok`), it becomes `Ok(x)`; if
+                    // a call (`|> filter(p)`), `filter(x, p)`. Mirrors
+                    // the C# back end's EmitPipe.
+                    EmitPipeCompose(be);
+                    break;
+
                 case BinaryExpr be:
                     _sb.Append('(');
                     EmitExpression(be.Left);
@@ -2107,6 +2127,233 @@ public static class GoEmitter
             _sb.Append(')');
         }
 
+        /// <summary>
+        /// Detect whether <paramref name="e"/> is a left-leaning chain
+        /// of pipe operators (mix of `|>` and `|>?`) that contains at
+        /// least one `|>?`. The chain comes out reversed (innermost
+        /// first) plus the original initial value at index 0.
+        /// </summary>
+        private static bool IsPipeChainContainingPropagate(
+            Expression e, out List<(BinaryOp Op, Expression Right, Expression FullNode)> chain)
+        {
+            chain = new List<(BinaryOp, Expression, Expression)>();
+            var hasPropagate = false;
+            var node = e;
+            while (node is BinaryExpr be
+                && (be.Op == BinaryOp.PipeCompose || be.Op == BinaryOp.PipePropagate))
+            {
+                if (be.Op == BinaryOp.PipePropagate) hasPropagate = true;
+                chain.Add((be.Op, be.Right, be));
+                node = be.Left;
+            }
+            if (!hasPropagate || chain.Count == 0)
+            {
+                chain.Clear();
+                return false;
+            }
+            chain.Reverse();
+            // Stash the chain's initial value as a sentinel at index 0
+            // by inserting a synthetic record. We just keep `node` for
+            // the caller to use; chain.Reverse() above gave us
+            // (op, rhs) in left-to-right order. The caller reads
+            // `node` separately as the chain's seed value.
+            // Repack: prepend a marker entry for the seed.
+            chain.Insert(0, (default, node, node));
+            return true;
+        }
+
+        /// <summary>
+        /// Emit a trailing pipe chain (including at least one `|>?`)
+        /// as a sequence of statements: hoist each `|>?` step into a
+        /// Result temp, early-return on Err, then either thread the
+        /// unwrapped value into the next step or emit the final
+        /// `return <expr>` when the chain ends.
+        ///
+        /// Each step is one of:
+        ///   - `|> rhs`:  current = rhs(current[, rhs.args])     (inline call)
+        ///   - `|>? rhs`: temp = rhs(current[, ...]); if !temp.IsOk { return Err };
+        ///                current = temp.Value
+        ///
+        /// The chain's first entry (index 0) is a sentinel carrying
+        /// the seed value (the LHS of the leftmost pipe).
+        /// </summary>
+        private void EmitPipeChainAsReturn(
+            List<(BinaryOp Op, Expression Right, Expression FullNode)> chain, int indent)
+        {
+            var pad = new string('\t', indent);
+            // Capture the seed via a temp so subsequent steps can
+            // reference it by name. Even when the seed is a single
+            // identifier we hoist for uniformity.
+            var seedName = $"__pp_{_qCounter++}";
+            _sb.Append(seedName);
+            _sb.Append(" := ");
+            EmitExpression(chain[0].Right);
+            _sb.AppendLine();
+            var currentName = seedName;
+            for (var i = 1; i < chain.Count; i++)
+            {
+                var (op, rhs, _) = chain[i];
+                var stepName = $"__pp_{_qCounter++}";
+                if (i == chain.Count - 1 && op == BinaryOp.PipeCompose)
+                {
+                    // Last step is an infallible pipe: emit as the
+                    // function's `return <call>` directly, no temp.
+                    _sb.Append(pad);
+                    _sb.Append("return ");
+                    EmitPipeStepCall(rhs, currentName);
+                    _sb.AppendLine();
+                    return;
+                }
+                _sb.Append(pad);
+                _sb.Append(stepName);
+                _sb.Append(" := ");
+                EmitPipeStepCall(rhs, currentName);
+                _sb.AppendLine();
+                if (op == BinaryOp.PipePropagate)
+                {
+                    // Hoist + early-return on Err.
+                    _sb.Append(pad);
+                    _sb.AppendLine($"if !{stepName}.IsOk {{");
+                    _sb.Append(pad);
+                    _sb.Append("\treturn overt.Err[");
+                    EmitCurrentReturnTypeArgs();
+                    _sb.AppendLine($"]({stepName}.Err)");
+                    _sb.Append(pad);
+                    _sb.AppendLine("}");
+                    // Subsequent steps see the unwrapped Value.
+                    var unwrappedName = $"__pp_{_qCounter++}";
+                    _sb.Append(pad);
+                    _sb.Append(unwrappedName);
+                    _sb.Append(" := ");
+                    _sb.Append(stepName);
+                    _sb.AppendLine(".Value");
+                    currentName = unwrappedName;
+                }
+                else
+                {
+                    currentName = stepName;
+                }
+            }
+            // Trailing `|>?` (rare but possible): the last step was a
+            // hoist-and-unwrap; whatever currentName names is the
+            // final value. Emit as the function return.
+            _sb.Append(pad);
+            _sb.Append("return ");
+            _sb.AppendLine(currentName);
+        }
+
+        /// <summary>
+        /// Emit a single pipe step as a Go call. The seed (the LHS
+        /// of the pipe) is referenced by <paramref name="seedName"/>;
+        /// the RHS is either a bare name (call as <c>f(seed)</c>) or
+        /// a CallExpr whose argument list shifts by one position
+        /// (call as <c>f(seed, args...)</c>).
+        ///
+        /// Ok / Err on the RHS get the constructor special-case: the
+        /// emitted call needs explicit type parameters from the
+        /// enclosing fn's return type, same as a bare `Ok(value)`
+        /// site. We thread that through by emitting `overt.Ok[T, E](
+        /// seed)` directly rather than via the EmitExpression path
+        /// (which would emit a bare `Ok` identifier with no
+        /// resolution).
+        /// </summary>
+        private void EmitPipeStepCall(Expression rhs, string seedName)
+        {
+            // Bare-name `Ok` / `Err` on RHS need explicit type args
+            // since Go can't infer them from a single argument.
+            if (rhs is IdentifierExpr { Name: "Ok" })
+            {
+                _sb.Append("overt.Ok[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
+                _sb.Append(seedName);
+                _sb.Append(')');
+                return;
+            }
+            if (rhs is IdentifierExpr { Name: "Err" })
+            {
+                _sb.Append("overt.Err[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
+                _sb.Append(seedName);
+                _sb.Append(')');
+                return;
+            }
+            if (rhs is CallExpr call)
+            {
+                EmitExpression(call.Callee);
+                _sb.Append('(');
+                _sb.Append(seedName);
+                foreach (var arg in call.Arguments)
+                {
+                    _sb.Append(", ");
+                    EmitExpression(arg.Value);
+                }
+                _sb.Append(')');
+                return;
+            }
+            // Bare name on RHS — same shape as `seed |> f`.
+            EmitExpression(rhs);
+            _sb.Append('(');
+            _sb.Append(seedName);
+            _sb.Append(')');
+        }
+
+        /// <summary>
+        /// Lower `x |> f` or `x |> f(args)` to `f(x)` / `f(x, args)`.
+        /// The LHS becomes the FIRST argument of the call on the
+        /// right; subsequent arguments shift one position. Mirrors
+        /// the C# back end's EmitPipe rewrite. The Overt-side type
+        /// checker has already verified the receiver-as-first-arg
+        /// shape works.
+        ///
+        /// `|> Ok` (constructor-as-RHS) flows through EmitCall's
+        /// existing `Ok` / `Err` special-case; the type-args come
+        /// from the enclosing fn's return type, same as a bare
+        /// `Ok(value)` site.
+        /// </summary>
+        private void EmitPipeCompose(BinaryExpr be)
+        {
+            // Ok / Err special-case: same as in EmitPipeStepCall.
+            if (be.Right is IdentifierExpr { Name: "Ok" })
+            {
+                _sb.Append("overt.Ok[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
+                EmitExpression(be.Left);
+                _sb.Append(')');
+                return;
+            }
+            if (be.Right is IdentifierExpr { Name: "Err" })
+            {
+                _sb.Append("overt.Err[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
+                EmitExpression(be.Left);
+                _sb.Append(')');
+                return;
+            }
+            if (be.Right is CallExpr call)
+            {
+                // Splice LHS as first arg, original args after.
+                EmitExpression(call.Callee);
+                _sb.Append('(');
+                EmitExpression(be.Left);
+                foreach (var arg in call.Arguments)
+                {
+                    _sb.Append(", ");
+                    EmitExpression(arg.Value);
+                }
+                _sb.Append(')');
+                return;
+            }
+            // Bare-name RHS: emit as `f(x)`.
+            EmitExpression(be.Right);
+            _sb.Append('(');
+            EmitExpression(be.Left);
+            _sb.Append(')');
+        }
+
         private static string BinaryOpToGo(BinaryOp op) => op switch
         {
             BinaryOp.Add => "+",
@@ -2154,6 +2401,8 @@ public static class GoEmitter
             "map" => "overt.Map",
             "filter" => "overt.Filter",
             "fold" => "overt.Fold",
+            "par_map" => "overt.ParMap",
+            "try_map" => "overt.TryMap",
             "all" => "overt.All",
             "any" => "overt.Any",
             "size" => "overt.Size",

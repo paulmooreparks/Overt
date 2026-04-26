@@ -15,6 +15,7 @@ package overt
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 // Unit is the zero-information value returned by fns whose Overt
@@ -199,6 +200,63 @@ func Any[T any](list List[T], pred func(T) bool) bool {
 		}
 	}
 	return false
+}
+
+// ParMap applies f to each element of list concurrently and returns
+// a List of the results in input order, OR the first Err encountered
+// if any element's call failed. On empty input returns Ok of the
+// empty list. Mirrors C# runtime's par_map.
+//
+// Implementation: goroutine per item with a WaitGroup join. Results
+// are written into a pre-sized slice indexed by position so order is
+// preserved without needing a channel-based collector. Per-item
+// goroutines force the work onto the scheduler instead of running
+// inline (the inline-loop fallback some parallel-loop libs do
+// silently breaks the "genuinely concurrent" contract this fn
+// promises).
+func ParMap[T, U, E any](list List[T], f func(T) Result[U, E]) Result[List[U], E] {
+	items := list.Items
+	if len(items) == 0 {
+		return Ok[List[U], E](List[U]{Items: []U{}})
+	}
+	results := make([]Result[U, E], len(items))
+	var wg sync.WaitGroup
+	wg.Add(len(items))
+	for i, v := range items {
+		i, v := i, v
+		go func() {
+			defer wg.Done()
+			results[i] = f(v)
+		}()
+	}
+	wg.Wait()
+	for _, r := range results {
+		if !r.IsOk {
+			return Err[List[U], E](r.Err)
+		}
+	}
+	out := make([]U, len(items))
+	for i, r := range results {
+		out[i] = r.Value
+	}
+	return Ok[List[U], E](List[U]{Items: out})
+}
+
+// TryMap is the sequential, pure-effects cousin of ParMap. Walks the
+// input list in order, calls f on each, short-circuits on the first
+// Err. No goroutines; no async effect on the caller side. Use when
+// the callback is a pure validator and the parallelism in ParMap
+// would force unwanted effects into the caller's row.
+func TryMap[T, U, E any](list List[T], f func(T) Result[U, E]) Result[List[U], E] {
+	out := make([]U, 0, len(list.Items))
+	for _, v := range list.Items {
+		r := f(v)
+		if !r.IsOk {
+			return Err[List[U], E](r.Err)
+		}
+		out = append(out, r.Value)
+	}
+	return Ok[List[U], E](List[U]{Items: out})
 }
 
 // IntRange returns the half-open integer range [start, end) as a List.
