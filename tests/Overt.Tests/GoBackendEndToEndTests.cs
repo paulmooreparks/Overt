@@ -42,6 +42,47 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Arithmetic_LetIfElse()
+    {
+        // Exercises: integer literals, Int parameters, arithmetic
+        // (+, *), comparison (==, <), let with type, statement-position
+        // if/else (with an else-if chain), Bool branching. The user fn
+        // returns Int and is called with named args; main uses the
+        // result in an if-condition. Three branches, three distinct
+        // print outputs — the chosen one tells us the whole pipeline
+        // routed correctly.
+        AssertOvertProgramPrints(
+            """
+            module arith
+
+            fn classify(n: Int) -> Int {
+                if n < 0 {
+                    -1
+                } else if n == 0 {
+                    0
+                } else {
+                    1
+                }
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let x: Int = 3 + 4 * 2
+                let cls: Int = classify(n = x - 11)
+                if cls == 0 {
+                    println("zero")?
+                } else if cls < 0 {
+                    println("negative")?
+                } else {
+                    println("positive")?
+                }
+                Ok(())
+            }
+            """,
+            // x = 3 + 4*2 = 11; classify(0) = 0; prints "zero".
+            expectedStdout: "zero\n");
+    }
+
+    [Fact]
     public void Transpiled_Parameters_ReceiveAndUseString()
     {
         // Exercises String parameters, identifier-expression references

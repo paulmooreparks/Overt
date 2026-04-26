@@ -103,7 +103,11 @@ public static class GoEmitter
         sb.Append(") ");
         EmitReturnType(sb, fn.ReturnType);
         sb.AppendLine(" {");
-        EmitBlock(sb, fn.Body, indent: 1);
+        // Functions whose return type lowers to no Go return slot
+        // (`-> ()` or null) don't want `return <expr>` for a trailing Unit;
+        // every other shape does want a trailing return.
+        var asReturn = fn.ReturnType is not null && fn.ReturnType is not UnitType;
+        EmitBlock(sb, fn.Body, indent: 1, asReturn);
         sb.AppendLine("}");
     }
 
@@ -144,7 +148,14 @@ public static class GoEmitter
         sb.Append(LowerType(type));
     }
 
-    private static void EmitBlock(StringBuilder sb, BlockExpr block, int indent)
+    /// <summary>
+    /// Emit a block. <paramref name="asReturn"/> controls how the trailing
+    /// expression is treated: function bodies with a non-Unit return want
+    /// `return <expr>` (true), while if/else branches in statement position
+    /// just want `<expr>` as a statement (false). The qCounter is threaded
+    /// through so nested ?-propagation gets unique temp-variable names.
+    /// </summary>
+    private static void EmitBlock(StringBuilder sb, BlockExpr block, int indent, bool asReturn)
     {
         var pad = new string('\t', indent);
         var qCounter = 0;
@@ -157,9 +168,74 @@ public static class GoEmitter
         if (block.TrailingExpression is not null)
         {
             sb.Append(pad);
-            sb.Append("return ");
+            // A trailing PropagateExpr is statement-shaped on emit (it lowers
+            // to a temp + early-return), so don't prefix with `return`.
+            if (block.TrailingExpression is PropagateExpr trailingPe)
+            {
+                EmitPropagate(sb, trailingPe, indent, ref qCounter);
+                sb.AppendLine();
+                return;
+            }
+            // A trailing IfExpr in return position lowers to an if/else
+            // statement where each branch recursively returns its own
+            // trailing value. This avoids needing an IIFE wrapper for
+            // expression-position if/else in the common case (function
+            // body whose value is decided by a branch). The recursion
+            // bottoms out at non-if trailing expressions, which use the
+            // straight `return <expr>` path below.
+            if (asReturn && block.TrailingExpression is IfExpr trailingIf)
+            {
+                EmitIfAsReturn(sb, trailingIf, indent);
+                sb.AppendLine();
+                return;
+            }
+            if (asReturn)
+            {
+                sb.Append("return ");
+            }
             EmitExpression(sb, block.TrailingExpression);
             sb.AppendLine();
+        }
+    }
+
+    /// <summary>
+    /// Emit an if/else where each branch returns its own trailing value.
+    /// Used when an if-expression appears in return position (the trailing
+    /// expression of a function body whose return type isn't Unit).
+    /// Recurses on the branches via <see cref="EmitBlock"/> with
+    /// <c>asReturn = true</c>, which threads through nested ifs.
+    /// </summary>
+    private static void EmitIfAsReturn(StringBuilder sb, IfExpr ie, int indent)
+    {
+        var pad = new string('\t', indent);
+        sb.Append("if ");
+        EmitExpression(sb, ie.Condition);
+        sb.AppendLine(" {");
+        EmitBlock(sb, ie.Then, indent + 1, asReturn: true);
+        sb.Append(pad);
+        if (ie.Else is BlockExpr elseBlock)
+        {
+            if (elseBlock.Statements.Length == 0
+                && elseBlock.TrailingExpression is IfExpr nested)
+            {
+                sb.Append("} else ");
+                EmitIfAsReturn(sb, nested, indent);
+            }
+            else
+            {
+                sb.AppendLine("} else {");
+                EmitBlock(sb, elseBlock, indent + 1, asReturn: true);
+                sb.Append(pad);
+                sb.Append('}');
+            }
+        }
+        else
+        {
+            // No else branch: an if-without-else is type-checked as Unit
+            // by the front end (DESIGN.md §4), so it can't appear in
+            // return position for a non-Unit fn. Defensive throw.
+            throw new NotSupportedException(
+                "if-without-else in return position is unreachable per the type checker");
         }
     }
 
@@ -172,10 +248,18 @@ public static class GoEmitter
                 {
                     EmitPropagate(sb, pe, indent, ref qCounter);
                 }
+                else if (es.Expression is IfExpr ie)
+                {
+                    EmitIfStatement(sb, ie, indent);
+                }
                 else
                 {
                     EmitExpression(sb, es.Expression);
                 }
+                break;
+
+            case LetStmt ls:
+                EmitLet(sb, ls);
                 break;
 
             case DiscardStmt ds:
@@ -186,6 +270,76 @@ public static class GoEmitter
             default:
                 throw new NotSupportedException(
                     $"Go back end does not yet handle {stmt.GetType().Name}.");
+        }
+    }
+
+    /// <summary>
+    /// Lower `let x: T = expr` to Go's `var x T = expr`. Overt requires the
+    /// type annotation (OV0314), so we always have a T to print. The
+    /// target pattern is currently restricted to a bare identifier;
+    /// destructuring lets (tuples, records) are a follow-up.
+    /// </summary>
+    private static void EmitLet(StringBuilder sb, LetStmt ls)
+    {
+        if (ls.Target is not IdentifierPattern ip)
+        {
+            throw new NotSupportedException(
+                "Go back end does not yet handle destructuring let; "
+                + $"got pattern {ls.Target.GetType().Name}.");
+        }
+        sb.Append("var ");
+        sb.Append(ip.Name);
+        if (ls.Type is not null)
+        {
+            sb.Append(' ');
+            sb.Append(LowerType(ls.Type));
+        }
+        sb.Append(" = ");
+        EmitExpression(sb, ls.Initializer);
+    }
+
+    /// <summary>
+    /// Lower a statement-position `if`/`else` to Go's `if`/`else`. Both
+    /// branches are blocks; the value of the if-expression is unused at
+    /// this position so neither branch needs a trailing-`return`.
+    ///
+    /// `else if` chains are encoded by the parser as <c>Else =
+    /// BlockExpr { TrailingExpression = IfExpr(...) }</c>; we detect that
+    /// shape and recurse on the inner IfExpr to produce idiomatic
+    /// Go `if/else if/else` instead of nested `else { if ... }`.
+    /// Expression-position if/else (let initializer, function arg) is a
+    /// follow-up: Go has no ternary, so it needs an immediately-invoked
+    /// closure wrapper.
+    /// </summary>
+    private static void EmitIfStatement(StringBuilder sb, IfExpr ie, int indent)
+    {
+        var pad = new string('\t', indent);
+        sb.Append("if ");
+        EmitExpression(sb, ie.Condition);
+        sb.AppendLine(" {");
+        EmitBlock(sb, ie.Then, indent + 1, asReturn: false);
+        sb.Append(pad);
+        if (ie.Else is BlockExpr elseBlock)
+        {
+            // Detect `else if` shape: the else block is a single trailing
+            // IfExpr with no other statements.
+            if (elseBlock.Statements.Length == 0
+                && elseBlock.TrailingExpression is IfExpr nested)
+            {
+                sb.Append("} else ");
+                EmitIfStatement(sb, nested, indent);
+            }
+            else
+            {
+                sb.AppendLine("} else {");
+                EmitBlock(sb, elseBlock, indent + 1, asReturn: false);
+                sb.Append(pad);
+                sb.Append('}');
+            }
+        }
+        else
+        {
+            sb.Append('}');
         }
     }
 
@@ -228,8 +382,35 @@ public static class GoEmitter
                 sb.Append(sl.Value);
                 break;
 
+            case IntegerLiteralExpr il:
+                // Lexeme: decimal / hex (0x...) / binary (0b...) — Go
+                // accepts the same set verbatim.
+                sb.Append(il.Lexeme);
+                break;
+
+            case BooleanLiteralExpr bl:
+                sb.Append(bl.Value ? "true" : "false");
+                break;
+
             case UnitExpr:
                 sb.Append("overt.UnitValue");
+                break;
+
+            case BinaryExpr be:
+                sb.Append('(');
+                EmitExpression(sb, be.Left);
+                sb.Append(' ');
+                sb.Append(BinaryOpToGo(be.Op));
+                sb.Append(' ');
+                EmitExpression(sb, be.Right);
+                sb.Append(')');
+                break;
+
+            case UnaryExpr ue:
+                sb.Append('(');
+                sb.Append(UnaryOpToGo(ue.Op));
+                EmitExpression(sb, ue.Operand);
+                sb.Append(')');
                 break;
 
             case CallExpr call:
@@ -248,6 +429,34 @@ public static class GoEmitter
                     $"Go back end does not yet handle expression {expr.GetType().Name}.");
         }
     }
+
+    private static string BinaryOpToGo(BinaryOp op) => op switch
+    {
+        BinaryOp.Add => "+",
+        BinaryOp.Subtract => "-",
+        BinaryOp.Multiply => "*",
+        BinaryOp.Divide => "/",
+        BinaryOp.Modulo => "%",
+        BinaryOp.Equal => "==",
+        BinaryOp.NotEqual => "!=",
+        BinaryOp.Less => "<",
+        BinaryOp.LessEqual => "<=",
+        BinaryOp.Greater => ">",
+        BinaryOp.GreaterEqual => ">=",
+        BinaryOp.LogicalAnd => "&&",
+        BinaryOp.LogicalOr => "||",
+        _ => throw new NotSupportedException(
+            "Go back end does not yet handle binary operator " + op
+            + " (pipe operators desugar in a separate pass that's not wired here)."),
+    };
+
+    private static string UnaryOpToGo(UnaryOp op) => op switch
+    {
+        UnaryOp.Negate => "-",
+        UnaryOp.LogicalNot => "!",
+        _ => throw new NotSupportedException(
+            "Go back end does not yet handle unary operator " + op),
+    };
 
     private static void EmitCall(StringBuilder sb, CallExpr call)
     {
