@@ -60,6 +60,11 @@ public static class GoEmitter
         private readonly Dictionary<string, ImmutableArray<EnumVariant>> _enums = new();
         private bool _usesFmt;
         private int _qCounter;
+        // The enclosing fn's return type, threaded into ?-propagation so
+        // the early-return matches the fn's Result<T, E> shape rather
+        // than the previous hardcoded `[overt.Unit, overt.IoError]`.
+        // null while emitting top-level decls / record fields / etc.
+        private TypeExpr? _currentFnReturnType;
 
         public EmitterInstance(ModuleDecl module)
         {
@@ -116,8 +121,16 @@ public static class GoEmitter
             }
             else
             {
-                // Suppress "imported and not used" for `os` when no user main.
-                _sb.AppendLine("var _ = os.Exit");
+                // No user main: this Overt module is a library. Go's
+                // `package main` still requires a `func main()` even
+                // when the build is just type-checked, so we synthesize
+                // an empty one. It also doubles as the unused-import
+                // suppression for `os`. A future `overt-go` build tool
+                // that knows its target is a library will instead emit
+                // `package <camelized-module-name>` and skip both.
+                _sb.AppendLine("func main() {");
+                _sb.AppendLine("\t_ = os.Exit");
+                _sb.AppendLine("}");
             }
 
             // Now assemble the final file: header + computed imports + body.
@@ -157,7 +170,15 @@ public static class GoEmitter
             _sb.AppendLine(" {");
             var asReturn = fn.ReturnType is not null && fn.ReturnType is not UnitType;
             _qCounter = 0;
-            EmitBlock(fn.Body, indent: 1, asReturn);
+            _currentFnReturnType = fn.ReturnType;
+            try
+            {
+                EmitBlock(fn.Body, indent: 1, asReturn);
+            }
+            finally
+            {
+                _currentFnReturnType = null;
+            }
             _sb.AppendLine("}");
         }
 
@@ -320,7 +341,7 @@ public static class GoEmitter
                     break;
 
                 case LetStmt ls:
-                    EmitLet(ls);
+                    EmitLet(ls, indent);
                     break;
 
                 case DiscardStmt ds:
@@ -334,13 +355,37 @@ public static class GoEmitter
             }
         }
 
-        private void EmitLet(LetStmt ls)
+        private void EmitLet(LetStmt ls, int indent)
         {
             if (ls.Target is not IdentifierPattern ip)
             {
                 throw new NotSupportedException(
                     "Go back end does not yet handle destructuring let; "
                     + $"got pattern {ls.Target.GetType().Name}.");
+            }
+            // `let x: T = expr?` lowers in two pieces: hoist the
+            // ?-propagate (which writes the temp + the early-return
+            // for the Err arm), then bind the let's name to the
+            // temp's Value field. Without this special case the
+            // PropagateExpr would fall through to EmitExpression,
+            // which has no way to lower a statement-shaped hoist
+            // into an expression slot.
+            if (ls.Initializer is PropagateExpr pe)
+            {
+                EmitPropagateHoist(pe, indent, out var tempName);
+                _sb.AppendLine();
+                _sb.Append(new string('\t', indent));
+                _sb.Append("var ");
+                _sb.Append(ip.Name);
+                if (ls.Type is not null)
+                {
+                    _sb.Append(' ');
+                    _sb.Append(LowerType(ls.Type));
+                }
+                _sb.Append(" = ");
+                _sb.Append(tempName);
+                _sb.Append(".Value");
+                return;
             }
             _sb.Append("var ");
             _sb.Append(ip.Name);
@@ -454,6 +499,15 @@ public static class GoEmitter
         /// </summary>
         private void EmitMatch(MatchExpr me, int indent, bool asReturn)
         {
+            // Stdlib enums (Result, Option) are concrete struct types in
+            // the Go runtime, not interfaces with sealed variants, so
+            // they need an `if .IsOk { ... } else { ... }`-shape lowering
+            // rather than a type switch. Detect that shape first.
+            if (TryResolveStdlibShape(me) is { } stdlib)
+            {
+                EmitMatchStdlibShape(me, stdlib, indent, asReturn);
+                return;
+            }
             // Determine the scrutinee's enum (if any) by looking at the
             // first arm's pattern path. The type checker has already
             // verified all arms are coherent; we just need a name to
@@ -505,6 +559,140 @@ public static class GoEmitter
             _sb.AppendLine($"\tpanic(\"unreachable: type checker proved match exhaustive\")");
             _sb.Append(pad);
             _sb.Append('}');
+        }
+
+        /// <summary>
+        /// Detect whether a match's arms are stdlib-Result-shaped
+        /// (`Ok(...)` / `Err(...)`) or stdlib-Option-shaped
+        /// (`Some(...)` / `None`). Returns the shape name or null when
+        /// the arms are some other kind. Detection is structural: we
+        /// don't carry the type-checker's resolved scrutinee type
+        /// here, so the heuristic looks at single-segment variant
+        /// references on each arm. A user enum that happens to call
+        /// its variants `Ok` / `Err` would collide with this; that's
+        /// rare enough to defer until it bites.
+        /// </summary>
+        private static string? TryResolveStdlibShape(MatchExpr me)
+        {
+            var anyResult = false;
+            var anyOption = false;
+            foreach (var arm in me.Arms)
+            {
+                var (name, isSingle) = ExtractSingleSegmentName(arm.Pattern);
+                if (!isSingle) continue;
+                if (name is "Ok" or "Err") anyResult = true;
+                if (name is "Some" or "None") anyOption = true;
+            }
+            if (anyResult && !anyOption) return "Result";
+            if (anyOption && !anyResult) return "Option";
+            return null;
+        }
+
+        private static (string? Name, bool IsSingle) ExtractSingleSegmentName(Pattern p)
+        {
+            return p switch
+            {
+                IdentifierPattern ip => (ip.Name, true),
+                PathPattern pp when pp.Path.Length == 1 => (pp.Path[0], true),
+                ConstructorPattern cp when cp.Path.Length == 1 => (cp.Path[0], true),
+                RecordPattern rp when rp.Path.Length == 1 => (rp.Path[0], true),
+                _ => (null, false),
+            };
+        }
+
+        /// <summary>
+        /// Emit a match on a stdlib Result or Option scrutinee as
+        /// `__m := scrut; if __m.IsOk { ... } else { ... }` (or
+        /// IsSome for Option). Each arm classified by its variant
+        /// name; bindings extracted from the variant's data field
+        /// (`__m.Value` for Ok / Some, `__m.Err` for Err). Wildcard
+        /// bindings discard the value with `_`.
+        /// </summary>
+        private void EmitMatchStdlibShape(MatchExpr me, string shape, int indent, bool asReturn)
+        {
+            var pad = new string('\t', indent);
+            var scrutVar = $"__m_{_qCounter++}";
+            // Variant → (binderName?, isWildcard, body) for the two arms
+            string? trueArmBinder = null;
+            Expression? trueArmBody = null;
+            string? falseArmBinder = null;
+            Expression? falseArmBody = null;
+            foreach (var arm in me.Arms)
+            {
+                var (name, _) = ExtractSingleSegmentName(arm.Pattern);
+                var binder = ExtractFirstArgBinder(arm.Pattern);
+                bool isTrueArm = name is "Ok" or "Some";
+                if (isTrueArm)
+                {
+                    trueArmBinder = binder;
+                    trueArmBody = arm.Body;
+                }
+                else
+                {
+                    falseArmBinder = binder;
+                    falseArmBody = arm.Body;
+                }
+            }
+            if (trueArmBody is null || falseArmBody is null)
+            {
+                throw new NotSupportedException(
+                    $"Go back end {shape} match must cover both arms; "
+                    + "wildcard arms aren't yet wired here.");
+            }
+
+            var probeField = shape == "Result" ? "IsOk" : "IsSome";
+            var trueValueField = "Value";
+            var falseValueField = shape == "Result" ? "Err" : null;
+
+            _sb.Append($"{scrutVar} := ");
+            EmitExpression(me.Scrutinee);
+            _sb.AppendLine();
+            _sb.Append(pad);
+            _sb.Append($"if {scrutVar}.{probeField} {{");
+            _sb.AppendLine();
+            if (trueArmBinder is not null)
+            {
+                _sb.Append(pad);
+                _sb.AppendLine($"\t{trueArmBinder} := {scrutVar}.{trueValueField}");
+            }
+            _sb.Append(pad);
+            _sb.Append('\t');
+            EmitArmBody(trueArmBody, indent + 1, asReturn);
+            _sb.Append(pad);
+            _sb.AppendLine("} else {");
+            if (falseArmBinder is not null && falseValueField is not null)
+            {
+                _sb.Append(pad);
+                _sb.AppendLine($"\t{falseArmBinder} := {scrutVar}.{falseValueField}");
+            }
+            else
+            {
+                // Wildcard arm or Option-None — silence the unused
+                // variable warning so `go build` accepts the block.
+                _sb.Append(pad);
+                _sb.AppendLine($"\t_ = {scrutVar}");
+            }
+            _sb.Append(pad);
+            _sb.Append('\t');
+            EmitArmBody(falseArmBody, indent + 1, asReturn);
+            _sb.Append(pad);
+            _sb.Append('}');
+        }
+
+        /// <summary>Best-effort extraction of the first ConstructorPattern
+        /// argument as a name (`Ok(x)` → "x"), or null when the pattern
+        /// has no binder (`Err(_)`, `None`, bare `Ok`).</summary>
+        private static string? ExtractFirstArgBinder(Pattern p)
+        {
+            if (p is ConstructorPattern cp && cp.Arguments.Length >= 1)
+            {
+                return cp.Arguments[0] switch
+                {
+                    IdentifierPattern ip => ip.Name,
+                    _ => null,
+                };
+            }
+            return null;
         }
 
         private string? TryResolveEnumName(MatchExpr me)
@@ -603,17 +791,99 @@ public static class GoEmitter
 
         private void EmitPropagate(PropagateExpr pe, int indent)
         {
+            EmitPropagateHoist(pe, indent, out _);
+        }
+
+        /// <summary>
+        /// Emit the `?`-propagation hoist (`__q_N := <op>; if
+        /// !__q_N.IsOk { return ... }`) and report the temp's name
+        /// via <paramref name="tempName"/> so callers (specifically
+        /// <see cref="EmitLet"/>) can read `__q_N.Value` afterwards
+        /// to bind the success branch's value to the let's target.
+        /// The early-return type is derived from the enclosing fn's
+        /// declared return type rather than hardcoded; that lets `?`
+        /// work in fns returning any `Result&lt;T, E&gt;`, not just
+        /// `Result&lt;(), IoError&gt;`.
+        /// </summary>
+        private void EmitPropagateHoist(PropagateExpr pe, int indent, out string tempName)
+        {
             var pad = new string('\t', indent);
-            var name = $"__q_{_qCounter++}";
-            _sb.Append($"{name} := ");
+            tempName = $"__q_{_qCounter++}";
+            _sb.Append($"{tempName} := ");
             EmitExpression(pe.Operand);
             _sb.AppendLine();
             _sb.Append(pad);
-            _sb.AppendLine($"if !{name}.IsOk {{");
+            _sb.AppendLine($"if !{tempName}.IsOk {{");
             _sb.Append(pad);
-            _sb.AppendLine($"\treturn overt.Err[overt.Unit, overt.IoError]({name}.Err)");
+            _sb.Append("\treturn overt.Err[");
+            EmitCurrentReturnTypeArgs();
+            _sb.AppendLine($"]({tempName}.Err)");
             _sb.Append(pad);
             _sb.Append("}");
+        }
+
+        /// <summary>
+        /// Emit `T, E` for the current fn's return type, where the fn
+        /// returns `Result&lt;T, E&gt;`. Used by ?-propagation's
+        /// early-return type-args. The type checker has already
+        /// guaranteed `?` only appears inside a Result-returning fn,
+        /// so a non-Result return here is a compiler bug.
+        /// </summary>
+        private void EmitCurrentReturnTypeArgs()
+        {
+            if (_currentFnReturnType is NamedType { Name: "Result" } nt
+                && nt.TypeArguments.Length == 2)
+            {
+                _sb.Append(LowerType(nt.TypeArguments[0]));
+                _sb.Append(", ");
+                _sb.Append(LowerType(nt.TypeArguments[1]));
+                return;
+            }
+            throw new InvalidOperationException(
+                "?-propagation reached the emitter outside a Result-returning fn; "
+                + "the type checker should have caught this.");
+        }
+
+        /// <summary>
+        /// Emit the element type for a `List.empty()` call. Uses the
+        /// enclosing fn's return type when it's `List&lt;T&gt;`-shaped;
+        /// otherwise falls back to `any`, which compiles but loses
+        /// type-precision and may surface as a usage error elsewhere.
+        /// A future expected-type-threading pass would let let-init
+        /// sites and call-arg positions also feed in the right T.
+        /// </summary>
+        private void EmitListElementTypeOrFallback()
+        {
+            if (_currentFnReturnType is NamedType { Name: "List" } nt
+                && nt.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(nt.TypeArguments[0]));
+                return;
+            }
+            _sb.Append("any");
+        }
+
+        /// <summary>
+        /// Emit `T, E` for an `Ok(...)` / `Err(...)` constructor call
+        /// targeting the current fn's return type. Falls back to the
+        /// `overt.Unit, overt.IoError` pair when the enclosing return
+        /// isn't `Result&lt;T, E&gt;`-shaped (e.g. a call site outside
+        /// any fn body, or a fn whose return is itself shaped through
+        /// extern). The fallback isn't always semantically correct,
+        /// but it matches the pre-target-typing behavior and keeps
+        /// the existing curated tests green.
+        /// </summary>
+        private void EmitResultTypeArgsOrFallback()
+        {
+            if (_currentFnReturnType is NamedType { Name: "Result" } nt
+                && nt.TypeArguments.Length == 2)
+            {
+                _sb.Append(LowerType(nt.TypeArguments[0]));
+                _sb.Append(", ");
+                _sb.Append(LowerType(nt.TypeArguments[1]));
+                return;
+            }
+            _sb.Append("overt.Unit, overt.IoError");
         }
 
         // ------------------------------------------------------ expressions
@@ -805,19 +1075,27 @@ public static class GoEmitter
 
         private void EmitCall(CallExpr call)
         {
-            // Special-case the constructors: `Ok(x)` and `Err(e)` need
-            // explicit type parameters in Go since there's no contextual
-            // type inference at the call site.
+            // Constructors `Ok(x)` and `Err(e)` need explicit type
+            // parameters because Go can't target-type generic calls
+            // from the surrounding context. Use the enclosing fn's
+            // declared return type (which the type checker has
+            // already validated as Result<T, E>) to spell the
+            // params. Falls back to the [Unit, IoError] hardcode for
+            // calls outside any fn (rare; defensive).
             if (call.Callee is IdentifierExpr { Name: "Ok" } && call.Arguments.Length == 1)
             {
-                _sb.Append("overt.Ok[overt.Unit, overt.IoError](");
+                _sb.Append("overt.Ok[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
                 EmitExpression(call.Arguments[0].Value);
                 _sb.Append(')');
                 return;
             }
             if (call.Callee is IdentifierExpr { Name: "Err" } && call.Arguments.Length == 1)
             {
-                _sb.Append("overt.Err[overt.Unit, overt.IoError](");
+                _sb.Append("overt.Err[");
+                EmitResultTypeArgsOrFallback();
+                _sb.Append("](");
                 EmitExpression(call.Arguments[0].Value);
                 _sb.Append(')');
                 return;
@@ -835,6 +1113,19 @@ public static class GoEmitter
             // What we WILL see here: stdlib namespace calls.
             if (call.Callee is FieldAccessExpr { Target: IdentifierExpr nsId } facCallee)
             {
+                // `List.empty()` is generic with no value-typed arg, so
+                // Go can't infer T. Thread the enclosing fn's return
+                // type (when it's List<T>) into the explicit type-arg
+                // slot. Without this, a fn shaped `-> List<Int>` whose
+                // body returns `List.empty()` would fail Go's inference.
+                if (nsId.Name == "List" && facCallee.FieldName == "empty"
+                    && call.Arguments.Length == 0)
+                {
+                    _sb.Append("overt.ListEmpty[");
+                    EmitListElementTypeOrFallback();
+                    _sb.Append("]()");
+                    return;
+                }
                 if (MapNamespaceCall(nsId.Name, facCallee.FieldName) is { } mapped)
                 {
                     _sb.Append(mapped);

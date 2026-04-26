@@ -40,44 +40,36 @@ public class GoCompileCheckTests
     // each one hits, observed by running this sweep against every
     // portable example):
     //
-    //   - arith_eval.ov       `?`-propagation in a let-initializer
-    //                         (`let v: Int = eval(inner)?`). EmitLet
-    //                         needs to hoist the temp + early-return
-    //                         the same way ExpressionStmt does today.
-    //   - bst.ov              Generic-parameter inference at the call
-    //                         site: `List.empty()` lowers to
-    //                         `overt.ListEmpty()` with no type args, but
-    //                         Go won't infer a type parameter from
-    //                         "what the caller assigns it to." The C#
-    //                         emitter target-types from the contextual
-    //                         return / variable type; the Go emitter
-    //                         needs the same threading for ListEmpty,
-    //                         Some, None, Ok, Err in non-main shapes.
-    //   - state_machine.ov    `match (state, event) { ... }` — tuple-of-
-    //                         enum scrutinee. EmitMatch's
-    //                         TryResolveEnumName only handles single-
-    //                         enum scrutinees; tuple match wants its
-    //                         own lowering (Go has no tuple-pattern
-    //                         switch, so this is a synthesized
+    //   - mutation.ov         `with`-expression, AssignmentStmt, `let
+    //                         mut`, `while` loop. WithExpr requires a
+    //                         multi-statement lowering for the
+    //                         struct-copy + field-override pattern;
+    //                         AssignmentStmt is one new case; while is
+    //                         a Go `for cond {}`. Most of mutation
+    //                         lands in one focused commit once
+    //                         WithExpr's lowering shape is decided.
+    //   - state_machine.ov    `match (state, event) { ... }` — tuple-
+    //                         of-enums scrutinee. EmitMatch's path
+    //                         resolution only handles single-enum and
+    //                         stdlib-Result/Option scrutinees; tuple
+    //                         match wants either a synthesized
     //                         per-axis nested switch or a single
-    //                         struct-key switch).
+    //                         struct-key switch.
     //   - effects.ov          Higher-order user fns with effect-row
     //                         polymorphism. Needs the emitter to
     //                         thread `func(...) T` types through
     //                         user-fn signatures.
-    //   - mutation.ov         `let mut` + AssignmentStmt. Re-binding
-    //                         lowers to plain `=` in Go but the
-    //                         emitter doesn't handle the AssignmentStmt
-    //                         AST node yet.
-    //   - pipeline.ov         Pipe operators (`|>`, `|>?`). BinaryOpToGo
-    //                         throws on PipeCompose / PipePropagate;
-    //                         they want a desugar pass into ordinary
-    //                         calls.
+    //   - pipeline.ov         Pipe operators (`|>`, `|>?`). The
+    //                         emitter throws on PipeCompose /
+    //                         PipePropagate today; they want a
+    //                         desugar pass into ordinary calls.
     //   - dashboard.ov        `parallel { ... }` task groups. Would
-    //                         map to goroutines + channels; no
-    //                         lowering yet.
-    //   - race.ov             `race { ... }` first-success. Same as
-    //                         above.
+    //                         lower to goroutines + channels; no
+    //                         lowering yet (and a real one wants the
+    //                         language-level concurrency design that's
+    //                         currently scoped only on paper).
+    //   - race.ov             `race { ... }` first-success. Same
+    //                         family as parallel; same gating design.
     //   - refinement.ov       Refinement runtime checks. The C#
     //                         emitter injects `where`-predicate
     //                         validations at every boundary; the Go
@@ -95,6 +87,8 @@ public class GoCompileCheckTests
     [Theory]
     [InlineData("hello.ov")]
     [InlineData("greeter.ov")]
+    [InlineData("arith_eval.ov")]
+    [InlineData("bst.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())
