@@ -171,6 +171,32 @@ public sealed class RefinementViolation(string aliasName, string predicateText, 
 }
 
 /// <summary>
+/// Domain-error value returned from an auto-generated <c>Alias.try_from(raw)</c>
+/// when its refinement type does not supply an <c>else { ... }</c> clause.
+/// A refinement that DOES supply one uses the user's own domain type
+/// instead, so this is the fallback "no custom error declared" shape.
+/// Round-trips through the emitter as a record value, not an exception:
+/// the auto-gen lowers `try_from` failures into <c>Err(RefinementError { ... })</c>
+/// in the Result return type, not a throw. Field names match Overt's
+/// lowercase-field convention.
+/// </summary>
+public sealed record RefinementError(
+    string alias_name,
+    string predicate_text,
+    object? offending_value)
+{
+    public override string ToString()
+        => $"value {Repr(offending_value)} does not satisfy refinement `{alias_name}` predicate: {predicate_text}";
+
+    private static string Repr(object? v) => v switch
+    {
+        null => "null",
+        string s => $"\"{s}\"",
+        _ => v.ToString() ?? "?",
+    };
+}
+
+/// <summary>
 /// Marker thrown by the emitted stub for an <c>extern</c> whose platform
 /// isn't wired up in the current runtime (e.g. <c>extern "go" fn ...</c>
 /// under the C# backend). The CLI recognizes this type specifically and

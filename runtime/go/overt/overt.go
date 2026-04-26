@@ -334,6 +334,36 @@ func refinementRepr(v any) string {
 	}
 }
 
+// RefinementError is the default Err arm of an auto-generated
+// `Alias.try_from(raw)` when the refinement type does not supply an
+// `else { ... }` clause. Refinements that DO supply one use their
+// own domain type instead, so this is the fallback "no custom error
+// declared" shape. Round-trips through the emitter as a value, not
+// a panic — distinct from RefinementViolation, which IS a panic
+// raised by the always-on `__Refinement_{Alias}__Check` boundary
+// helper.
+//
+// Fields use Go's TitleCase export convention; the Overt-level field
+// names (`alias_name`, etc.) are reserved for if/when user code wants
+// to read them via field-access syntax, at which point the emitter
+// can route the access. For now the helper constructs values directly
+// and users typically just propagate or pattern-match on the type.
+type RefinementError struct {
+	AliasName      string
+	PredicateText  string
+	OffendingValue any
+}
+
+func (e RefinementError) String() string {
+	return fmt.Sprintf("value %s does not satisfy refinement `%s` predicate: %s",
+		refinementRepr(e.OffendingValue), e.AliasName, e.PredicateText)
+}
+
+// Error mirrors String so RefinementError can flow through error-aware
+// code if the user mixes idioms. The default narrative matches the C#
+// runtime's RefinementError.ToString output verbatim.
+func (e RefinementError) Error() string { return e.String() }
+
 // IntRange returns the half-open integer range [start, end) as a List.
 // start >= end yields the empty List (Python semantics).
 func IntRange(start, end int) List[int] {

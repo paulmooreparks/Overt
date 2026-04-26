@@ -106,6 +106,11 @@ public static class Stdlib
         e.Add(Type("Map"));
         e.Add(Type("Set"));
         e.Add(Type("IoError"));
+        // RefinementError is the default Err arm of an auto-generated
+        // `Alias.try_from` when the refinement type doesn't supply an
+        // `else { ... }` clause. Refinements that DO supply one use
+        // their own domain type instead.
+        e.Add(Type("RefinementError"));
         e.Add(Type("HttpError"));
         e.Add(Type("TraceEvent"));
         e.Add(Type("RaceAllFailed"));

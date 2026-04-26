@@ -104,6 +104,19 @@ public static class GoEmitter
         // — see CheckRefinementAtBoundary in TypeChecker.cs and the comment
         // on EmitTypeAlias below.
         private readonly ImmutableDictionary<SourceSpan, string> _refinementBoundaries;
+        // Type-check result, kept whole so emit-time helpers (e.g. the
+        // refinement try_from helper, which needs to read the inferred type
+        // of the else-arm to spell its Result error type) can dip into
+        // ExpressionTypes / RefinementTryFromCalls without refactoring the
+        // single-shot constructor wiring. Null when no TypeCheckResult is
+        // passed to Emit() (CLI/tests now always pass it).
+        private readonly TypeCheckResult? _typeCheck;
+        // Spans of `Alias.try_from(...)` call sites, keyed to the alias
+        // name. EmitCall consults this to lower the head as
+        // `__Refinement_{Alias}__TryFrom(...)` instead of treating the
+        // FieldAccess as a regular field access. Empty when no
+        // TypeCheckResult was passed.
+        private readonly ImmutableDictionary<SourceSpan, string> _refinementTryFromCalls;
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -122,7 +135,10 @@ public static class GoEmitter
         public EmitterInstance(ModuleDecl module, TypeCheckResult? typed)
         {
             _module = module;
+            _typeCheck = typed;
             _refinementBoundaries = typed?.RefinementBoundaries
+                ?? ImmutableDictionary<SourceSpan, string>.Empty;
+            _refinementTryFromCalls = typed?.RefinementTryFromCalls
                 ?? ImmutableDictionary<SourceSpan, string>.Empty;
             foreach (var decl in module.Declarations)
             {
@@ -887,8 +903,85 @@ public static class GoEmitter
             if (ta.Predicate is not null)
             {
                 EmitRefinementCheckHelper(ta);
+                EmitRefinementTryFromHelper(ta);
             }
         }
+
+        /// <summary>
+        /// Emit `__Refinement_{Alias}__TryFrom(self T) overt.Result[T, ErrType]`,
+        /// the value-error variant of the boundary check that the user calls
+        /// explicitly via `{Alias}.try_from(raw)`. Returns Ok(self) when the
+        /// predicate holds and Err(...) otherwise — either constructing the
+        /// alias's `else { ... }` arm (when present) or a generic
+        /// <c>overt.RefinementError</c> record (when not).
+        ///
+        /// Mirrors <see cref="CSharpEmitter.EmitRefinementTryFrom"/>; helper
+        /// names use the flat <c>__Refinement_{Alias}__TryFrom</c> form because
+        /// Go has no namespacing.
+        /// </summary>
+        private void EmitRefinementTryFromHelper(TypeAliasDecl ta)
+        {
+            var inner = LowerType(ta.Target);
+            var predText = FormatRefinementPredicate(ta.Predicate!);
+            var escaped = EscapeGoString(predText);
+            var errType = ResolveTryFromErrorType(ta);
+            var resultType = $"overt.Result[{inner}, {errType}]";
+
+            _sb.AppendLine();
+            _sb.AppendLine($"func __Refinement_{ta.Name}__TryFrom(self {inner}) {resultType} {{");
+            _sb.Append("\tif ");
+            EmitExpression(ta.Predicate!);
+            _sb.AppendLine(" {");
+            _sb.AppendLine($"\t\treturn overt.Ok[{inner}, {errType}](self)");
+            _sb.AppendLine("\t}");
+            _sb.Append($"\treturn overt.Err[{inner}, {errType}](");
+            if (ta.ElseExpr is { } elseExpr)
+            {
+                EmitExpression(elseExpr);
+            }
+            else
+            {
+                _sb.Append($"overt.RefinementError{{AliasName: \"{ta.Name}\", PredicateText: \"{escaped}\", OffendingValue: self}}");
+            }
+            _sb.AppendLine(")");
+            _sb.AppendLine("}");
+        }
+
+        /// <summary>
+        /// Resolve the Go type spelling for the Err arm of an alias's
+        /// auto-generated <c>try_from</c>. When an else-arm is present we
+        /// look up its inferred type via the type checker; without an else-
+        /// arm we use the runtime's generic <c>overt.RefinementError</c>.
+        /// </summary>
+        private string ResolveTryFromErrorType(TypeAliasDecl ta)
+        {
+            if (ta.ElseExpr is { } elseExpr
+                && _typeCheck?.ExpressionTypes is { } expr
+                && expr.TryGetValue(elseExpr.Span, out var inferred))
+            {
+                return GoTypeFromInferred(inferred);
+            }
+            return "overt.RefinementError";
+        }
+
+        /// <summary>
+        /// Lower an inferred TypeRef (the type checker's IR) to its Go
+        /// spelling. The emitter elsewhere works on TypeExpr (the AST shape);
+        /// this is the bridge for cases — like the inferred type of a
+        /// refinement alias's else-arm — where the only handle we have is the
+        /// type-check result.
+        /// </summary>
+        private static string GoTypeFromInferred(TypeRef t) => t switch
+        {
+            PrimitiveType { Name: "Int" } => "int",
+            PrimitiveType { Name: "Int64" } => "int64",
+            PrimitiveType { Name: "Float" } => "float64",
+            PrimitiveType { Name: "Bool" } => "bool",
+            PrimitiveType { Name: "String" } => "string",
+            PrimitiveType { Name: "Unit" } => "overt.Unit",
+            NamedTypeRef nt => nt.Name,
+            _ => "any",
+        };
 
         /// <summary>
         /// Emit a `__Refinement_{Alias}__Check(self T) T` helper that
@@ -1374,7 +1467,15 @@ public static class GoEmitter
                 _sb.Append(LowerType(ls.Type));
             }
             _sb.Append(" = ");
-            EmitExpression(ls.Initializer);
+            // Thread the let-target type as an expected-type hint so
+            // generic helpers like `List.empty()` can read T from the
+            // declared shape. Restore the prior value on exit; nesting
+            // is rare but possible (let inside an initializer block),
+            // and we don't want a stale hint to leak to a sibling let.
+            var prior = _expectedListElementType;
+            _expectedListElementType = ls.Type;
+            try { EmitExpression(ls.Initializer); }
+            finally { _expectedListElementType = prior; }
         }
 
         /// <summary>
@@ -2401,16 +2502,43 @@ public static class GoEmitter
                 + "the type checker should have caught this.");
         }
 
+        // Per-emit "expected type at this position" hint, set by callers
+        // that know the surrounding type the value will land in (today:
+        // EmitLet when the let-target carries a type annotation). Read by
+        // EmitListElementTypeOrFallback to pin `List.empty()`'s element
+        // type without relying on the fn-return-type fallback path.
+        // Cleared when the caller's scope ends. Single slot is enough —
+        // List.empty doesn't nest inside another List.empty in practice,
+        // and the existing fn-return / Result-of-List heuristics handle
+        // the call-arg-of-Result-returning-fn case where it might.
+        private TypeExpr? _expectedListElementType;
+
         /// <summary>
-        /// Emit the element type for a `List.empty()` call. Uses the
-        /// enclosing fn's return type when it's `List&lt;T&gt;`-shaped;
-        /// otherwise falls back to `any`, which compiles but loses
-        /// type-precision and may surface as a usage error elsewhere.
-        /// A future expected-type-threading pass would let let-init
-        /// sites and call-arg positions also feed in the right T.
+        /// Emit the element type for a `List.empty()` call. Three sources
+        /// in priority order:
+        ///
+        ///   1. The caller-supplied <see cref="_expectedListElementType"/>
+        ///      hint — set by, e.g., <see cref="EmitLet"/> when the
+        ///      let-target type is known. Most precise.
+        ///   2. The enclosing fn's return type, when it's
+        ///      <c>List&lt;T&gt;</c>-shaped. Covers `fn f() -> List&lt;Int&gt;
+        ///      { List.empty() }` directly.
+        ///   3. <c>Result&lt;List&lt;T&gt;, E&gt;</c> peeling — covers
+        ///      `Ok(List.empty())` inside a Result-returning fn.
+        ///
+        /// Falls through to <c>any</c> when none of the above pin the
+        /// element type. Compiles, but the call site may surface a usage
+        /// mismatch elsewhere; the typed `let x: List&lt;T&gt; = ...`
+        /// idiom is the user-side workaround.
         /// </summary>
         private void EmitListElementTypeOrFallback()
         {
+            if (_expectedListElementType is NamedType { Name: "List" } expected
+                && expected.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(expected.TypeArguments[0]));
+                return;
+            }
             if (_currentFnReturnType is NamedType { Name: "List" } nt
                 && nt.TypeArguments.Length == 1)
             {
@@ -2716,6 +2844,22 @@ public static class GoEmitter
                 EmitResultTypeArgsOrFallback();
                 _sb.Append("](");
                 EmitExpression(call.Arguments[0].Value);
+                _sb.Append(')');
+                return;
+            }
+
+            // Refinement-alias try_from: `Age.try_from(raw)` lowers to
+            // `__Refinement_Age__TryFrom(raw)`. The type checker recorded
+            // the FieldAccess span in RefinementTryFromCalls.
+            if (call.Callee is FieldAccessExpr tryFromFa
+                && _refinementTryFromCalls.TryGetValue(tryFromFa.Span, out var tryFromAlias))
+            {
+                _sb.Append($"__Refinement_{tryFromAlias}__TryFrom(");
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    if (i > 0) _sb.Append(", ");
+                    EmitExpression(call.Arguments[i].Value);
+                }
                 _sb.Append(')');
                 return;
             }

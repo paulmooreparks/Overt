@@ -59,6 +59,40 @@ More examples under [`examples/`](examples/): task groups (`parallel`), fallback
 
 ---
 
+## What survives transpilation
+
+Overt is its own language, not a thin wrapper around its targets. The features below live at the *language* level: the type checker enforces them, the emitters lower them. Switching back ends doesn't change what they mean, only how they look on disk. A transpilation in either direction couldn't reconstruct them from the host language alone.
+
+- **Refinement types with auto-generated validators.** A type with a `where` predicate is a real type, not a name for an Int. The compile-time checker rejects literal violations (OV0311); boundary expressions get wrapped in a panic-on-failure helper at runtime. The optional `else { ... }` clause supplies the domain error variant for the auto-generated `Alias.try_from(raw) -> Result<Alias, ErrType>`:
+
+  ```overt
+  type Age = Int where 0 <= self && self <= 150 else {
+      ValidationError.AgeOutOfRange { got = self }
+  }
+
+  let age: Age = Age.try_from(user_input)?
+  ```
+
+  See [`examples/refinement.ov`](examples/refinement.ov) for the runnable demo.
+
+- **Effect rows on every fn signature.** Every fn declares the effects it performs (`!{io}`, `!{io, async}`, etc.). The type checker propagates them through `?`; OV0310 fires when a caller doesn't declare an effect a callee performs. Effects are erased at lowering, but the discipline survives: an Overt program that compiles will not surprise the reader with hidden I/O.
+
+- **Flow-sensitive narrowing.** Once a predicate is proven inside a branch, the type checker narrows the base type to the corresponding refinement. `Ok(raw)` type-checks inside `if 0 <= raw && raw <= 150 { ... }` even though `raw` was declared `Int`. This is what makes `Age.try_from`'s body free of redundant runtime checks: the predicate is statically proven inside the success branch.
+
+- **Named-only call syntax.** Every call site spells its arguments by name: `greet(name = "alice")`, never `greet("alice")`. The parser rejects positional calls. Refactors stay safe under arg reordering, and the call site documents itself without the reader looking up the signature.
+
+- **Match exhaustiveness, checked at the type level.** A `match` over a closed enum that misses a variant is a compile error, not a runtime panic. Adding a variant later forces every consumer to handle it. No fall-through, no default arms unless the user writes one.
+
+- **Annotations as declarative metadata.** `@derive(Debug, Display)`, `@doc("...")`, `@csharp("[Attr]")` are part of the language; they lower per back end (C# attributes, Go method impls) but the surface is uniform. The compiler reads them at type-check time, so misspellings surface as diagnostics, not silent no-ops.
+
+- **First-class concurrency and tracing primitives.** `parallel { ... }` task groups, `race { ... }` first-success, and `trace { ... }` causal blocks are syntactic constructs the type checker reasons about, not library calls. Lowerings differ by target (sequential on Go today, structured on C#) but the source-level shape is one canonical form.
+
+- **Trailing commas everywhere.** Records, args, variants, type-arg lists, match arms — every list-shaped construct accepts a trailing comma. Adding a row never produces a one-line diff with two changes.
+
+For the longer rationale, see [`DESIGN.md`](DESIGN.md). For agent-facing operational guidance, [`AGENTS.md`](AGENTS.md). The features above are the answer to "why a new language at all": each one would be impossible to retrofit into a transpilation of an existing source language.
+
+---
+
 ## Quick try
 
 Requires the .NET 9 SDK. Today, from a clone of this repo:

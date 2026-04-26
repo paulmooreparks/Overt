@@ -35,12 +35,30 @@ public sealed record FunctionDecl(
 /// <code>type Age = Int where 0 &lt;= self &amp;&amp; self &lt;= 150</code>
 /// <c>Predicate</c> is null for plain aliases. Generic parameters are collected in
 /// <see cref="TypeParameters"/> (DESIGN.md §8 — refinement types).
+/// <para>
+/// <c>ElseExpr</c> is the optional expression after the predicate that supplies a
+/// domain-specific error value for the auto-generated
+/// <c>{Alias}.try_from(raw)</c>:
+/// </para>
+/// <code>
+/// type Age = Int where 0 &lt;= self &amp;&amp; self &lt;= 150 else {
+///     ValidationError.AgeOutOfRange { got = self }
+/// }
+/// </code>
+/// <para>
+/// When <c>ElseExpr</c> is null the auto-generated <c>try_from</c> returns
+/// <c>Result&lt;Alias, RefinementError&gt;</c>; when present, its inferred type
+/// becomes the <c>E</c> in <c>Result&lt;Alias, E&gt;</c>. Inside the else expression
+/// <c>self</c> is in scope and refers to the offending inner value, mirroring
+/// the predicate's binding.
+/// </para>
 /// </summary>
 public sealed record TypeAliasDecl(
     string Name,
     ImmutableArray<string> TypeParameters,
     TypeExpr Target,
     Expression? Predicate,
+    Expression? ElseExpr,
     SourceSpan Span) : Declaration(Span);
 
 /// <summary>

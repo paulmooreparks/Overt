@@ -2,9 +2,38 @@ module refinement_example
 
 // Refinement types push validation into the type system, out of scattered if-statements.
 // Syntax: `T where <predicate>`, with `self` referring to the value.
+//
+// Two distinguishing features that survive transpilation to either back end:
+//
+//   1. Compile-time literal violations (OV0311): the type checker rejects
+//      `let _: Age = -1` outright, no runtime check needed.
+//
+//   2. Boundary runtime checks: when a value flowing into a refinement-typed
+//      slot can't be statically proven, the emitter wraps it in a
+//      `__Refinement_{Alias}__Check` helper that panics on failure.
+//
+// And one ergonomic affordance: each refined alias gets a free
+// `Alias.try_from(raw)` validator that returns `Result<Alias, ErrType>`.
+// The optional `else { ... }` clause picks the domain error variant; without
+// it the generic `RefinementError` falls out.
 
-type Age         = Int   where 0   <= self && self <= 150
-type Percent     = Float where 0.0 <= self && self <= 100.0
+@derive(Debug, Display)
+enum ValidationError {
+    AgeOutOfRange   { got: Int },
+    ScoreOutOfRange { got: Float },
+    NoFriends,
+}
+
+type Age = Int where 0 <= self && self <= 150 else {
+    ValidationError.AgeOutOfRange { got = self }
+}
+
+type Percent = Float where 0.0 <= self && self <= 100.0 else {
+    ValidationError.ScoreOutOfRange { got = self }
+}
+
+// `NonEmpty<T>` is generic, so its auto-generated `try_from` is gated on a
+// follow-up. Hand-written validators stay the path for generics until then.
 type NonEmpty<T> = List<T> where size(self) > 0
 
 record UserProfile {
@@ -14,34 +43,12 @@ record UserProfile {
     friends:       NonEmpty<String>,
 }
 
-@derive(Debug, Display)
-enum ValidationError {
-    AgeOutOfRange   { got: Int },
-    ScoreOutOfRange { got: Float },
-    NoFriends,
-}
-
-// Each `check_*` helper uses flow-sensitive type narrowing: once a predicate
-// is proven inside a branch, the compiler narrows the base type to the
-// corresponding refinement type. That is why `Ok(raw)` type-checks in the
-// Ok branch even though `raw` was declared as `Int`.
-fn check_age(raw: Int) -> Result<Age, ValidationError> {
-    if 0 <= raw && raw <= 150 {
-        Ok(raw)
-    } else {
-        Err(ValidationError.AgeOutOfRange { got = raw })
-    }
-}
-
-fn check_percent(raw: Float) -> Result<Percent, ValidationError> {
-    if 0.0 <= raw && raw <= 100.0 {
-        Ok(raw)
-    } else {
-        Err(ValidationError.ScoreOutOfRange { got = raw })
-    }
-}
-
 fn check_non_empty(raw: List<String>) -> Result<NonEmpty<String>, ValidationError> {
+    // Flow-sensitive narrowing: inside the `if size(raw) > 0` branch the
+    // compiler narrows `List<String>` to `NonEmpty<String>`, so `Ok(raw)`
+    // type-checks even though `raw` was declared as `List<String>`. This is
+    // the same machinery that lets `Age.try_from`'s body coerce `raw: Int`
+    // to `Age` once the predicate is proven inside the if-branch.
     if size(raw) > 0 {
         Ok(raw)
     } else {
@@ -56,9 +63,9 @@ fn make_profile(
     friends:   List<String>,
 ) -> Result<UserProfile, ValidationError> {
 
-    let age:     Age              = check_age(age_raw)?
-    let score:   Percent          = check_percent(score_raw)?
-    let checked: NonEmpty<String> = check_non_empty(friends)?
+    let age:     Age              = Age.try_from(age_raw)?
+    let score:   Percent          = Percent.try_from(score_raw)?
+    let checked: NonEmpty<String> = check_non_empty(raw = friends)?
 
     Ok(UserProfile {
         name          = name,
@@ -66,4 +73,56 @@ fn make_profile(
         score_percent = score,
         friends       = checked,
     })
+}
+
+// Exercises the three boundary cases on the same input shape so a single
+// `make_profile` call dispatches to the matching error arm on each
+// invocation. The success path constructs a UserProfile; failures surface
+// the user-defined ValidationError the refinement types' `else { ... }`
+// clauses produce. The Err arm formats via `${err}` rather than
+// destructuring per variant — the Go emitter doesn't yet lower nested
+// enum-variant matches inside Result, and the binary Ok/Err shape works
+// on both back ends.
+fn report(label: String, result: Result<UserProfile, ValidationError>) !{io} -> Result<(), IoError> {
+    match result {
+        Ok(p)  => println("${label}: ok name=${p.name}")?,
+        Err(e) => println("${label}: ${e}")?,
+    }
+    Ok(())
+}
+
+fn main() !{io} -> Result<(), IoError> {
+    let friends: List<String> = List.singleton(value = "alice")
+
+    // Valid input — Age, Percent, and NonEmpty all hold.
+    report(label = "valid", result = make_profile(
+        name      = "ada",
+        age_raw   = 36,
+        score_raw = 87.5,
+        friends   = friends,
+    ))?
+
+    // Age out of range — `Age.try_from(200)` returns Err with the
+    // `else { ValidationError.AgeOutOfRange { got = self } }` arm.
+    report(label = "bad-age", result = make_profile(
+        name      = "ada",
+        age_raw   = 200,
+        score_raw = 87.5,
+        friends   = friends,
+    ))?
+
+    // Empty friends — `check_non_empty` returns Err(NoFriends). Demonstrates
+    // that hand-written validators compose with auto-generated ones at the
+    // same call site. The empty list is bound to a typed local so the Go
+    // emitter pins List.empty's element type from the let-target's
+    // annotation rather than the call-arg position.
+    let empty: List<String> = List.empty()
+    report(label = "no-friends", result = make_profile(
+        name      = "ada",
+        age_raw   = 36,
+        score_raw = 87.5,
+        friends   = empty,
+    ))?
+
+    Ok(())
 }

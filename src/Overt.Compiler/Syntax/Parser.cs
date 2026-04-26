@@ -652,11 +652,24 @@ public sealed class Parser
         var target = ParseTypeExpr();
 
         Expression? predicate = null;
+        Expression? elseExpr = null;
         var endPos = target.Span.End;
         if (Match(TokenKind.KeywordWhere))
         {
             predicate = ParseExpression();
             endPos = predicate.Span.End;
+
+            // Optional `else { expr }` after the predicate supplies a domain
+            // error for the auto-generated `Alias.try_from`. Single-expression
+            // body (no statements / no trailing semicolons): the user wraps a
+            // fn call when more logic is needed.
+            if (Match(TokenKind.KeywordElse))
+            {
+                Expect(TokenKind.LeftBrace, "else clause body");
+                elseExpr = ParseExpression();
+                var closing = Expect(TokenKind.RightBrace, "else clause body");
+                endPos = closing.Span.End;
+            }
         }
 
         return new TypeAliasDecl(
@@ -664,6 +677,7 @@ public sealed class Parser
             typeParams,
             target,
             predicate,
+            elseExpr,
             new SourceSpan(startPos, endPos));
     }
 

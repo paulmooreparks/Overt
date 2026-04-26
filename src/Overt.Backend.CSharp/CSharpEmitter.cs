@@ -402,16 +402,12 @@ public sealed class CSharpEmitter
         // refinement aliases lower to wrapper records instead; non-generic plain aliases
         // stay as using-directives so primitive aliases don't pay for a wrapping type.
         //
-        // Non-generic refinements lower to a using-alias today and so have no coercion
-        // boundary to check at; literal violations are caught by OV0311 at compile
-        // time, and non-literal violations aren't enforced at runtime yet.
-        if (t.Predicate is not null && t.TypeParameters.Length == 0)
-        {
-            _w.WriteLine(
-                $"// TODO: non-generic refinement `{t.Name}`: runtime check for "
-                + "non-literal values not yet wired (OV0311 covers literal boundaries)");
-        }
-
+        // Non-generic refinements lower to a using-alias and a sibling
+        // `__Refinements.{Alias}__Check` helper; the type checker flags
+        // boundary expressions and the emitter wraps them in the helper at
+        // call-arg / return / record-field positions. Literal violations
+        // are caught by OV0311 at compile time, and non-literal violations
+        // throw RefinementViolation through the helper at runtime.
         if (t.TypeParameters.Length > 0)
         {
             var typeParams = string.Join(", ", t.TypeParameters);
@@ -465,12 +461,17 @@ public sealed class CSharpEmitter
         _w.WriteLine(";");
     }
 
-    /// <summary>Emit a <c>__Refinements</c> static class holding a <c>{Alias}__Check</c>
-    /// method for each non-generic refinement alias that carries a predicate.
-    /// The method evaluates the predicate against its argument, throws
-    /// <see cref="Overt.Runtime.RefinementViolation"/> on failure, otherwise
-    /// returns the value untouched. Generic refinements don't participate —
-    /// they check inside their wrapper's implicit operator.</summary>
+    /// <summary>Emit a <c>__Refinements</c> static class holding two methods
+    /// per non-generic refinement alias that carries a predicate:
+    /// <c>{Alias}__Check</c> (the panic-on-failure boundary helper, used for
+    /// statically-undecidable boundaries the emitter wraps automatically) and
+    /// <c>{Alias}__TryFrom</c> (the value-error variant the user calls
+    /// explicitly via <c>{Alias}.try_from(raw)</c>). The TryFrom helper
+    /// returns <c>Result&lt;Inner, ErrType&gt;</c> where ErrType is either
+    /// the inferred type of the alias's <c>else { ... }</c> arm or
+    /// <see cref="Overt.Runtime.RefinementError"/> when no else-arm is
+    /// declared. Generic refinements don't participate in either — they
+    /// check inside their wrapper's implicit operator.</summary>
     private void EmitRefinementChecks(ModuleDecl module)
     {
         var refinedAliases = module.Declarations
@@ -487,6 +488,8 @@ public sealed class CSharpEmitter
             {
                 var innerType = CSharpTypeDisplay(LowerType(t.Target));
                 var predText = FormatPredicateText(t.Predicate!);
+
+                // {Alias}__Check: panic-on-failure boundary helper.
                 _w.WriteLine($"public static {innerType} {t.Name}__Check({innerType} self)");
                 _w.WriteLine("{");
                 using (_w.Indent())
@@ -505,10 +508,69 @@ public sealed class CSharpEmitter
                     _w.WriteLine("return self;");
                 }
                 _w.WriteLine("}");
+
+                // {Alias}__TryFrom: value-error variant called explicitly via
+                // `{Alias}.try_from(raw)`. Either constructs the user's
+                // else-arm expression or a generic RefinementError record on
+                // predicate failure.
+                EmitRefinementTryFrom(t, innerType, predText);
             }
         }
         _w.WriteLine("}");
         _w.WriteLine();
+    }
+
+    /// <summary>Emit the <c>{Alias}__TryFrom</c> static method body. The
+    /// return type is <c>Result&lt;Inner, ErrType&gt;</c> where ErrType is
+    /// inferred from the alias's else-arm if present, or the runtime's
+    /// <c>RefinementError</c> record fallback otherwise.</summary>
+    private void EmitRefinementTryFrom(TypeAliasDecl t, string innerType, string predText)
+    {
+        string errTypeDisplay;
+        if (t.ElseExpr is { } elseExpr
+            && _types?.ExpressionTypes is { } expr
+            && expr.TryGetValue(elseExpr.Span, out var inferred))
+        {
+            errTypeDisplay = CSharpTypeDisplay(inferred);
+        }
+        else
+        {
+            errTypeDisplay = "global::Overt.Runtime.RefinementError";
+        }
+
+        var resultType = $"global::Overt.Runtime.Result<{innerType}, {errTypeDisplay}>";
+        _w.WriteLine();
+        _w.WriteLine($"public static {resultType} {t.Name}__TryFrom({innerType} self)");
+        _w.WriteLine("{");
+        using (_w.Indent())
+        {
+            _w.Write("if (");
+            EmitExpressionBody(t.Predicate!);
+            _w.WriteLine(")");
+            _w.WriteLine("{");
+            using (_w.Indent())
+            {
+                // Prelude.Ok / Err are in scope via `using static`; the
+                // _OkMarker / _ErrMarker implicit operator on Result<T,E>
+                // does the construction so call sites don't have to spell
+                // out the generic args.
+                _w.WriteLine("return Ok(self);");
+            }
+            _w.WriteLine("}");
+            _w.Write("return Err(");
+            if (t.ElseExpr is { } eExpr)
+            {
+                EmitExpressionBody(eExpr);
+            }
+            else
+            {
+                _w.Write(
+                    $"new global::Overt.Runtime.RefinementError("
+                    + $"\"{t.Name}\", \"{EscapeCsharpString(predText)}\", self)");
+            }
+            _w.WriteLine(");");
+        }
+        _w.WriteLine("}");
     }
 
     /// <summary>Render a refinement predicate as its Overt source spelling for
@@ -1262,7 +1324,14 @@ public sealed class CSharpEmitter
                     }
                     EmitPatternForBinding(ls.Target);
                     _w.Write(" = ");
-                    EmitExpression(ls.Initializer);
+                    // Thread the let-target type as the initializer's
+                    // expected-type so target-typed inference helpers
+                    // (`List.empty()` → `List.empty<T>()`,
+                    // `Ok(x)`/`Err(e)` markers, etc.) pick up T from
+                    // the declared shape rather than the surrounding
+                    // call-arg or nothing.
+                    var letExpected = ls.Type is not null ? LowerType(ls.Type) : null;
+                    WithExpected(letExpected, () => EmitExpression(ls.Initializer));
                     _w.WriteLine(";");
                 }
                 break;
@@ -2449,6 +2518,22 @@ public sealed class CSharpEmitter
         // but whose type is decidable from the expected context: `List.empty()` →
         // `List.empty<T>()`, `None()` → `None<T>()`.
         if (TryEmitInferenceHelper(c)) return;
+
+        // Refinement-alias try_from: `Age.try_from(raw)` lowers to
+        // `__Refinements.Age__TryFrom(raw)`. The type checker recorded the
+        // span in RefinementTryFromCalls; the emit just rewrites the head.
+        if (c.Callee is FieldAccessExpr tryFromFa
+            && _types?.RefinementTryFromCalls.TryGetValue(tryFromFa.Span, out var tryFromAlias) == true)
+        {
+            _w.Write($"__Refinements.{tryFromAlias}__TryFrom(");
+            for (var i = 0; i < c.Arguments.Length; i++)
+            {
+                if (i > 0) _w.Write(", ");
+                EmitExpression(c.Arguments[i].Value);
+            }
+            _w.Write(")");
+            return;
+        }
 
         // Method-call syntax: `s.method(args)` where the typer resolved
         // the FieldAccess to an aliased instance extern. Route the call

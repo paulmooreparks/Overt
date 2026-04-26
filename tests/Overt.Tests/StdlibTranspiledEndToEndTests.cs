@@ -907,6 +907,101 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_RefinementTryFrom_OkPath_ReturnsOkWithInnerValue()
+    {
+        // Auto-generated `Alias.try_from(raw) -> Result<Alias, ErrType>`.
+        // For a value inside the predicate range, the synthesized
+        // `__Refinements.Age__TryFrom` returns Ok(value) without invoking
+        // the user's else-arm. We test by returning the try_from result
+        // directly from main so the test harness sees IsOk=true and the
+        // unwrapped Age value (=42) on the Ok arm.
+        const string src = """
+            module ref_tryfrom_ok
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn main() -> Result<Age, RefinementError> {
+                Age.try_from(42)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "ref_tryfrom_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
+    public void Transpiled_RefinementTryFrom_NoElse_ErrPathReturnsRefinementError()
+    {
+        // Without an else-arm, the synthesized try_from constructs a
+        // generic RefinementError record on predicate failure. The Err
+        // arm carries the alias name, predicate text, and offending value
+        // for telemetry / logging.
+        const string src = """
+            module ref_tryfrom_err
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn main() -> Result<Age, RefinementError> {
+                Age.try_from(999)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "ref_tryfrom_err");
+        Assert.NotNull(result);
+        // Outer Result is Err — predicate fails, RefinementError carries the
+        // alias name, predicate text, and offender.
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var errProp = result.GetType().GetProperty("Error")
+            ?? result.GetType().GetField("Error")?.DeclaringType?.GetProperty("Error");
+        // ResultErr exposes Error; use reflection to dig in.
+        var asResultErr = result;
+        var errorValue = asResultErr.GetType().GetProperty("Error")!.GetValue(asResultErr);
+        Assert.NotNull(errorValue);
+        var aliasName = errorValue!.GetType().GetProperty("alias_name")!.GetValue(errorValue) as string;
+        Assert.Equal("Age", aliasName);
+    }
+
+    [Fact]
+    public void Transpiled_RefinementTryFrom_WithElseArm_ReturnsDomainError()
+    {
+        // The else-arm picks the domain error variant. Predicate failure
+        // constructs the user's `BadInput.OutOfRange { got = self }` variant
+        // with `self` bound to the offending input. Verifies the emitter
+        // lowers the else-arm with `self` substitution and that the
+        // inferred error type drives the Result's E parameter.
+        const string src = """
+            module ref_tryfrom_else
+
+            @derive(Debug)
+            enum BadInput {
+                OutOfRange { got: Int },
+            }
+
+            type Age = Int where 0 <= self && self <= 150 else {
+                BadInput.OutOfRange { got = self }
+            }
+
+            fn main() -> Result<Age, BadInput> {
+                Age.try_from(999)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "ref_tryfrom_else");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var errorValue = result.GetType().GetProperty("Error")!.GetValue(result);
+        Assert.NotNull(errorValue);
+        // Variant-as-record: the BadInput_OutOfRange struct carries `got = 999`.
+        Assert.Equal("BadInput_OutOfRange", errorValue!.GetType().Name);
+        var got = errorValue.GetType().GetProperty("got")!.GetValue(errorValue);
+        Assert.Equal(999, got);
+    }
+
+    [Fact]
     public void Transpiled_GenericRefinement_SatisfiedPredicate_Passes()
     {
         // Counterpart: a non-empty list passes the predicate and the wrapper

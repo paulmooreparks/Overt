@@ -38,6 +38,21 @@ public sealed class TypeChecker
     // `{Alias}__Check(...)`.
     private readonly Dictionary<SourceSpan, string> _refinementBoundaries = new();
 
+    // Auto-generated `Alias.try_from` signatures, keyed by alias name. Populated
+    // when AnnotateDeclaration walks a TypeAliasDecl with a predicate. Generic
+    // refinements skip this map for now — their try_from signature would need
+    // type-parameter threading the emitter doesn't yet do for synthesized fns.
+    // The map drives both InferFieldAccess (to type-check `Alias.try_from`
+    // expressions) and the per-call-site resolution dictionary below.
+    private readonly Dictionary<string, FunctionTypeRef> _refinementTryFromSignatures = new();
+
+    // FieldAccess spans that resolve to an auto-generated `Alias.try_from`,
+    // keyed to the alias name. Emitters consult this to lower the call as
+    // `__Refinement_{Alias}__TryFrom(...)` (Go) or
+    // `__Refinements.{Alias}__TryFrom(...)` (C#) instead of treating it as a
+    // regular field access.
+    private readonly Dictionary<SourceSpan, string> _refinementTryFromCalls = new();
+
     /// <summary>
     /// Call spans whose arity and argument types should NOT be checked — the call
     /// appears as the right-hand side of a pipe (<c>x |&gt; f(a)</c>) or pipe-propagate
@@ -181,7 +196,8 @@ public sealed class TypeChecker
             checker._expressionTypes.ToImmutableDictionary(),
             checker._diagnostics.ToImmutableArray(),
             checker._refinementBoundaries.ToImmutableDictionary(),
-            checker._methodCallResolutions.ToImmutableDictionary());
+            checker._methodCallResolutions.ToImmutableDictionary(),
+            checker._refinementTryFromCalls.ToImmutableDictionary());
     }
 
     // -------------------------------------------------------------- module
@@ -388,11 +404,65 @@ public sealed class TypeChecker
                 _currentReturnType = null;
                 break;
             case TypeAliasDecl t:
-                if (t.Predicate is { } pred) AnnotateExpression(pred);
+                AnnotateTypeAliasDecl(t);
                 break;
                 // ExternDecl, RecordDecl, EnumDecl have no bodies to annotate.
         }
         _currentTypeParams = new HashSet<string>();
+    }
+
+    /// <summary>
+    /// Annotate the predicate and optional else-arm of a refinement alias,
+    /// then synthesize the alias's <c>try_from</c> signature so call sites
+    /// like <c>Age.try_from(raw)</c> type-check.
+    ///
+    /// Both predicate and else-arm see <c>self</c> bound to the alias's
+    /// inner type (the <see cref="TypeAliasDecl.Target"/>). The else-arm's
+    /// inferred type becomes the <c>E</c> in <c>Result&lt;Alias, E&gt;</c>;
+    /// when no else-arm is present, the synthesized signature uses
+    /// <see cref="RefinementError"/> as the fallback.
+    ///
+    /// Generic aliases (<c>type NonEmpty&lt;T&gt; = ...</c>) skip
+    /// signature synthesis: their <c>try_from</c> would need type-parameter
+    /// threading the emitter doesn't yet handle for synthesized functions.
+    /// Hand-written validators remain the path for those today.
+    /// </summary>
+    private void AnnotateTypeAliasDecl(TypeAliasDecl t)
+    {
+        if (t.Predicate is null) return;
+
+        var innerType = LowerType(t.Target);
+
+        // `self` is the synthetic predicate-binding the resolver added at
+        // the alias span. Register its type so identifier lookups inside
+        // the predicate and else-arm flow naturally.
+        var selfSymbol = new Symbol(SymbolKind.PatternBinding, "self", t.Span);
+        _symbolTypes[selfSymbol] = innerType;
+
+        AnnotateExpression(t.Predicate);
+
+        TypeRef errorType;
+        if (t.ElseExpr is { } elseExpr)
+        {
+            errorType = AnnotateExpression(elseExpr);
+        }
+        else
+        {
+            errorType = new NamedTypeRef("RefinementError", ImmutableArray<TypeRef>.Empty);
+        }
+
+        // Generic refinement aliases skip auto-gen for now (see XML doc
+        // above). The hand-written validator pattern still works.
+        if (t.TypeParameters.Length > 0) return;
+
+        var aliasType = new NamedTypeRef(t.Name, ImmutableArray<TypeRef>.Empty);
+        var resultType = new NamedTypeRef("Result",
+            ImmutableArray.Create<TypeRef>(aliasType, errorType));
+        var tryFrom = new FunctionTypeRef(
+            ImmutableArray.Create<TypeRef>(innerType),
+            resultType,
+            ImmutableArray<string>.Empty);
+        _refinementTryFromSignatures[t.Name] = tryFrom;
     }
 
     /// <summary>
@@ -539,6 +609,22 @@ public sealed class TypeChecker
         {
             AnnotateExpression(fa.Target); // still walk the target for nested annotation
             return resolvedType;
+        }
+
+        // Refinement-alias auto-gen: `Age.try_from(...)`. The target is a bare
+        // identifier resolving to a TypeAlias symbol whose decl carries a
+        // predicate; the field name is `try_from`. Look up the synthesized
+        // signature populated by AnnotateTypeAliasDecl, record this span as a
+        // refinement try_from call so the emitters can route it, and return
+        // the function type so the surrounding CallExpr type-checks.
+        if (fa.Target is IdentifierExpr aliasIdent
+            && fa.FieldName == "try_from"
+            && _resolution.Resolutions.TryGetValue(aliasIdent.Span, out var aliasSym)
+            && aliasSym.Kind == SymbolKind.TypeAlias
+            && _refinementTryFromSignatures.TryGetValue(aliasSym.Name, out var tryFromType))
+        {
+            _refinementTryFromCalls[fa.Span] = aliasSym.Name;
+            return tryFromType;
         }
 
         var targetType = AnnotateExpression(fa.Target);
@@ -1867,8 +1953,20 @@ public sealed record TypeCheckResult(
     ImmutableDictionary<SourceSpan, TypeRef> ExpressionTypes,
     ImmutableArray<Diagnostic> Diagnostics,
     ImmutableDictionary<SourceSpan, string>? RefinementBoundaries = null,
-    ImmutableDictionary<SourceSpan, MethodCallResolution>? MethodCallResolutions = null)
+    ImmutableDictionary<SourceSpan, MethodCallResolution>? MethodCallResolutions = null,
+    ImmutableDictionary<SourceSpan, string>? RefinementTryFromCalls = null)
 {
+    /// <summary>
+    /// FieldAccess spans that resolve to an auto-generated <c>Alias.try_from</c>,
+    /// keyed to the alias name. Emitters consult this to lower the call as
+    /// <c>__Refinement_{Alias}__TryFrom(...)</c> (Go) or
+    /// <c>__Refinements.{Alias}__TryFrom(...)</c> (C#) instead of treating it
+    /// as a regular field-access-then-call pair.
+    /// </summary>
+    public ImmutableDictionary<SourceSpan, string> RefinementTryFromCalls { get; init; } =
+        RefinementTryFromCalls
+        ?? ImmutableDictionary<SourceSpan, string>.Empty;
+
     /// <summary>
     /// Per-FieldAccess resolutions for method-call-syntax invocations
     /// (`receiver.method(args)`). Keyed by the FieldAccess span; values

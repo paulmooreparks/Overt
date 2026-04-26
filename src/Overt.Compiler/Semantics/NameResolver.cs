@@ -319,6 +319,14 @@ public sealed class NameResolver
             var predScope = new Scope(aliasScope);
             predScope.Define(new Symbol(SymbolKind.PatternBinding, "self", t.Span));
             ResolveExpression(pred, predScope);
+
+            // The optional else-arm shares the predicate's `self` binding. The
+            // expression evaluates to a domain error value handed back from
+            // the auto-generated `Alias.try_from` when the predicate fails.
+            if (t.ElseExpr is { } elseExpr)
+            {
+                ResolveExpression(elseExpr, predScope);
+            }
         }
     }
 
