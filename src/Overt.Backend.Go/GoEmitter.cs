@@ -439,7 +439,23 @@ public static class GoEmitter
                 return;
             }
 
-            // Body shape #2: direct passthrough. For Unit-returning
+            // Body shape #2: Option<T> return → wrap the Go-side
+            // (typically nillable) value into Some / None based on
+            // a nil-check. The lowering is `if __r == nil { return
+            // None } else { return Some(__r) }`. Valid for pointer,
+            // interface, slice, map, and channel returns; invalid
+            // for value-typed T (Go's nil isn't comparable to int,
+            // string, etc.) — those surface as a clear go-build
+            // error if the user mismatches the declaration.
+            // See docs/ffi.md §6.
+            if (TryGetOptionTypeArg(ext.ReturnType) is { } optionInner)
+            {
+                EmitOptionWrappedShimBody(ext, selector, member, optionInner, isInstance);
+                _sb.AppendLine("}");
+                return;
+            }
+
+            // Body shape #3: direct passthrough. For Unit-returning
             // shims the call is a statement; otherwise prefix with
             // `return`. Used when the Overt return is a primitive,
             // an opaque host type, or a non-Result composite.
@@ -505,6 +521,40 @@ public static class GoEmitter
                 return nt.TypeArguments[0];
             }
             return null;
+        }
+
+        /// <summary>
+        /// If <paramref name="returnType"/> is `Option&lt;T&gt;`, return
+        /// T. Used to detect the nil-check-wrapping shim body shape.
+        /// </summary>
+        private static TypeExpr? TryGetOptionTypeArg(TypeExpr? returnType)
+        {
+            if (returnType is NamedType { Name: "Option" } nt
+                && nt.TypeArguments.Length == 1)
+            {
+                return nt.TypeArguments[0];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Emit the shim body for an extern "go" fn whose Overt return
+        /// type is `Option&lt;T&gt;`. The Go-side bound function is
+        /// assumed to return a nillable T (typically `*T` for some
+        /// struct, or an interface, slice, map, channel). The shim
+        /// nil-checks the result and wraps into Some / None.
+        /// </summary>
+        private void EmitOptionWrappedShimBody(
+            ExternDecl ext, string? selector, string member, TypeExpr innerType, bool isInstance)
+        {
+            var innerGoType = LowerType(innerType);
+            _sb.Append("\t__r := ");
+            EmitShimCall(ext, selector, member, isInstance);
+            _sb.AppendLine();
+            _sb.AppendLine("\tif __r == nil {");
+            _sb.AppendLine($"\t\treturn overt.None[{innerGoType}]()");
+            _sb.AppendLine("\t}");
+            _sb.AppendLine($"\treturn overt.Some[{innerGoType}](__r)");
         }
 
         /// <summary>

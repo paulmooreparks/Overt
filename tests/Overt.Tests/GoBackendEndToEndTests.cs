@@ -117,6 +117,56 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_OptionWrap_NilPointer()
+    {
+        // Exercises the Option<T> nil-pointer wrap. The Go-side
+        // helper returns either `*Box{42}` for "found" or `nil` for
+        // "missing". The shim nil-checks the return and emits
+        // `overt.Some(...)` / `overt.None[...]()` accordingly.
+        // Overt-side match-on-Option (handled by the existing
+        // EmitMatchStdlibShape path) routes each arm.
+        AssertOvertProgramPrints(
+            """
+            module option_wrap_e2e
+
+            extern "go" type Box binds "*Box"
+            extern "go" fn lookup(name: String) -> Option<Box> binds "Lookup" from ""
+            extern "go" instance fn value(self: Box) -> Int binds "Value"
+
+            fn main() !{io} -> Result<(), IoError> {
+                match lookup(name = "found") {
+                    Some(b) => println("got=${b.value()}")?,
+                    None    => println("missing")?,
+                }
+                match lookup(name = "missing") {
+                    Some(b) => println("got=${b.value()}")?,
+                    None    => println("missing")?,
+                }
+                Ok(())
+            }
+            """,
+            expectedStdout: "got=42\nmissing\n",
+            extraGoSource: """
+                package main
+
+                type Box struct {
+                    n int
+                }
+
+                func (b *Box) Value() int {
+                    return b.n
+                }
+
+                func Lookup(name string) *Box {
+                    if name == "found" {
+                        return &Box{n: 42}
+                    }
+                    return nil
+                }
+                """);
+    }
+
+    [Fact]
     public void Transpiled_ExternGo_InstanceFn()
     {
         // Exercises `extern "go" instance fn`. The first Overt
