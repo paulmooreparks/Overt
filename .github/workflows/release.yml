@@ -129,6 +129,25 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Dogfood: validate the tag against `ovsemver`, the SemVer Kit
+      # CLI authored end-to-end in Overt. The bash regex in
+      # compute-version pins the channel-suffix shape; ovsemver
+      # double-checks the underlying SemVer 2.0 grammar of `${TAG#v}`.
+      # If the two disagree, the release aborts before pack — either
+      # the tag is malformed in a way the regex missed, or SemVer Kit
+      # has regressed against its own spec.
+      - name: Validate tag with ovsemver
+        env:
+          TAG: ${{ needs.compute-version.outputs.tag }}
+        run: |
+          set -e
+          dotnet tool install -g ParksComputing.SemVer.Cli --version "0.1.0-*" --prerelease
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          NUGET_VERSION="${TAG#v}"
+          echo "Validating $NUGET_VERSION against ovsemver..."
+          ovsemver parse "$NUGET_VERSION"
+          echo "ovsemver: tag is a valid SemVer 2.0 string"
+
       - name: Derive NuGet version and FileVersion
         id: ver
         run: |
