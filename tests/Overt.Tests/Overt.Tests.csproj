@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Overt.Compiler\Overt.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Overt.Backend.CSharp\Overt.Backend.CSharp.csproj" />
+    <ProjectReference Include="..\..\src\Overt.Backend.Go\Overt.Backend.Go.csproj" />
     <ProjectReference Include="..\..\src\Overt.Build\Overt.Build.csproj" />
     <ProjectReference Include="..\..\src\Overt.Cli\Overt.Cli.csproj" />
     <ProjectReference Include="..\Overt.EndToEnd\Overt.EndToEnd.csproj" />

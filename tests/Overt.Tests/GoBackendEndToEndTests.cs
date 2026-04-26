@@ -1,0 +1,178 @@
+using System.Diagnostics;
+using Overt.Backend.Go;
+using Overt.Compiler.Syntax;
+using Xunit;
+
+namespace Overt.Tests;
+
+/// <summary>
+/// End-to-end run for the Go back end. Lexes / parses a small Overt module,
+/// emits Go source via <see cref="GoEmitter"/>, drops it next to the in-repo
+/// runtime under <c>runtime/go</c> via a temp Go module, then invokes
+/// <c>go build</c> + the resulting binary and asserts on stdout.
+///
+/// The test is skipped (via <see cref="SkippableFactAttribute"/>-style guard)
+/// when the <c>go</c> toolchain is not on PATH, so a contributor without Go
+/// installed sees a passing suite. CI runners that target the Go back end
+/// install Go explicitly and this skip path is inert.
+///
+/// Scope: hello-world. As the GoEmitter grows additional features, parallel
+/// tests should go here, each one a tight Overt → Go → run loop. The
+/// existing C#-side tests (<c>StdlibTranspiledEndToEndTests</c>) are the
+/// reference for which Overt features are expected to lower correctly.
+/// </summary>
+public class GoBackendEndToEndTests
+{
+    [Fact]
+    public void Transpiled_Hello_PrintsToStdout()
+    {
+        if (!IsGoOnPath())
+        {
+            // Go toolchain not present — silently pass. The intent is
+            // covered by the C# back end's e2e tests; this one is
+            // additive coverage for the Go target.
+            return;
+        }
+
+        const string src = """
+            module hello
+
+            fn main() !{io} -> Result<(), IoError> {
+                println("hello from Go")?
+                Ok(())
+            }
+            """;
+
+        var lex = Lexer.Lex(src);
+        var parse = Parser.Parse(lex.Tokens);
+        Assert.Empty(parse.Diagnostics);
+
+        var goSource = GoEmitter.Emit(parse.Module);
+
+        var workDir = Directory.CreateTempSubdirectory("overt-go-e2e-").FullName;
+        try
+        {
+            // Lay out a Go module that imports the in-repo runtime via a
+            // `replace` directive, so the test never depends on a published
+            // `overt-runtime` module on a registry.
+            var runtimePath = LocateRuntimePath();
+            File.WriteAllText(
+                Path.Combine(workDir, "go.mod"),
+                $$"""
+                module overt-app
+
+                go 1.21
+
+                require overt-runtime v0.0.0
+                replace overt-runtime => {{runtimePath.Replace("\\", "/")}}
+                """);
+            File.WriteAllText(Path.Combine(workDir, "main.go"), goSource);
+
+            // `go mod tidy` to populate go.sum (Go 1.21+ refuses to build
+            // without one even for a replace-only require).
+            RunGo(workDir, "mod", "tidy");
+
+            var binPath = Path.Combine(workDir, IsWindows() ? "app.exe" : "app");
+            RunGo(workDir, "build", "-o", binPath, ".");
+
+            var (stdout, stderr, exit) = RunBinary(binPath);
+            Assert.Equal(0, exit);
+            Assert.Equal("", stderr);
+            // Go's fmt.Fprintln always writes a single LF regardless of
+            // OS, while .NET's StreamReader on Windows leaves the LF
+            // unmodified (no CRLF translation when reading from a pipe).
+            Assert.Equal("hello from Go\n", stdout);
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
+    private static bool IsGoOnPath()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("go", "version")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return false;
+            p.WaitForExit(5_000);
+            return p.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsWindows()
+        => Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+    /// <summary>Walk up from the test bin directory to the repo root,
+    /// then down to <c>runtime/go</c>. The runtime is checked into the
+    /// repo so the test doesn't need a network round trip.</summary>
+    private static string LocateRuntimePath()
+    {
+        var here = new DirectoryInfo(AppContext.BaseDirectory);
+        while (here is not null && !File.Exists(Path.Combine(here.FullName, "Overt.sln")))
+        {
+            here = here.Parent;
+        }
+        if (here is null)
+        {
+            throw new InvalidOperationException(
+                "Could not locate Overt.sln walking up from " + AppContext.BaseDirectory);
+        }
+        var runtime = Path.Combine(here.FullName, "runtime", "go");
+        if (!Directory.Exists(runtime))
+        {
+            throw new InvalidOperationException(
+                "Go runtime directory not found at " + runtime);
+        }
+        return runtime;
+    }
+
+    private static void RunGo(string workDir, params string[] args)
+    {
+        var psi = new ProcessStartInfo("go")
+        {
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEnd();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        if (p.ExitCode != 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"`go {string.Join(" ", args)}` failed (exit {p.ExitCode})\n"
+                + $"stdout:\n{stdout}\n"
+                + $"stderr:\n{stderr}");
+        }
+    }
+
+    private static (string Stdout, string Stderr, int Exit) RunBinary(string path)
+    {
+        var psi = new ProcessStartInfo(path)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using var p = Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEnd();
+        var stderr = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        return (stdout, stderr, p.ExitCode);
+    }
+}

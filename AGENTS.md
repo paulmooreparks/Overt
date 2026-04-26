@@ -785,9 +785,11 @@ attributes (C# `using`-aliases can't carry them). Non-`@csharp` /
 non-`@doc` attributes on `fn` are rejected by **OV0157**; `@derive`
 applies only to records and enums.
 
-**`@go("...")` and other backends**: not yet implemented. The
-passthrough escape hatch is scoped per-target; when the Go backend
-comes online, its attribute vocabulary lives under its own prefix.
+**`@go("...")` and other back ends**: not yet implemented. The
+passthrough escape hatch is scoped per-target; the Go back end
+(`Overt.Backend.Go`) is a hello-world-grade scaffold today, with
+no `@go` attribute surface yet. When it grows, its vocabulary
+lives under its own prefix.
 
 ---
 
