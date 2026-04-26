@@ -59,6 +59,13 @@ public static class Stdlib
         b["String.code_at"] = ImmutableArray.Create("s", "index");
         b["String.chars"] = ImmutableArray.Create("s");
         b["String.code_points"] = ImmutableArray.Create("s");
+        b["String.starts_with"] = ImmutableArray.Create("s", "prefix");
+        b["String.ends_with"] = ImmutableArray.Create("s", "suffix");
+        b["String.contains"] = ImmutableArray.Create("s", "needle");
+        b["Option.unwrap_or"] = ImmutableArray.Create("opt", "default_value");
+        b["Option.unwrap_or_else"] = ImmutableArray.Create("opt", "default_fn");
+        b["Result.unwrap_or"] = ImmutableArray.Create("result", "default_value");
+        b["Result.unwrap_or_else"] = ImmutableArray.Create("result", "default_fn");
         b["Int.range"] = ImmutableArray.Create("start", "end");
         b["List.at"] = ImmutableArray.Create("list", "index");
         b["all"] = ImmutableArray.Create("list", "predicate");
@@ -369,6 +376,88 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("List", PrimitiveType.Int)));
+
+        // String.starts_with(s: String, prefix: String) -> Bool
+        // True iff `s` begins with `prefix`. Empty prefix is true.
+        e.Add(Fn("String.starts_with",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.Bool));
+
+        // String.ends_with(s: String, suffix: String) -> Bool
+        // True iff `s` ends with `suffix`. Empty suffix is true.
+        e.Add(Fn("String.ends_with",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.Bool));
+
+        // String.contains(s: String, needle: String) -> Bool
+        // True iff `needle` appears anywhere in `s`. Empty needle is
+        // true (matches the .NET / Go convention; "every string contains
+        // the empty string").
+        e.Add(Fn("String.contains",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.Bool));
+
+        // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
+        // Returns the inner T on Some, otherwise the default. The
+        // default is evaluated eagerly; for a lazily-computed default
+        // use unwrap_or_else.
+        e.Add(Fn("Option.unwrap_or",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("Option", TV("T")),
+                TV("T"),
+            },
+            ret: TV("T")));
+
+        // Option.unwrap_or_else<T, E>(opt: Option<T>, default_fn: fn() !{E} -> T) !{E} -> T
+        // Lazy companion to unwrap_or. The default fn runs only when
+        // opt is None; its effect row is propagated.
+        e.Add(Fn("Option.unwrap_or_else",
+            typeParams: new[] { "T", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("Option", TV("T")),
+                new FunctionTypeRef(
+                    ImmutableArray<TypeRef>.Empty,
+                    TV("T"),
+                    ImmutableArray.Create("E")),
+            },
+            ret: TV("T"),
+            effects: new[] { "E" }));
+
+        // Result.unwrap_or<T, E>(result: Result<T, E>, default_value: T) -> T
+        // Returns the inner T on Ok, otherwise the default. As with
+        // Option.unwrap_or the default is evaluated eagerly.
+        e.Add(Fn("Result.unwrap_or",
+            typeParams: new[] { "T", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("Result", TV("T"), TV("E")),
+                TV("T"),
+            },
+            ret: TV("T")));
+
+        // Result.unwrap_or_else<T, E, F>(result: Result<T, E>,
+        //                                default_fn: fn(E) !{F} -> T) !{F} -> T
+        // Lazy companion. The default fn receives the Err value so it
+        // can react to the failure shape (translate, log, retry, etc.)
+        // before producing the fallback. Its effect row is propagated.
+        e.Add(Fn("Result.unwrap_or_else",
+            typeParams: new[] { "T", "E", "F" },
+            parameters: new TypeRef[]
+            {
+                Generic("Result", TV("T"), TV("E")),
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(TV("E")),
+                    TV("T"),
+                    ImmutableArray.Create("F")),
+            },
+            ret: TV("T"),
+            effects: new[] { "F" }));
 
         // Int.range(start: Int, end: Int) -> List<Int>
         // Half-open integer range [start, end). Useful with `for i in

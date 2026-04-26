@@ -466,6 +466,23 @@ for i in Int.range(start = 0, end = size(xs)) {
 let only_evens: Bool = all(list = xs, predicate = is_even)
 let has_zero: Bool = any(list = xs, predicate = is_zero)
 
+// String predicates — Bool returns, no allocation:
+let is_url: Bool = url.starts_with(prefix = "https://")
+let trailing: Bool = path.ends_with(suffix = "/")
+let mentions: Bool = log_line.contains(needle = "ERROR")
+
+// Option / Result fallbacks — eager (`unwrap_or`) and lazy (`unwrap_or_else`).
+// The lazy fn runs only on None / Err; for Result, it receives the Err value
+// so the fallback can react to the failure shape. Overt has no inline-lambda
+// syntax, so the lazy callbacks are named fns:
+fn make_default() -> Int { 0 }
+fn explain(e: IoError) -> Int { 0 }
+
+let count: Int   = maybe_count.unwrap_or(default_value = 0)
+let lazy:  Int   = maybe_count.unwrap_or_else(default_fn = make_default)
+let read:  Int   = read_int(...).unwrap_or(default_value = 0)
+let smart: Int   = read_int(...).unwrap_or_else(default_fn = explain)
+
 // Infinite loop; exits via break
 let mut n = 0
 loop {

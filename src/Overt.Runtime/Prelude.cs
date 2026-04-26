@@ -98,6 +98,45 @@ public sealed record OptionNone<T> : Option<T>
 public readonly record struct _SomeMarker<T>(T Value);
 public readonly record struct _NoneMarker;
 
+/// <summary>
+/// Non-generic namespace companion for <c>Option.X</c> module-qualified
+/// calls. Distinct from <c>Option&lt;T&gt;</c> (different arity), so the
+/// two coexist without naming conflict. Method-call syntax routes
+/// <c>opt.unwrap_or(d)</c> through here.
+/// </summary>
+public static class Option
+{
+    /// <summary>Returns the inner T on Some, otherwise <paramref name="default_value"/>.
+    /// The default is evaluated eagerly; pair with <see cref="unwrap_or_else"/>
+    /// when the default is expensive or has effects.</summary>
+    public static T unwrap_or<T>(Option<T> opt, T default_value)
+        => opt is OptionSome<T> some ? some.Value : default_value;
+
+    /// <summary>Lazy companion to <see cref="unwrap_or"/>. The default fn
+    /// runs only when <paramref name="opt"/> is None.</summary>
+    public static T unwrap_or_else<T>(Option<T> opt, Func<T> default_fn)
+        => opt is OptionSome<T> some ? some.Value : default_fn();
+}
+
+/// <summary>
+/// Non-generic namespace companion for <c>Result.X</c> module-qualified
+/// calls. Pairs with <c>Result&lt;T, E&gt;</c> the same way <see cref="Option"/>
+/// pairs with <c>Option&lt;T&gt;</c>.
+/// </summary>
+public static class Result
+{
+    /// <summary>Returns the inner T on Ok, otherwise <paramref name="default_value"/>.
+    /// Default evaluated eagerly.</summary>
+    public static T unwrap_or<T, E>(Result<T, E> result, T default_value)
+        => result is ResultOk<T, E> ok ? ok.Value : default_value;
+
+    /// <summary>Lazy companion. The default fn receives the Err value so it can
+    /// translate, log, or otherwise react to the failure shape before producing
+    /// the fallback.</summary>
+    public static T unwrap_or_else<T, E>(Result<T, E> result, Func<E, T> default_fn)
+        => result is ResultOk<T, E> ok ? ok.Value : default_fn(((ResultErr<T, E>)result).Error);
+}
+
 // ---------------------------------------------------------------- Error types
 
 /// <summary>Minimal stand-in for Overt's <c>IoError</c>. Will grow to carry the
@@ -327,6 +366,14 @@ public static class String
         }
         return new List<int>(builder.MoveToImmutable());
     }
+
+    // Three predicate-shape helpers built on .NET's String methods.
+    // Empty argument is true in every case (matches StringComparison.Ordinal
+    // semantics); callers that want "non-empty prefix" can guard with
+    // `length(prefix) > 0 && s.starts_with(prefix)`.
+    public static bool starts_with(string s, string prefix) => s.StartsWith(prefix, StringComparison.Ordinal);
+    public static bool ends_with(string s, string suffix) => s.EndsWith(suffix, StringComparison.Ordinal);
+    public static bool contains(string s, string needle) => s.Contains(needle, StringComparison.Ordinal);
 }
 
 /// <summary>

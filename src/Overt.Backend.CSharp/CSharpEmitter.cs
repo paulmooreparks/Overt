@@ -1244,7 +1244,22 @@ public sealed class CSharpEmitter
                 }
                 else
                 {
-                    _w.Write("var ");
+                    // Prefer the source's explicit type annotation over `var`
+                    // when present. Markers like `Err(...)` / `Ok(...)` /
+                    // `Some(...)` / `None` only target-type into Result /
+                    // Option through an explicit declared type at the
+                    // initializer site; `var` would freeze them as the
+                    // marker struct, breaking generic-method inference at
+                    // every later use site (e.g. `result.unwrap_or(...)`).
+                    if (ls.Type is not null)
+                    {
+                        EmitType(ls.Type);
+                        _w.Write(" ");
+                    }
+                    else
+                    {
+                        _w.Write("var ");
+                    }
                     EmitPatternForBinding(ls.Target);
                     _w.Write(" = ");
                     EmitExpression(ls.Initializer);

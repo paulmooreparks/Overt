@@ -580,6 +580,76 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_StringPredicates_StartsEndsContains()
+    {
+        // Exercises the three predicate-shape String helpers, both as
+        // bare `String.X(...)` calls and via method-call syntax.
+        const string src = """
+            module strpred_e2e
+
+            fn main() !{io} -> Result<(), IoError> {
+                let s: String = "hello world"
+                println(if s.starts_with(prefix = "hello") { "starts: yes" } else { "starts: no" })?
+                println(if s.ends_with(suffix = "world") { "ends: yes" } else { "ends: no" })?
+                println(if s.contains(needle = "lo wo") { "contains: yes" } else { "contains: no" })?
+                println(if s.starts_with(prefix = "") { "empty-prefix: yes" } else { "empty-prefix: no" })?
+                println(if s.contains(needle = "xyz") { "missing: yes" } else { "missing: no" })?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "strpred_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("starts: yes", stdout);
+        Assert.Contains("ends: yes", stdout);
+        Assert.Contains("contains: yes", stdout);
+        Assert.Contains("empty-prefix: yes", stdout);
+        Assert.Contains("missing: no", stdout);
+    }
+
+    [Fact]
+    public void Transpiled_UnwrapOr_OnOptionAndResult()
+    {
+        // Exercises Option.unwrap_or, Option.unwrap_or_else,
+        // Result.unwrap_or, Result.unwrap_or_else (the latter
+        // receives the Err value so the default can react).
+        // Overt has no inline-lambda syntax, so the lazy companions
+        // take named fns; that's the canonical idiom across the
+        // existing fold/map/filter callsites too.
+        const string src = """
+            module unwrap_e2e
+
+            fn make_seven() -> Int { 7 }
+            fn explain(e: IoError) -> Int { 11 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let some_v: Option<Int> = Some(42)
+                let none_v: Option<Int> = None
+                let s_default: Int = some_v.unwrap_or(default_value = 0)
+                let n_default: Int = none_v.unwrap_or(default_value = -1)
+                let n_lazy: Int = none_v.unwrap_or_else(default_fn = make_seven)
+
+                let ok_v: Result<Int, IoError> = Ok(99)
+                let err_v: Result<Int, IoError> = Err(IoError { narrative = "bad" })
+                let r_ok: Int = ok_v.unwrap_or(default_value = 0)
+                let r_err: Int = err_v.unwrap_or(default_value = 5)
+                let r_lazy: Int = err_v.unwrap_or_else(default_fn = explain)
+
+                println("some=${s_default} none=${n_default} lazy=${n_lazy}")?
+                println("ok=${r_ok} err=${r_err} rlazy=${r_lazy}")?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "unwrap_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("some=42 none=-1 lazy=7", stdout);
+        Assert.Contains("ok=99 err=5 rlazy=11", stdout);
+    }
+
+    [Fact]
     public void Transpiled_AllAndAny_QuantifyOverList()
     {
         // Exercises the `all` / `any` predicate combinators. Verifies
