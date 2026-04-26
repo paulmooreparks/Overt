@@ -442,10 +442,29 @@ the `None` stdlib symbol).
 ## 8. Control flow
 
 ```overt
-// Collection iteration; must be a List<T>
-for each x in xs {
+// Collection iteration; iterable must be a List<T>. The `each` keyword
+// is optional — `for x in xs` and `for each x in xs` parse identically.
+for x in xs {
     println("got ${x}")?
 }
+
+// Walk a string by character (List<String>) or by code unit (List<Int>):
+for c in "abc".chars() {
+    println("c=${c}")?
+}
+for code in "abc".code_points() {
+    println("code=${code}")?
+}
+
+// Index-walk via Int.range — half-open [start, end):
+for i in Int.range(start = 0, end = size(xs)) {
+    println("xs[${i}] = ${List.at(list = xs, index = i)}")?
+}
+
+// Predicate combinators — short-circuit, propagate the predicate's
+// effect row, vacuous all=true / vacuous any=false on empty lists:
+let only_evens: Bool = all(list = xs, predicate = is_even)
+let has_zero: Bool = any(list = xs, predicate = is_zero)
 
 // Infinite loop; exits via break
 let mut n = 0
@@ -461,7 +480,7 @@ while m < 10 {
 }
 ```
 
-`break`/`continue` outside a loop body fire **OV0312**. `for each` on a
+`break`/`continue` outside a loop body fire **OV0312**. `for` on a
 non-`List` iterable fires **OV0313**.
 
 ---

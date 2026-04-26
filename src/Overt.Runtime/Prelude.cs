@@ -288,6 +288,74 @@ public static class String
         }
         return s[index];
     }
+
+    // Each character of the input string as a single-character string.
+    // Returned as an Overt List<String> so callers can iterate with
+    // `for c in s.chars()` and pattern-match against literal strings.
+    // For pure ASCII / character-class work that just needs the code
+    // point as a number, prefer `code_points` to avoid the per-char
+    // string allocation.
+    public static List<string> chars(string s)
+    {
+        if (s.Length == 0)
+        {
+            return new List<string>(System.Collections.Immutable.ImmutableArray<string>.Empty);
+        }
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<string>(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            builder.Add(s[i].ToString());
+        }
+        return new List<string>(builder.MoveToImmutable());
+    }
+
+    // Each character's UTF-16 code unit as an Int, in order. The
+    // numeric companion to `chars()` — same iteration shape but
+    // avoids string boxing per character. Surrogate pairs surface as
+    // two ints (matching .NET semantics); SemVer-style ASCII work
+    // doesn't care, and Unicode-aware code can post-process.
+    public static List<int> code_points(string s)
+    {
+        if (s.Length == 0)
+        {
+            return new List<int>(System.Collections.Immutable.ImmutableArray<int>.Empty);
+        }
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<int>(s.Length);
+        for (int i = 0; i < s.Length; i++)
+        {
+            builder.Add(s[i]);
+        }
+        return new List<int>(builder.MoveToImmutable());
+    }
+}
+
+/// <summary>
+/// Companion class for <c>Int.X</c> module-qualified calls. Overt's
+/// <c>Int</c> primitive lowers to .NET's <see cref="int"/> (32-bit
+/// signed); this class collects integer-shaped helpers that don't fit
+/// as instance methods.
+/// </summary>
+public static class Int
+{
+    // Half-open integer range [start, end). Materialized eagerly as
+    // a List<Int> so callers can use it with `for i in Int.range(0, n)`
+    // without an iterator abstraction. For a closed range, pass `end + 1`.
+    // A `start >= end` argument yields the empty list (matches Python
+    // semantics, avoids a separate null/error channel).
+    public static List<int> range(int start, int end)
+    {
+        if (start >= end)
+        {
+            return new List<int>(System.Collections.Immutable.ImmutableArray<int>.Empty);
+        }
+        var n = end - start;
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<int>(n);
+        for (int i = start; i < end; i++)
+        {
+            builder.Add(i);
+        }
+        return new List<int>(builder.MoveToImmutable());
+    }
 }
 
 public sealed record Map<K, V>(System.Collections.Immutable.ImmutableDictionary<K, V> Items)
@@ -432,6 +500,29 @@ public static class Prelude
         var acc = seed;
         foreach (var item in list.Items) acc = step(acc, item);
         return acc;
+    }
+
+    // Universal / existential predicate combinators. Vacuous all on an
+    // empty list returns true (the universal-quantification convention);
+    // vacuous any returns false. Both short-circuit, so callers can pass
+    // expensive predicates without paying for the whole list when the
+    // answer is decidable from a prefix.
+    public static bool all<T>(List<T> list, Func<T, bool> predicate)
+    {
+        foreach (var item in list.Items)
+        {
+            if (!predicate(item)) return false;
+        }
+        return true;
+    }
+
+    public static bool any<T>(List<T> list, Func<T, bool> predicate)
+    {
+        foreach (var item in list.Items)
+        {
+            if (predicate(item)) return true;
+        }
+        return false;
     }
 
     // try_map: the sequential, pure cousin of par_map. Walks the list in order

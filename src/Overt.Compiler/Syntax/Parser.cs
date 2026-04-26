@@ -1662,11 +1662,20 @@ public sealed class Parser
 
     private ForEachExpr ParseForEachExpr()
     {
+        // Two equivalent surface forms: `for x in iter` and `for each x in iter`.
+        // The `each` form was the original spelling (reserved keyword to make
+        // the construct visually unambiguous). Bare `for x in` matches the
+        // mainstream syntax found in Rust/Python/Swift/Go and is the preferred
+        // form going forward; `for each` remains parseable so older sources
+        // and goldens still build.
         var startPos = Current.Span.Start;
-        Expect(TokenKind.KeywordFor, "for each");
-        Expect(TokenKind.KeywordEach, "for each (the `each` keyword is required — Overt has no bare `for` form)");
+        Expect(TokenKind.KeywordFor, "for");
+        if (Current.Kind == TokenKind.KeywordEach)
+        {
+            Advance();
+        }
         var binder = ParsePattern();
-        Expect(TokenKind.KeywordIn, "for each");
+        Expect(TokenKind.KeywordIn, "for x in <iterable>");
         var iterable = ParseExpressionRestricted();
         var body = ParseBlock();
         return new ForEachExpr(binder, iterable, body, new SourceSpan(startPos, body.Span.End));

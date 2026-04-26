@@ -550,6 +550,72 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_BareForLoop_OverCharsAndRange()
+    {
+        // Exercises the `for x in iter` form (without `each`), driven by
+        // String.chars() and Int.range(). Together these are what makes
+        // string-walking and index-walking ergonomic without recursion.
+        const string src = """
+            module forbare_e2e
+
+            fn main() !{io} -> Result<(), IoError> {
+                for c in "ab".chars() {
+                    println("c=${c}")?
+                }
+                for i in Int.range(start = 0, end = 3) {
+                    println("i=${i}")?
+                }
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "forbare_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("c=a", stdout);
+        Assert.Contains("c=b", stdout);
+        Assert.Contains("i=0", stdout);
+        Assert.Contains("i=2", stdout);
+        Assert.DoesNotContain("i=3", stdout);
+    }
+
+    [Fact]
+    public void Transpiled_AllAndAny_QuantifyOverList()
+    {
+        // Exercises the `all` / `any` predicate combinators. Verifies
+        // both the pass and fail branches and the empty-list edge cases
+        // (vacuous all = true, vacuous any = false).
+        const string src = """
+            module quant_e2e
+
+            fn even(n: Int) -> Bool { n - (n / 2) * 2 == 0 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let xs: List<Int> = Int.range(start = 0, end = 4)   // [0,1,2,3]
+                let evens: List<Int> = filter(list = xs, predicate = even)
+
+                println(if all(list = xs, predicate = even) { "all-mixed: true" } else { "all-mixed: false" })?
+                println(if all(list = evens, predicate = even) { "all-evens: true" } else { "all-evens: false" })?
+                println(if any(list = xs, predicate = even) { "any-mixed: true" } else { "any-mixed: false" })?
+
+                let empty: List<Int> = Int.range(start = 0, end = 0)
+                println(if all(list = empty, predicate = even) { "all-empty: true" } else { "all-empty: false" })?
+                println(if any(list = empty, predicate = even) { "any-empty: true" } else { "any-empty: false" })?
+                Ok(())
+            }
+            """;
+        var (result, stdout) = CompileAndRun(src, "quant_e2e");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Contains("all-mixed: false", stdout);
+        Assert.Contains("all-evens: true", stdout);
+        Assert.Contains("any-mixed: true", stdout);
+        Assert.Contains("all-empty: true", stdout);
+        Assert.Contains("any-empty: false", stdout);
+    }
+
+    [Fact]
     public void Transpiled_LiteralPatterns_MatchIntegerAndBool()
     {
         // Literal patterns on Int (including negative), with a `_` catch-all.

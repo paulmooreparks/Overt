@@ -57,7 +57,12 @@ public static class Stdlib
         b["String.split"] = ImmutableArray.Create("s", "sep");
         b["String.join"] = ImmutableArray.Create("list", "sep");
         b["String.code_at"] = ImmutableArray.Create("s", "index");
+        b["String.chars"] = ImmutableArray.Create("s");
+        b["String.code_points"] = ImmutableArray.Create("s");
+        b["Int.range"] = ImmutableArray.Create("start", "end");
         b["List.at"] = ImmutableArray.Create("list", "index");
+        b["all"] = ImmutableArray.Create("list", "predicate");
+        b["any"] = ImmutableArray.Create("list", "predicate");
         return b.ToImmutable();
     }
 
@@ -102,6 +107,7 @@ public static class Stdlib
         e.Add(Type("Trace")); // stdlib namespace shape
         e.Add(Type("Task"));  // async-boundary wrapper; see AGENTS.md §9
         e.Add(Type("String")); // namespace shape for String.split / String.join / etc.
+        e.Add(Type("Int"));    // namespace shape for Int.range / etc.
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -245,6 +251,41 @@ public static class Stdlib
             },
             ret: TV("U")));
 
+        // all<T, E>(list: List<T>, predicate: fn(T) !{E} -> Bool) !{E} -> Bool
+        // Universal quantifier. True iff predicate(item) holds for every
+        // element; vacuously true on the empty list. Short-circuits on the
+        // first false. The predicate's effect row is propagated.
+        e.Add(Fn("all",
+            typeParams: new[] { "T", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(TV("T")),
+                    PrimitiveType.Bool,
+                    ImmutableArray.Create("E")),
+            },
+            ret: PrimitiveType.Bool,
+            effects: new[] { "E" }));
+
+        // any<T, E>(list: List<T>, predicate: fn(T) !{E} -> Bool) !{E} -> Bool
+        // Existential quantifier. True iff predicate(item) holds for at
+        // least one element; vacuously false on the empty list. Short-
+        // circuits on the first true. The predicate's effect row is
+        // propagated.
+        e.Add(Fn("any",
+            typeParams: new[] { "T", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(TV("T")),
+                    PrimitiveType.Bool,
+                    ImmutableArray.Create("E")),
+            },
+            ret: PrimitiveType.Bool,
+            effects: new[] { "E" }));
+
         // ---- Module-qualified stdlib members --------------------------------
         // These resolve via the name-qualified lookup path the resolver takes for
         // `Module.member` callees. Adding entries here lets the type checker see
@@ -311,6 +352,32 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.Int },
             ret: PrimitiveType.Int));
+
+        // String.chars(s: String) -> List<String>
+        // Each character as a single-character string. Pairs with the
+        // bare-`for` form: `for c in s.chars() { ... }`.
+        e.Add(Fn("String.chars",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("List", PrimitiveType.String)));
+
+        // String.code_points(s: String) -> List<Int>
+        // Numeric companion to chars() — each character's UTF-16 code
+        // unit as an Int, in order. Cheaper than chars() when the
+        // caller only needs numeric predicates.
+        e.Add(Fn("String.code_points",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("List", PrimitiveType.Int)));
+
+        // Int.range(start: Int, end: Int) -> List<Int>
+        // Half-open integer range [start, end). Useful with `for i in
+        // Int.range(0, n)` when an index, not the element, is what the
+        // body needs. start >= end yields the empty list.
+        e.Add(Fn("Int.range",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.Int, PrimitiveType.Int },
+            ret: Generic("List", PrimitiveType.Int)));
 
         // Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
         e.Add(Fn("Trace.subscribe",
