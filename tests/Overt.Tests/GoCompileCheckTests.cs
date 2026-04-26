@@ -40,10 +40,6 @@ public class GoCompileCheckTests
     // each one hits, observed by running this sweep against every
     // portable example):
     //
-    //   - effects.ov          Higher-order user fns with effect-row
-    //                         polymorphism. Needs the emitter to
-    //                         thread `func(...) T` types through
-    //                         user-fn signatures.
     //   - dashboard.ov        `parallel { ... }` task groups. Would
     //                         lower to goroutines + channels; no
     //                         lowering yet (and a real one wants the
@@ -73,6 +69,7 @@ public class GoCompileCheckTests
     [InlineData("mutation.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("pipeline.ov")]
+    [InlineData("effects.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())

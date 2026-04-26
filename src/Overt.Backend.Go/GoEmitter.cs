@@ -333,7 +333,27 @@ public static class GoEmitter
         {
             var goName = fn.Name == "main" ? "__overt_main" : fn.Name;
 
-            _sb.Append($"func {goName}(");
+            _sb.Append($"func {goName}");
+            // Type parameters: emit `[T any, U any, ...]` for any
+            // type variables actually referenced in the signature.
+            // Overt's <T, E, ...> mixes type variables and effect-
+            // row variables in the same list; only the former
+            // matter for Go's type-parameter syntax. We detect by
+            // walking the parameter / return types and collecting
+            // names that appear as a NamedType reference.
+            var typeVars = CollectUsedTypeVariables(fn);
+            if (typeVars.Count > 0)
+            {
+                _sb.Append('[');
+                for (var i = 0; i < typeVars.Count; i++)
+                {
+                    if (i > 0) _sb.Append(", ");
+                    _sb.Append(typeVars[i]);
+                    _sb.Append(" any");
+                }
+                _sb.Append(']');
+            }
+            _sb.Append('(');
             for (var i = 0; i < fn.Parameters.Length; i++)
             {
                 if (i > 0) _sb.Append(", ");
@@ -674,6 +694,61 @@ public static class GoEmitter
                     + "non-stdlib packages.");
             }
             return (target[..lastDot], target[(lastDot + 1)..]);
+        }
+
+        /// <summary>
+        /// Walk an Overt fn's parameter and return types, collect the
+        /// names from <see cref="FunctionDecl.TypeParameters"/> that
+        /// actually appear as type references, and return them in
+        /// declaration order. The remainder are effect-row variables
+        /// (mentioned only inside `!{...}` rows, not as types) and
+        /// don't get a Go type-parameter slot.
+        /// </summary>
+        private static List<string> CollectUsedTypeVariables(FunctionDecl fn)
+        {
+            if (fn.TypeParameters.Length == 0) return new List<string>();
+            var declared = new HashSet<string>(fn.TypeParameters, StringComparer.Ordinal);
+            var used = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in fn.Parameters)
+            {
+                WalkTypeExprForTypeVars(p.Type, declared, used);
+            }
+            WalkTypeExprForTypeVars(fn.ReturnType, declared, used);
+            var ordered = new List<string>();
+            foreach (var name in fn.TypeParameters)
+            {
+                if (used.Contains(name)) ordered.Add(name);
+            }
+            return ordered;
+        }
+
+        private static void WalkTypeExprForTypeVars(
+            TypeExpr? type, HashSet<string> declared, HashSet<string> used)
+        {
+            switch (type)
+            {
+                case null:
+                    return;
+                case NamedType nt:
+                    if (nt.TypeArguments.Length == 0 && declared.Contains(nt.Name))
+                    {
+                        used.Add(nt.Name);
+                    }
+                    foreach (var ta in nt.TypeArguments)
+                    {
+                        WalkTypeExprForTypeVars(ta, declared, used);
+                    }
+                    return;
+                case FunctionType ft:
+                    foreach (var pt in ft.Parameters)
+                    {
+                        WalkTypeExprForTypeVars(pt, declared, used);
+                    }
+                    WalkTypeExprForTypeVars(ft.ReturnType, declared, used);
+                    return;
+                default:
+                    return;
+            }
         }
 
         private void EmitRecord(RecordDecl rec)
