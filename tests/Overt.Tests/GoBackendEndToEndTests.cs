@@ -65,6 +65,32 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_OpaqueHostType()
+    {
+        // Exercises `extern "go" type` for an opaque host-type
+        // round-trip. Declares `time.Time` as an opaque type, gets
+        // a value via `time.Now()`, and discards it with `let _`.
+        // The Go-side `time` import is added automatically based on
+        // the binds-string. Without the opaque-type registry, the
+        // emitter would throw on `LowerType(NamedType("Time"))`.
+        AssertOvertProgramPrints(
+            """
+            module externtype_e2e
+
+            extern "go" type Time binds "time.Time"
+
+            extern "go" fn now() -> Time binds "time.Now"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Time = now()
+                println("got time")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "got time\n");
+    }
+
+    [Fact]
     public void Transpiled_ExternGo_FromClauseImportPath()
     {
         // Verifies the `from "<import-path>"` clause for cases where

@@ -58,6 +58,12 @@ public static class GoEmitter
         // unused imports, so we can't speculatively import everything.
         private readonly StringBuilder _sb = new();
         private readonly Dictionary<string, ImmutableArray<EnumVariant>> _enums = new();
+        // Opaque host-type bindings: name → binds-string (the
+        // verbatim Go-side type expression). LowerType consults
+        // this when a NamedType doesn't match a built-in or stdlib
+        // shape; the binds-string is what gets emitted at every use
+        // site. See docs/ffi.md §2.
+        private readonly Dictionary<string, string> _externTypes = new(StringComparer.Ordinal);
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -82,7 +88,56 @@ public static class GoEmitter
                 {
                     _enums[en.Name] = en.Variants;
                 }
+                else if (decl is ExternTypeDecl ext && ext.Platform == "go")
+                {
+                    _externTypes[ext.Name] = ext.BindsTarget;
+                    var importPath = TryExtractGoImportPath(ext.BindsTarget);
+                    if (importPath is not null)
+                    {
+                        _imports.Add(importPath);
+                    }
+                }
             }
+        }
+
+        /// <summary>
+        /// Extract the Go import path from an opaque-type binds-string
+        /// like <c>"*net/http.Request"</c> → <c>"net/http"</c>. Returns
+        /// null when the string is a built-in Go type expression
+        /// (<c>"[]string"</c>, <c>"map[string]int"</c>, <c>"int"</c>)
+        /// that needs no import.
+        ///
+        /// Algorithm: strip one leading <c>*</c>, then split at the
+        /// LAST dot. The part before is the import path; the part
+        /// after is the in-package type name. If there's no dot, the
+        /// type is in the universe block (`int`, `string`, `error`)
+        /// or a slice/map composite literal — nothing to import.
+        /// </summary>
+        private static string? TryExtractGoImportPath(string binds)
+        {
+            var s = binds;
+            if (s.StartsWith("*", StringComparison.Ordinal))
+            {
+                s = s[1..];
+            }
+            // Reject composite type expressions (slices, maps, arrays).
+            // Their element types may need imports too, but parsing
+            // those out is brittle; for v1 we trust the user to declare
+            // separate `extern "go" type` entries for the inner types
+            // that need importing.
+            if (s.StartsWith("[", StringComparison.Ordinal)
+                || s.StartsWith("map[", StringComparison.Ordinal)
+                || s.StartsWith("chan ", StringComparison.Ordinal)
+                || s.StartsWith("func", StringComparison.Ordinal))
+            {
+                return null;
+            }
+            var lastDot = s.LastIndexOf('.');
+            if (lastDot <= 0)
+            {
+                return null;
+            }
+            return s[..lastDot];
         }
 
         public string Emit()
@@ -113,6 +168,12 @@ public static class GoEmitter
                     case ExternDecl ext:
                         EmitExtern(ext);
                         _sb.AppendLine();
+                        break;
+
+                    case ExternTypeDecl:
+                        // Already collected into _externTypes during
+                        // construction; the binds-string surfaces at
+                        // every use site via LowerType. No body emit.
                         break;
 
                     default:
@@ -403,6 +464,12 @@ public static class GoEmitter
             NamedType { Name: "List" } nt when nt.TypeArguments.Length == 1
                 => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
+            // Opaque host types: declared by `extern "go" type N binds
+            // "..."`. The binds-string IS the Go-side type expression
+            // (including pointer markers, package qualifiers, etc.); we
+            // emit it verbatim at every use site. See docs/ffi.md §2.
+            NamedType nt when nt.TypeArguments.Length == 0
+                && _externTypes.TryGetValue(nt.Name, out var binds) => binds,
             // User-declared record / enum types: NamedType with zero type
             // arguments. Refer to it by its source name (single-package layout).
             NamedType nt when nt.TypeArguments.Length == 0 => nt.Name,
@@ -513,6 +580,16 @@ public static class GoEmitter
 
         private void EmitLet(LetStmt ls, int indent)
         {
+            // `let _ = expr` discards the value. Lowers to Go's `_ = expr`
+            // form, which Go accepts at statement level for any
+            // expression. Useful for opaque-host-type round-trips where
+            // we want to evaluate the call but don't need the result.
+            if (ls.Target is WildcardPattern)
+            {
+                _sb.Append("_ = ");
+                EmitExpression(ls.Initializer);
+                return;
+            }
             if (ls.Target is not IdentifierPattern ip)
             {
                 throw new NotSupportedException(
