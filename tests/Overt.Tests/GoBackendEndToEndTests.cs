@@ -65,6 +65,58 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_ResultWrap_TError()
+    {
+        // Exercises the Result<T, IoError> shim convention. The Overt-
+        // side declaration claims `Result<Int, IoError>`; the bound
+        // Go function `strconv.Atoi` returns `(int, error)`. The
+        // emitter recognizes the shape and inserts the err-check +
+        // Ok/Err wrap.
+        AssertOvertProgramPrints(
+            """
+            module result_wrap_e2e
+
+            extern "go" fn atoi(s: String) -> Result<Int, IoError> binds "strconv.Atoi"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = atoi(s = "42")?
+                println("got: ${n}")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "got: 42\n");
+    }
+
+    [Fact]
+    public void Transpiled_ExternGo_ResultWrap_ErrorOnly()
+    {
+        // Exercises the Result<(), IoError> shim convention for Go
+        // functions that return just `error`. Bound to a hand-written
+        // helper that always returns nil; the test confirms the
+        // success path emits and runs cleanly.
+        AssertOvertProgramPrints(
+            """
+            module result_wrap_unit_e2e
+
+            extern "go" fn always_ok() !{io} -> Result<(), IoError> binds "AlwaysOk" from ""
+
+            fn main() !{io} -> Result<(), IoError> {
+                always_ok()?
+                println("ok")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "ok\n",
+            extraGoSource: """
+                package main
+
+                func AlwaysOk() error {
+                    return nil
+                }
+                """);
+    }
+
+    [Fact]
     public void Transpiled_ExternGo_FunctionTypedParameter()
     {
         // Exercises a function-typed parameter on an `extern "go" fn`.

@@ -393,8 +393,23 @@ public static class GoEmitter
             _sb.Append(") ");
             EmitReturnType(ext.ReturnType);
             _sb.AppendLine(" {");
-            // Body: forward the call. For Unit-returning shims, the
-            // call is a statement; otherwise prefix with `return`.
+
+            // Body shape #1: Result<T, IoError> return → wrap the
+            // Go-side `(T, error)` (or `error`) into Ok / Err. This
+            // is the convention every Go stdlib fallible function
+            // follows; Overt's Result<T, IoError> targets it directly.
+            // See docs/ffi.md §6.
+            if (TryGetResultIoErrorTypeArg(ext.ReturnType) is { } innerType)
+            {
+                EmitResultWrappedShimBody(ext, selector, member, innerType);
+                _sb.AppendLine("}");
+                return;
+            }
+
+            // Body shape #2: direct passthrough. For Unit-returning
+            // shims the call is a statement; otherwise prefix with
+            // `return`. Used when the Overt return is a primitive,
+            // an opaque host type, or a non-Result composite.
             _sb.Append('\t');
             var hasReturnSlot = ext.ReturnType is not null && ext.ReturnType is not UnitType;
             if (hasReturnSlot) _sb.Append("return ");
@@ -412,6 +427,86 @@ public static class GoEmitter
             }
             _sb.AppendLine(")");
             _sb.AppendLine("}");
+        }
+
+        /// <summary>
+        /// If <paramref name="returnType"/> is `Result&lt;T, IoError&gt;`,
+        /// return T. Used to detect the (T, error)-wrapping shim body
+        /// shape. Returns null for any other return shape, including
+        /// `Result&lt;T, E&gt;` where E isn't IoError (those need a
+        /// manual shim).
+        /// </summary>
+        private static TypeExpr? TryGetResultIoErrorTypeArg(TypeExpr? returnType)
+        {
+            if (returnType is NamedType { Name: "Result" } nt
+                && nt.TypeArguments.Length == 2
+                && nt.TypeArguments[1] is NamedType { Name: "IoError" })
+            {
+                return nt.TypeArguments[0];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Emit the shim body for an extern "go" fn whose Overt return
+        /// type is `Result&lt;T, IoError&gt;`. The Go-side bound
+        /// function is assumed to return either `(T, error)` (when T
+        /// isn't Unit) or `error` (when T is Unit). The shim does the
+        /// err-check and wraps into Result on either branch.
+        /// </summary>
+        private void EmitResultWrappedShimBody(ExternDecl ext, string? selector, string member, TypeExpr innerType)
+        {
+            var innerGoType = LowerType(innerType);
+            var isUnit = innerType is UnitType;
+
+            // Build the call expression: `pkg.Member(arg1, arg2, ...)`
+            // or just `Member(...)` for in-package binds.
+            var call = new StringBuilder();
+            if (selector is not null)
+            {
+                call.Append(selector);
+                call.Append('.');
+            }
+            call.Append(member);
+            call.Append('(');
+            for (var i = 0; i < ext.Parameters.Length; i++)
+            {
+                if (i > 0) call.Append(", ");
+                call.Append(ext.Parameters[i].Name);
+            }
+            call.Append(')');
+
+            if (isUnit)
+            {
+                // `error`-only return shape:
+                //   if err := pkg.Member(...); err != nil {
+                //       return overt.Err[overt.Unit, overt.IoError](
+                //           overt.IoError{Narrative: err.Error()})
+                //   }
+                //   return overt.Ok[overt.Unit, overt.IoError](overt.UnitValue)
+                _sb.Append("\tif err := ");
+                _sb.Append(call);
+                _sb.AppendLine("; err != nil {");
+                _sb.AppendLine($"\t\treturn overt.Err[overt.Unit, overt.IoError](overt.IoError{{Narrative: err.Error()}})");
+                _sb.AppendLine("\t}");
+                _sb.AppendLine($"\treturn overt.Ok[overt.Unit, overt.IoError](overt.UnitValue)");
+                return;
+            }
+
+            // `(T, error)` return shape:
+            //   __r, err := pkg.Member(...)
+            //   if err != nil {
+            //       return overt.Err[T, overt.IoError](
+            //           overt.IoError{Narrative: err.Error()})
+            //   }
+            //   return overt.Ok[T, overt.IoError](__r)
+            _sb.Append("\t__r, err := ");
+            _sb.Append(call);
+            _sb.AppendLine();
+            _sb.AppendLine("\tif err != nil {");
+            _sb.AppendLine($"\t\treturn overt.Err[{innerGoType}, overt.IoError](overt.IoError{{Narrative: err.Error()}})");
+            _sb.AppendLine("\t}");
+            _sb.AppendLine($"\treturn overt.Ok[{innerGoType}, overt.IoError](__r)");
         }
 
         /// <summary>
