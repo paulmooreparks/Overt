@@ -7,7 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="..\..\examples\*.ov" Link="examples\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Recursive glob so the per-back-end subdirectories (examples/csharp/,
+         future examples/go/, etc.) are picked up alongside the portable set
+         at the root. The Link path mirrors the source layout so tests that
+         inline a path like "csharp/ffi.ov" find the file in bin/. -->
+    <Content Include="..\..\examples\**\*.ov" Link="examples\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

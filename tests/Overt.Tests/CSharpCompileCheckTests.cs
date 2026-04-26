@@ -113,20 +113,22 @@ public class CSharpCompileCheckTests
     // The example still lexes, parses, name-resolves, type-checks, and
     // formats — it just can't C#-compile without the companion assembly.
     [Theory]
+    // Portable examples (root) — pure Overt, no extern bulk-imports.
     [InlineData("hello.ov")]
     [InlineData("mutation.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("race.ov")]
-    [InlineData("ffi.ov")]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
     [InlineData("trace.ov")]
     [InlineData("arith_eval.ov")]
-    [InlineData("json.ov")]
-    [InlineData("async.ov")]
+    // C#-bucket examples — reach `extern "csharp"` for stdlib.
+    [InlineData("csharp/ffi.ov")]
+    [InlineData("csharp/json.ov")]
+    [InlineData("csharp/async.ov")]
     public void Emit_Example_ProducesCompilableCSharp(string file)
     {
         var errors = CompileEmittedCSharp(file);

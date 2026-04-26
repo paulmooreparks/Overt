@@ -588,11 +588,11 @@ public class TypeDiagnosticTests
     [InlineData("state_machine.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("race.ov")]
-    [InlineData("inference.ov")]
-    [InlineData("ffi.ov")]
     [InlineData("trace.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
+    [InlineData("csharp/inference.ov")]
+    [InlineData("csharp/ffi.ov")]
     public void Examples_ProduceNoTypeDiagnostics(string file)
     {
         var source = File.ReadAllText(Path.Combine(ExamplesDir, file));

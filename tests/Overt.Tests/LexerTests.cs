@@ -281,20 +281,20 @@ public class LexerTests
     /// in the environment to regenerate the golden files after an intentional change.
     /// </summary>
     [Theory]
-    [InlineData("async.ov")]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("effects.ov")]
-    [InlineData("ffi.ov")]
     [InlineData("hello.ov")]
-    [InlineData("inference.ov")]
-    [InlineData("json.ov")]
     [InlineData("mutation.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("race.ov")]
     [InlineData("refinement.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("trace.ov")]
+    [InlineData("csharp/async.ov")]
+    [InlineData("csharp/ffi.ov")]
+    [InlineData("csharp/inference.ov")]
+    [InlineData("csharp/json.ov")]
     public void Lex_Example_MatchesGoldenTokenStream(string exampleFile)
     {
         var sourcePath = Path.Combine(ExamplesDir, exampleFile);

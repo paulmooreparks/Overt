@@ -157,6 +157,8 @@ ROLLOUT.md                          Phased plan for taking Overt public
 docs/
   grammar/                          Authoritative lexical + precedence grammars
 examples/                           Example programs (living test cases)
+                                    Root contains portable examples (Overt prelude only).
+                                    csharp/ contains examples that reach `extern "csharp"`.
 samples/
   msbuild-smoke/                    C# project consuming .ov files via Overt.Build
 stdlib/
@@ -284,7 +286,7 @@ Working end-to-end on C#:
 
 - **Language.** Records, enums (including struct-like variants), pattern matching with cartesian-product exhaustiveness on tuples of enums, effect rows, refinement types with runtime-checked boundaries, immutable records with `with`-updates, `let mut` rebinding, full imperative control flow (`for each`, `while`, `loop`, `break`, `continue`, literal patterns), `?` and `|>?` propagation (including inside nested `if`/`match` arms), `.await` on `Task<T>` with async-effect fns emitting as `async Task<T>`.
 - **FFI.** `extern "csharp"` with three explicit kinds (static, `instance`, and `ctor`), plus generic methods via angle-bracket binds targets (`Deserialize<MyType>`). Go and C placeholders parse and diagnose clearly; only C# executes today.
-- **Stdlib.** Genuinely-Overt-native types and helpers only (`Result`, `Option`, `List`, `Map`, `Set`, task groups, trace, `println`); see DESIGN.md §19 for the membership rule. Everything else (file I/O, HTTP, JSON, math, time, env access) is reached through `extern "csharp" use "..."` (AGENTS.md §11.7), which reflects on a target type and synthesizes the bindings at compile time. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/json.ov`](examples/json.ov).
+- **Stdlib.** Genuinely-Overt-native types and helpers only (`Result`, `Option`, `List`, `Map`, `Set`, task groups, trace, `println`); see DESIGN.md §19 for the membership rule. Everything else (file I/O, HTTP, JSON, math, time, env access) is reached through `extern "csharp" use "..."` (AGENTS.md §11.7), which reflects on a target type and synthesizes the bindings at compile time. JSON roundtrip via `JsonSerializer.Deserialize<T>` demonstrated in [`examples/csharp/json.ov`](examples/csharp/json.ov).
 - **Tooling.** `overt run` (in-memory Roslyn compile + execute), `overt fmt` (canonical form, idempotent, comment-preserving), `overt bind` (reflection-based facade generation), `overt --emit=<stage>` (tokens, ast, resolved, typed, csharp). Compile-time diagnostics carry stable OV-codes plus `help:` fixes and `note: see AGENTS.md §N` pointers.
 - **Packaging.** `<PackageReference Include="Overt.Build" />` compiles `.ov` files alongside `.cs` in any csproj. `overt` packaged as a .NET global tool. Both nupkgs are produced and tested; neither is published to nuget.org yet ([`ROLLOUT.md`](ROLLOUT.md) Phase 2).
 - **Not yet.** Go back-end emission, LSP server, cross-file module system beyond the current in-repo graph, and self-hosted compiler, all on the roadmap in [`CARRYOVER.md`](CARRYOVER.md).

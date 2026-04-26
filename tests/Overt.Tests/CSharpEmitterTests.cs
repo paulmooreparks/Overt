@@ -115,13 +115,13 @@ public class CSharpEmitterTests
     [InlineData("state_machine.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("race.ov")]
-    [InlineData("inference.ov")]
-    [InlineData("ffi.ov")]
     [InlineData("trace.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
-    [InlineData("json.ov")]
-    [InlineData("async.ov")]
+    [InlineData("csharp/inference.ov")]
+    [InlineData("csharp/ffi.ov")]
+    [InlineData("csharp/json.ov")]
+    [InlineData("csharp/async.ov")]
     public void Emit_Example_ProducesCSharp(string file)
     {
         var source = File.ReadAllText(Path.Combine(ExamplesDir, file));

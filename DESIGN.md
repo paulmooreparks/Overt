@@ -1332,8 +1332,8 @@ Current examples:
 - [`examples/state_machine.ov`](examples/state_machine.ov) — `enum` + exhaustive match on tuple patterns
 - [`examples/refinement.ov`](examples/refinement.ov) — refinement types and flow-sensitive narrowing
 - [`examples/trace.ov`](examples/trace.ov) — `trace` blocks and `TraceEvent` consumers
-- [`examples/ffi.ov`](examples/ffi.ov) — all three FFI platforms (`csharp`, `go`, `c`)
-- [`examples/inference.ov`](examples/inference.ov) — `inference` effect and its propagation through `par_map`
+- [`examples/csharp/ffi.ov`](examples/csharp/ffi.ov) — all three FFI platforms (`csharp`, `go`, `c`)
+- [`examples/csharp/inference.ov`](examples/csharp/inference.ov) — `inference` effect and its propagation through `par_map`
 - [`examples/bst.ov`](examples/bst.ov) — self-referential `enum`, recursive pattern matching, structural sharing on insert
 
 ---

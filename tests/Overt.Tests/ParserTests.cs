@@ -1084,11 +1084,11 @@ public class ParserTests
     [InlineData("state_machine.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("race.ov")]
-    [InlineData("inference.ov")]
-    [InlineData("ffi.ov")]
     [InlineData("trace.ov")]
     [InlineData("effects.ov")]
     [InlineData("refinement.ov")]
+    [InlineData("csharp/inference.ov")]
+    [InlineData("csharp/ffi.ov")]
     public void Parse_Example_HasNoDiagnostics(string file)
     {
         var result = ParseFile(file);

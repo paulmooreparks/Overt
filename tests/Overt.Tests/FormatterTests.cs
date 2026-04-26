@@ -19,19 +19,21 @@ public class FormatterTests
         Path.Combine(AppContext.BaseDirectory, "examples");
 
     [Theory]
+    // Portable examples (root) — pure Overt, no extern bulk-imports.
     [InlineData("hello.ov")]
     [InlineData("arith_eval.ov")]
     [InlineData("bst.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("effects.ov")]
-    [InlineData("ffi.ov")]
-    [InlineData("inference.ov")]
     [InlineData("mutation.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("race.ov")]
     [InlineData("refinement.ov")]
     [InlineData("state_machine.ov")]
     [InlineData("trace.ov")]
+    // C#-bucket examples — reach `extern "csharp"` for stdlib.
+    [InlineData("csharp/ffi.ov")]
+    [InlineData("csharp/inference.ov")]
     public void Format_Example_IsIdempotentAndParseable(string file)
     {
         var source = File.ReadAllText(Path.Combine(ExamplesDir, file));
