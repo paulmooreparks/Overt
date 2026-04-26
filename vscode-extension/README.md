@@ -68,12 +68,29 @@ Extensions` then search.
 From a local `.vsix`:
 
 ```
-vsce package
-code --install-extension overt-language-0.1.0.vsix
+bash scripts/build-vsix.sh   # wraps `vsce package`
+code --install-extension vscode-extension/overt-language-<version>.vsix
 ```
 
 The repository's `vscode-extension/` directory contains the source
-for the extension; `vsce package` produces the installable artifact.
+for the extension. The `scripts/build-vsix.sh` wrapper (with a
+PowerShell twin) installs vsce on demand and produces the .vsix at
+the version listed in `package.json`.
+
+Every push to `main` that touches `vscode-extension/` rebuilds the
+.vsix in CI and uploads it as a workflow artifact under
+[Actions → vscode-extension](https://github.com/paulmooreparks/Overt/actions/workflows/vscode-extension.yml),
+so a fresh build is always one click away even without local
+Node.js.
+
+### Releasing a new version
+
+The Marketplace rejects duplicate versions, so before each publish
+the patch in `vscode-extension/package.json` must be bumped (e.g.
+`0.1.1` → `0.1.2`). Add a corresponding entry to `CHANGELOG.md`,
+push, then either drag the artifact onto
+[Marketplace → manage](https://marketplace.visualstudio.com/manage)
+or run `vsce publish` with a logged-in publisher.
 
 ## Status
 

@@ -1,0 +1,60 @@
+# Build the Overt VS Code extension into a .vsix on every push that
+# touches `vscode-extension/`, and upload it as a workflow artifact so
+# anyone can download a fresh build from the Actions tab without local
+# Node.js or vsce installed. Triggered manually too, for the "I want a
+# rebuild without changing anything" case.
+#
+# This workflow does NOT publish to the Marketplace. Publishing is a
+# separate manual step (drag-and-drop the .vsix onto
+# https://marketplace.visualstudio.com/manage, or `vsce publish` with
+# a logged-in publisher) so a credential leak in CI cannot push a
+# bogus extension. The version field in
+# `vscode-extension/package.json` must be incremented before each
+# publish; the Marketplace rejects duplicate versions, so the bump is
+# the natural gate.
+
+name: vscode-extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vscode-extension/**'
+      - 'scripts/build-vsix.sh'
+      - '.github/workflows/vscode-extension.yml'
+
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build .vsix
+        id: build
+        run: bash scripts/build-vsix.sh
+
+      - name: Read extension version
+        id: version
+        run: |
+          VERSION=$(node -e "console.log(require('./vscode-extension/package.json').version)")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Extension version: $VERSION"
+
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: overt-language-${{ steps.version.outputs.version }}
+          path: vscode-extension/overt-language-*.vsix
+          if-no-files-found: error
+          retention-days: 90
