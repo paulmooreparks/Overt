@@ -4,6 +4,15 @@
     "description": "Syntax highlighting and language configuration for Overt",
     "version": "0.1.0",
     "publisher": "paulmooreparks",
+    "license": "Apache-2.0",
+    "homepage": "https://github.com/paulmooreparks/Overt",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/paulmooreparks/Overt.git"
+    },
+    "bugs": {
+        "url": "https://github.com/paulmooreparks/Overt/issues"
+    },
     "icon": "icon.png",
     "engines": {
         "vscode": "^1.70.0"
