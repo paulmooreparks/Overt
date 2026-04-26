@@ -141,7 +141,7 @@ jobs:
           TAG: ${{ needs.compute-version.outputs.tag }}
         run: |
           set -e
-          dotnet tool install -g ParksComputing.SemVer.Cli --version "0.1.0-*"
+          dotnet tool install -g ParksComputing.SemVer.Cli --prerelease
           export PATH="$PATH:$HOME/.dotnet/tools"
           NUGET_VERSION="${TAG#v}"
           echo "Validating $NUGET_VERSION against ovsemver..."
