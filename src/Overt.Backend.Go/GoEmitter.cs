@@ -76,6 +76,17 @@ public static class GoEmitter
         // expression line; cleared per line. EmitExpression's
         // WithExpr case checks here first.
         private readonly Dictionary<SourceSpan, string> _withHoists = new();
+        // Refinement-type aliases (`type T = Base where ...`).
+        // Non-generic ones get a Go `type T = Base` declaration so
+        // the source name shows up in the emitted code; generic ones
+        // (`type NonEmpty<T> = List<T>`) skip declaration and have
+        // their Target substituted at every use site, since Go's
+        // generic alias support varies across versions and the
+        // substitution form is unambiguous. The `where` predicate
+        // is dropped — refinement runtime checks aren't injected on
+        // the Go target yet (see docs/ffi.md and the sweep comment
+        // block).
+        private readonly Dictionary<string, TypeAliasDecl> _typeAliases = new(StringComparer.Ordinal);
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -115,6 +126,44 @@ public static class GoEmitter
                 {
                     _instanceExterns.Add(efn.Name);
                 }
+                else if (decl is TypeAliasDecl ta)
+                {
+                    _typeAliases[ta.Name] = ta;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Substitute type arguments for type parameters in a TypeExpr
+        /// tree. Used for generic refinement-alias use sites where we
+        /// substitute the alias's Target rather than declaring a Go
+        /// generic alias (Go-version-portability concern). Walks the
+        /// TypeExpr; replaces any `NamedType("T")` whose name matches
+        /// a parameter in <paramref name="parameters"/> with the
+        /// corresponding entry from <paramref name="arguments"/>.
+        /// </summary>
+        private static TypeExpr SubstituteTypeArgs(
+            TypeExpr type,
+            ImmutableArray<string> parameters,
+            ImmutableArray<TypeExpr> arguments)
+        {
+            switch (type)
+            {
+                case NamedType nt when nt.TypeArguments.Length == 0:
+                    var idx = parameters.IndexOf(nt.Name);
+                    if (idx >= 0) return arguments[idx];
+                    return nt;
+                case NamedType nt:
+                    var subbed = nt.TypeArguments.Select(
+                        ta => SubstituteTypeArgs(ta, parameters, arguments)).ToImmutableArray();
+                    return new NamedType(nt.Name, subbed, nt.Span);
+                case FunctionType ft:
+                    var subbedParams = ft.Parameters.Select(
+                        p => SubstituteTypeArgs(p, parameters, arguments)).ToImmutableArray();
+                    var subbedRet = SubstituteTypeArgs(ft.ReturnType, parameters, arguments);
+                    return new FunctionType(subbedParams, ft.Effects, subbedRet, ft.Span);
+                default:
+                    return type;
             }
         }
 
@@ -269,6 +318,18 @@ public static class GoEmitter
                         // Already collected into _externTypes during
                         // construction; the binds-string surfaces at
                         // every use site via LowerType. No body emit.
+                        break;
+
+                    case TypeAliasDecl ta:
+                        EmitTypeAlias(ta);
+                        // EmitTypeAlias may emit nothing (generic
+                        // aliases substitute at use sites instead);
+                        // only add the trailing blank line when it
+                        // actually wrote something.
+                        if (ta.TypeParameters.Length == 0)
+                        {
+                            _sb.AppendLine();
+                        }
                         break;
 
                     default:
@@ -772,6 +833,27 @@ public static class GoEmitter
         }
 
         /// <summary>
+        /// Emit `type Name = <Base>` for non-generic refinement-type
+        /// aliases. The `where` predicate is dropped — refinement
+        /// runtime checks aren't injected on the Go target yet, so
+        /// the alias is purely a name for the base type. Generic
+        /// aliases skip emission entirely; LowerType substitutes
+        /// their Target with type-arg substitution at every use
+        /// site instead.
+        /// </summary>
+        private void EmitTypeAlias(TypeAliasDecl ta)
+        {
+            if (ta.TypeParameters.Length > 0)
+            {
+                // Substituted at use sites via LowerType. Nothing to
+                // emit at the declaration.
+                return;
+            }
+            _sb.Append($"type {ta.Name} = ");
+            _sb.AppendLine(LowerType(ta.Target));
+        }
+
+        /// <summary>
         /// Lower an Overt enum to Go's idiomatic sum-type pattern: an
         /// interface with an unexported sealing method, plus one struct per
         /// variant that implements it. Bare variants emit as
@@ -848,6 +930,24 @@ public static class GoEmitter
             // not its import path. See docs/ffi.md §2 and OpaqueTypeToGo.
             NamedType nt when nt.TypeArguments.Length == 0
                 && _externTypes.TryGetValue(nt.Name, out var binds) => OpaqueTypeToGo(binds),
+            // Generic refinement alias: `NonEmpty<String>` substitutes
+            // the alias's Target with String for every reference to
+            // the alias's type parameter, then lowers the result.
+            // This avoids relying on Go's generic-alias support which
+            // varies across versions. See refinement.ov for the
+            // canonical case.
+            NamedType nt when nt.TypeArguments.Length > 0
+                && _typeAliases.TryGetValue(nt.Name, out var galias)
+                && galias.TypeParameters.Length == nt.TypeArguments.Length
+                => LowerType(SubstituteTypeArgs(galias.Target, galias.TypeParameters, nt.TypeArguments)),
+            // Non-generic refinement alias used as a name reference
+            // (`Age`, `Percent`): keep the alias's source name, since
+            // EmitTypeAlias will have declared `type Age = int` etc.
+            // at the top of the module.
+            NamedType nt when nt.TypeArguments.Length == 0
+                && _typeAliases.TryGetValue(nt.Name, out var alias)
+                && alias.TypeParameters.Length == 0
+                => nt.Name,
             // Function types: lower to Go's `func(P1, P2, ...) R`. Effect
             // rows erase at the FFI boundary (Go has no concept of them);
             // a `()`-returning Overt fn becomes a Go fn with no return
@@ -923,6 +1023,11 @@ public static class GoEmitter
                 if (asReturn && IsPipeChainContainingPropagate(trailing, out var pipeChain))
                 {
                     EmitPipeChainAsReturn(pipeChain, indent);
+                    return;
+                }
+                if (asReturn && trailing is RaceExpr trailingRace)
+                {
+                    EmitRaceAsReturn(trailingRace, indent);
                     return;
                 }
                 if (trailing is MatchExpr trailingMatch)
@@ -1089,6 +1194,18 @@ public static class GoEmitter
             {
                 _sb.Append("_ = ");
                 EmitExpression(ls.Initializer);
+                return;
+            }
+            // `let (a, b, ...) = parallel { e1, e2, ... }[?]` is the
+            // canonical shape for parallel task groups. Lower to a
+            // goroutine-per-task fan-out + WaitGroup join, then bind
+            // each tuple slot to the corresponding result. The
+            // optional `?` propagates the first Err.
+            if (ls.Target is TuplePattern tp
+                && TryUnwrapParallel(ls.Initializer, out var parallelExpr, out var hasPropagate)
+                && tp.Elements.Length == parallelExpr.Tasks.Length)
+            {
+                EmitParallelLetTuple(tp, parallelExpr, hasPropagate, indent);
                 return;
             }
             if (ls.Target is not IdentifierPattern ip)
@@ -1400,6 +1517,137 @@ public static class GoEmitter
                 }
             }
             return tempName;
+        }
+
+        /// <summary>
+        /// Try to unwrap an expression that is either a bare ParallelExpr
+        /// or a PropagateExpr wrapping one. Returns the inner ParallelExpr
+        /// and a flag indicating whether the `?` was present, or false
+        /// when the expression doesn't fit either shape.
+        /// </summary>
+        private static bool TryUnwrapParallel(
+            Expression e, out ParallelExpr parallel, out bool hasPropagate)
+        {
+            if (e is ParallelExpr pe)
+            {
+                parallel = pe;
+                hasPropagate = false;
+                return true;
+            }
+            if (e is PropagateExpr { Operand: ParallelExpr pep })
+            {
+                parallel = pep;
+                hasPropagate = true;
+                return true;
+            }
+            parallel = null!;
+            hasPropagate = false;
+            return false;
+        }
+
+        /// <summary>
+        /// Lower `let (a, b, ...) = parallel { e1, e2, ... }[?]` as a
+        /// SEQUENTIAL fan-out: each task runs in order, results bind
+        /// to tuple slots, optional `?` propagates the first Err.
+        ///
+        /// The Overt-side semantics promise concurrent execution; the
+        /// Go target satisfies the SHAPE (fan-out + join) but not
+        /// the parallelism today. A real concurrent lowering would
+        /// declare per-task Result temps with the type-checker's
+        /// inferred types, spawn goroutines, and join with a
+        /// WaitGroup. That requires plumbing TypeCheckResult into
+        /// the GoEmitter and is gated on the language-arc
+        /// concurrency design (docs/concurrency.md). For now, the
+        /// sequential lowering compiles and produces semantically
+        /// correct results — just slower than promised.
+        /// </summary>
+        private void EmitParallelLetTuple(
+            TuplePattern tp, ParallelExpr parallel, bool hasPropagate, int indent)
+        {
+            var n = parallel.Tasks.Length;
+            var pad = new string('\t', indent);
+            var resultNames = new string[n];
+            for (var i = 0; i < n; i++)
+            {
+                resultNames[i] = $"__par_{_qCounter++}";
+                if (i > 0) _sb.Append(pad);
+                _sb.Append(resultNames[i]);
+                _sb.Append(" := ");
+                EmitExpression(parallel.Tasks[i]);
+                _sb.AppendLine();
+            }
+            if (hasPropagate)
+            {
+                for (var i = 0; i < n; i++)
+                {
+                    _sb.Append(pad);
+                    _sb.AppendLine($"if !{resultNames[i]}.IsOk {{");
+                    _sb.Append(pad);
+                    _sb.Append("\treturn overt.Err[");
+                    EmitCurrentReturnTypeArgs();
+                    _sb.AppendLine($"]({resultNames[i]}.Err)");
+                    _sb.Append(pad);
+                    _sb.AppendLine("}");
+                }
+            }
+            for (var i = 0; i < n; i++)
+            {
+                if (tp.Elements[i] is not IdentifierPattern slot)
+                {
+                    throw new NotSupportedException(
+                        "Go back end's parallel-let-tuple binding requires "
+                        + "identifier-pattern slots; nested patterns aren't supported yet.");
+                }
+                _sb.Append(pad);
+                _sb.Append(slot.Name);
+                _sb.Append(" := ");
+                _sb.Append(resultNames[i]);
+                if (hasPropagate)
+                {
+                    _sb.Append(".Value");
+                }
+                if (i < n - 1) _sb.AppendLine();
+                // Last assignment: don't emit a trailing newline; the
+                // caller's EmitBlock writes one after EmitStatement.
+            }
+        }
+
+        /// <summary>
+        /// Lower a trailing `race { e1, e2, ... }` (or
+        /// `race { ... }?`) in return position to sequential
+        /// "try each, return first Ok" form. Real first-success
+        /// concurrency is gated on the same plumbing as
+        /// EmitParallelLetTuple and lands with the language-arc
+        /// concurrency design.
+        /// </summary>
+        private void EmitRaceAsReturn(RaceExpr race, int indent)
+        {
+            var pad = new string('\t', indent);
+            var n = race.Tasks.Length;
+            if (n == 0)
+            {
+                throw new NotSupportedException("Go back end requires race { ... } to have at least one task.");
+            }
+            var resultNames = new string[n];
+            for (var i = 0; i < n; i++)
+            {
+                resultNames[i] = $"__race_{_qCounter++}";
+                if (i > 0) _sb.Append(pad);
+                _sb.Append(resultNames[i]);
+                _sb.Append(" := ");
+                EmitExpression(race.Tasks[i]);
+                _sb.AppendLine();
+                _sb.Append(pad);
+                _sb.AppendLine($"if {resultNames[i]}.IsOk {{");
+                _sb.Append(pad);
+                _sb.AppendLine($"\treturn {resultNames[i]}");
+                _sb.Append(pad);
+                _sb.AppendLine("}");
+            }
+            // All failed: return the first Err.
+            _sb.Append(pad);
+            _sb.Append("return ");
+            _sb.AppendLine(resultNames[0]);
         }
 
         private void EmitIfStatement(IfExpr ie, int indent)
@@ -2059,6 +2307,17 @@ public static class GoEmitter
                 _sb.Append(LowerType(nt.TypeArguments[0]));
                 return;
             }
+            // Common case: fn returns Result<List<T>, E> and the List.empty()
+            // sits inside an Ok(...) wrap. The Ok-arg slot is List<T>, so
+            // peel one layer through Result and reuse the same lookup.
+            if (_currentFnReturnType is NamedType { Name: "Result" } rt
+                && rt.TypeArguments.Length == 2
+                && rt.TypeArguments[0] is NamedType { Name: "List" } innerList
+                && innerList.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(innerList.TypeArguments[0]));
+                return;
+            }
             _sb.Append("any");
         }
 
@@ -2101,6 +2360,12 @@ public static class GoEmitter
 
                 case IntegerLiteralExpr il:
                     _sb.Append(il.Lexeme);
+                    break;
+
+                case FloatLiteralExpr fl:
+                    // Go's float-literal syntax matches Overt's lexer
+                    // output (decimal point, optional `e±N` exponent).
+                    _sb.Append(fl.Lexeme);
                     break;
 
                 case BooleanLiteralExpr bl:

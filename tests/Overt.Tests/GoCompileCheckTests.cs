@@ -34,31 +34,30 @@ public class GoCompileCheckTests
     private static readonly Lazy<string> RuntimePath = new(LocateRuntimePath);
 
     // Examples currently in scope for the Go target. Each one passes
-    // `go build` against the in-repo runtime end-to-end.
+    // `go build` against the in-repo runtime end-to-end. All portable
+    // examples are in scope as of the parallel/race/refinement landing.
     //
-    // Out-of-scope examples (with the concrete emitter / runtime gap
-    // each one hits, observed by running this sweep against every
-    // portable example):
+    // Out of scope, by design, not by gap:
     //
-    //   - dashboard.ov        `parallel { ... }` task groups. Would
-    //                         lower to goroutines + channels; no
-    //                         lowering yet (and a real one wants the
-    //                         language-level concurrency design that's
-    //                         currently scoped only on paper).
-    //   - race.ov             `race { ... }` first-success. Same
-    //                         family as parallel; same gating design.
-    //   - refinement.ov       Refinement runtime checks. The C#
-    //                         emitter injects `where`-predicate
-    //                         validations at every boundary; the Go
-    //                         emitter doesn't.
-    //   - csharp/*            Reach into `extern "csharp" use "..."` —
-    //                         the Go target has no equivalent FFI, by
-    //                         design. These will never enter this
-    //                         theory; they live in `examples/csharp/`
-    //                         for that reason.
+    //   - csharp/*            Reach into `extern "csharp" use "..."`,
+    //                         which the Go target has no equivalent FFI
+    //                         for. These live in `examples/csharp/` for
+    //                         that reason and will never enter this
+    //                         theory.
     //
-    // Each entry above gains a row in the theory below the moment its
-    // feature lands, and the comment shrinks accordingly.
+    // Two caveats on the in-scope set:
+    //
+    //   - dashboard.ov / race.ov lower their `parallel { ... }` and
+    //     `race { ... }` blocks to sequential Go (per-task assignment
+    //     plus join, or per-task try-and-return-on-Ok with fallback).
+    //     The shape is right (fan-out then join, first-success
+    //     fallback) but not the parallelism. Genuine concurrency lands
+    //     when the language-arc concurrency design plumbs through and
+    //     the GoEmitter can fan out onto goroutines + channels.
+    //   - refinement.ov compiles, but the Go emitter does not yet
+    //     inject `where`-predicate runtime checks at boundaries the way
+    //     the C# emitter does. Refinement aliases lower as bare type
+    //     aliases for now; predicate validation is gated on a follow-up.
     [Theory]
     [InlineData("hello.ov")]
     [InlineData("greeter.ov")]
@@ -69,6 +68,9 @@ public class GoCompileCheckTests
     [InlineData("pipeline.ov")]
     [InlineData("effects.ov")]
     [InlineData("trace.ov")]
+    [InlineData("refinement.ov")]
+    [InlineData("dashboard.ov")]
+    [InlineData("race.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())
