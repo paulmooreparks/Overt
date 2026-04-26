@@ -934,6 +934,63 @@ refinements:
 
 ---
 
+## 11.8. Go-target FFI: `extern "go" fn`
+
+The Go back end recognizes `extern "go" fn` declarations and lowers
+each one to a Go shim that wraps the bound target. There is no
+bulk-import equivalent of `extern "csharp" use` yet; Go FFI is
+per-method only.
+
+```overt
+// Stdlib package: the package selector is the import path.
+extern "go" fn upper(s: String) -> String binds "strings.ToUpper"
+extern "go" fn now() -> Int64 binds "time.Now"
+
+// Stdlib subpackage: declared name `filepath`, import path `path/filepath`.
+// Use the `from` clause whenever the import path differs from the
+// package selector.
+extern "go" fn base(p: String) -> String
+    binds "filepath.Base" from "path/filepath"
+
+// Third-party package: full import path in `from`.
+extern "go" fn parse_url(raw: String) -> Result<String, IoError>
+    binds "url.Parse" from "net/url"
+```
+
+**Binds-target shape**: the string is the Go-side use-site
+expression, split at the LAST dot into a package selector and a
+member name. The selector is what shows up at the call site (e.g.
+`fmt.Println` calls `Println` on package `fmt`). The full import
+path defaults to the selector (correct for stdlib top-level
+packages); when the path differs (subpackages, third-party
+modules), supply it via `from "<path>"`.
+
+**Body lowering**: the emitter writes a Go function with the
+Overt-side name and signature; the body forwards each parameter
+to the bound target and returns the result. No type conversion
+beyond the primitive lowerings (`Int → int`, `String → string`,
+etc.); a target that takes or returns a non-primitive Go type the
+emitter doesn't already understand will need a hand-written
+adapter.
+
+**Cross-platform externs**: an `extern "<other>" fn` (csharp, c)
+that's compiled into the Go target gets a panic stub. Calling it
+surfaces a clear runtime error rather than a link-time failure.
+Same in the other direction: `extern "go" fn` reaching the C#
+target throws `ExternPlatformNotImplemented`.
+
+**Limitations today**:
+
+- No bulk-import (`extern "go" use "<package>"`). Per-method only.
+- Effect rows are honored at the type level but no Go-side panic
+  recovery is generated; a panic in the bound target will propagate
+  as a Go panic, not as `Result.Err`.
+- Generic Go functions (with type parameters) aren't supported.
+- Go interface types in parameter or return position aren't yet
+  reachable; the emitter throws on `LowerType` for them.
+
+---
+
 ## 12. Stdlib surface (runnable subset)
 
 ### Result / Option

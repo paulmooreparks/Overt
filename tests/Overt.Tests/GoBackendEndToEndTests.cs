@@ -42,6 +42,53 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_CallsStdlibFunction()
+    {
+        // Exercises `extern "go" fn` end-to-end: an Overt-side
+        // declaration binding `strings.ToUpper` plus a main that
+        // calls it. The emitter generates a Go shim that forwards
+        // the call, adds `strings` to the import set, and the
+        // result threads through string interpolation.
+        AssertOvertProgramPrints(
+            """
+            module extern_e2e
+
+            extern "go" fn upper(s: String) -> String binds "strings.ToUpper"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let shouted: String = upper(s = "hello, world")
+                println("got: ${shouted}")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "got: HELLO, WORLD\n");
+    }
+
+    [Fact]
+    public void Transpiled_ExternGo_FromClauseImportPath()
+    {
+        // Verifies the `from "<import-path>"` clause for cases where
+        // the package selector and full Go import path differ. Uses
+        // `path/filepath` whose declared package name is `filepath`
+        // but whose import path is `path/filepath`. Without the
+        // `from` clause the emitter would import a non-existent
+        // top-level `filepath` package.
+        AssertOvertProgramPrints(
+            """
+            module extern_path_e2e
+
+            extern "go" fn base(p: String) -> String binds "filepath.Base" from "path/filepath"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let leaf: String = base(p = "/usr/local/bin/overt")
+                println("leaf: ${leaf}")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "leaf: overt\n");
+    }
+
+    [Fact]
     public void Transpiled_ForEachOverList()
     {
         // Exercises `for x in iter` over a List<Int> built by Int.range,
