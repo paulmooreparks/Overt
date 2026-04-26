@@ -476,7 +476,7 @@ public sealed class CSharpEmitter
     {
         var refinedAliases = module.Declarations
             .OfType<TypeAliasDecl>()
-            .Where(t => t.Predicate is not null && t.TypeParameters.Length == 0)
+            .Where(t => t.Predicate is not null)
             .ToArray();
         if (refinedAliases.Length == 0) return;
 
@@ -486,34 +486,37 @@ public sealed class CSharpEmitter
         {
             foreach (var t in refinedAliases)
             {
-                var innerType = CSharpTypeDisplay(LowerType(t.Target));
+                // The Check helper is non-generic-only: generic refinements
+                // already check inside their wrapper record's implicit
+                // operator (see EmitTypeAlias). The TryFrom helper covers
+                // both generic and non-generic — it's the value-error
+                // variant the user calls explicitly via `{Alias}.try_from`.
                 var predText = FormatPredicateText(t.Predicate!);
 
-                // {Alias}__Check: panic-on-failure boundary helper.
-                _w.WriteLine($"public static {innerType} {t.Name}__Check({innerType} self)");
-                _w.WriteLine("{");
-                using (_w.Indent())
+                if (t.TypeParameters.Length == 0)
                 {
-                    _w.Write("if (!(");
-                    EmitExpressionBody(t.Predicate!);
-                    _w.WriteLine("))");
+                    var innerType = CSharpTypeDisplay(LowerType(t.Target));
+                    _w.WriteLine($"public static {innerType} {t.Name}__Check({innerType} self)");
                     _w.WriteLine("{");
                     using (_w.Indent())
                     {
-                        _w.WriteLine(
-                            $"throw new global::Overt.Runtime.RefinementViolation("
-                            + $"\"{t.Name}\", \"{EscapeCsharpString(predText)}\", self);");
+                        _w.Write("if (!(");
+                        EmitExpressionBody(t.Predicate!);
+                        _w.WriteLine("))");
+                        _w.WriteLine("{");
+                        using (_w.Indent())
+                        {
+                            _w.WriteLine(
+                                $"throw new global::Overt.Runtime.RefinementViolation("
+                                + $"\"{t.Name}\", \"{EscapeCsharpString(predText)}\", self);");
+                        }
+                        _w.WriteLine("}");
+                        _w.WriteLine("return self;");
                     }
                     _w.WriteLine("}");
-                    _w.WriteLine("return self;");
                 }
-                _w.WriteLine("}");
 
-                // {Alias}__TryFrom: value-error variant called explicitly via
-                // `{Alias}.try_from(raw)`. Either constructs the user's
-                // else-arm expression or a generic RefinementError record on
-                // predicate failure.
-                EmitRefinementTryFrom(t, innerType, predText);
+                EmitRefinementTryFrom(t, predText);
             }
         }
         _w.WriteLine("}");
@@ -521,11 +524,40 @@ public sealed class CSharpEmitter
     }
 
     /// <summary>Emit the <c>{Alias}__TryFrom</c> static method body. The
-    /// return type is <c>Result&lt;Inner, ErrType&gt;</c> where ErrType is
-    /// inferred from the alias's else-arm if present, or the runtime's
-    /// <c>RefinementError</c> record fallback otherwise.</summary>
-    private void EmitRefinementTryFrom(TypeAliasDecl t, string innerType, string predText)
+    /// return type is <c>Result&lt;{Alias-or-Inner}, ErrType&gt;</c> where
+    /// ErrType is inferred from the alias's else-arm if present, or the
+    /// runtime's <c>RefinementError</c> record fallback otherwise.
+    ///
+    /// Two shapes:
+    /// <list type="bullet">
+    /// <item>Non-generic: parameter and return-Inner are both the
+    /// alias's lowered Target type; Ok(self) returns the same value.</item>
+    /// <item>Generic: type-parameter list is emitted as
+    /// <c>&lt;T, U, ...&gt;</c> on the method, parameter type is the
+    /// lowered Target with TypeVars surfaced, and Ok(self) returns a
+    /// <c>new {Alias}&lt;T, ...&gt;(self)</c> wrapped in the wrapper record
+    /// the EmitTypeAlias path emitted for generic aliases.</item>
+    /// </list>
+    /// The user-facing call site (<c>{Alias}.try_from(xs)</c>) leans on
+    /// C# generic-method inference to pick T from the argument's type;
+    /// callers that want explicit instantiation can spell it on the C#
+    /// side, but the Overt source has no need to.
+    /// </summary>
+    private void EmitRefinementTryFrom(TypeAliasDecl t, string predText)
     {
+        var isGeneric = t.TypeParameters.Length > 0;
+        var typeParams = isGeneric ? "<" + string.Join(", ", t.TypeParameters) + ">" : "";
+
+        // Inner type: the alias's Target lowered. For a generic alias this
+        // contains TypeVar references; LowerType + CSharpTypeDisplay produce
+        // the right `T`-spelled C# type.
+        var innerType = CSharpTypeDisplay(LowerType(t.Target));
+
+        // Public-facing return type: `Result<{Alias}, ErrType>` for non-generic
+        // (using-alias unfolds to inner so it's interchangeable), and
+        // `Result<{Alias}<T, ...>, ErrType>` for generic (the wrapper record).
+        var aliasDisplay = isGeneric ? $"{t.Name}<{string.Join(", ", t.TypeParameters)}>" : t.Name;
+
         string errTypeDisplay;
         if (t.ElseExpr is { } elseExpr
             && _types?.ExpressionTypes is { } expr
@@ -538,9 +570,9 @@ public sealed class CSharpEmitter
             errTypeDisplay = "global::Overt.Runtime.RefinementError";
         }
 
-        var resultType = $"global::Overt.Runtime.Result<{innerType}, {errTypeDisplay}>";
+        var resultType = $"global::Overt.Runtime.Result<{aliasDisplay}, {errTypeDisplay}>";
         _w.WriteLine();
-        _w.WriteLine($"public static {resultType} {t.Name}__TryFrom({innerType} self)");
+        _w.WriteLine($"public static {resultType} {t.Name}__TryFrom{typeParams}({innerType} self)");
         _w.WriteLine("{");
         using (_w.Indent())
         {
@@ -550,11 +582,20 @@ public sealed class CSharpEmitter
             _w.WriteLine("{");
             using (_w.Indent())
             {
-                // Prelude.Ok / Err are in scope via `using static`; the
-                // _OkMarker / _ErrMarker implicit operator on Result<T,E>
-                // does the construction so call sites don't have to spell
-                // out the generic args.
-                _w.WriteLine("return Ok(self);");
+                // Non-generic: Ok(self) marker target-types into the
+                // Result<{using-alias}, _>. Generic: wrap the inner in the
+                // emitted wrapper record before lifting to Ok, since
+                // Result<NonEmpty<T>, _> needs a NonEmpty<T> Ok value, not
+                // a List<T>. The Ok/Err markers' implicit operator handles
+                // the rest.
+                if (isGeneric)
+                {
+                    _w.WriteLine($"return Ok(new {aliasDisplay}(self));");
+                }
+                else
+                {
+                    _w.WriteLine("return Ok(self);");
+                }
             }
             _w.WriteLine("}");
             _w.Write("return Err(");

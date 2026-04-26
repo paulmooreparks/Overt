@@ -936,8 +936,16 @@ public static class GoEmitter
         {
             if (ta.TypeParameters.Length > 0)
             {
-                // Substituted at use sites via LowerType. Nothing to
-                // emit at the declaration.
+                // Generic aliases substitute at every use site via
+                // LowerType — no `type Name = ...` declaration. The
+                // boundary-check helper still skips for generics (no
+                // boundary-tracking on the type-checker side), but the
+                // try_from helper does land: it's a generic Go fn the
+                // user calls explicitly.
+                if (ta.Predicate is not null)
+                {
+                    EmitRefinementTryFromHelper(ta);
+                }
                 return;
             }
             _sb.Append($"type {ta.Name} = ");
@@ -970,8 +978,17 @@ public static class GoEmitter
             var errType = ResolveTryFromErrorType(ta);
             var resultType = $"overt.Result[{inner}, {errType}]";
 
+            // Generic aliases get Go's `[T any, ...]` type-parameter list
+            // on the helper. The substitute-at-use-site lowering means
+            // the alias name itself never appears in the inner type
+            // (it's already `List[T]` etc. for a `NonEmpty<T> = List<T>`),
+            // so there's no separate "alias type" to emit alongside.
+            var typeParams = ta.TypeParameters.Length == 0
+                ? string.Empty
+                : "[" + string.Join(", ", ta.TypeParameters.Select(p => p + " any")) + "]";
+
             _sb.AppendLine();
-            _sb.AppendLine($"func __Refinement_{ta.Name}__TryFrom(self {inner}) {resultType} {{");
+            _sb.AppendLine($"func __Refinement_{ta.Name}__TryFrom{typeParams}(self {inner}) {resultType} {{");
             _sb.Append("\tif ");
             EmitExpression(ta.Predicate!);
             _sb.AppendLine(" {");

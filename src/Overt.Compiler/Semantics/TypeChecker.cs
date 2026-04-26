@@ -422,10 +422,11 @@ public sealed class TypeChecker
     /// when no else-arm is present, the synthesized signature uses
     /// <see cref="RefinementError"/> as the fallback.
     ///
-    /// Generic aliases (<c>type NonEmpty&lt;T&gt; = ...</c>) skip
-    /// signature synthesis: their <c>try_from</c> would need type-parameter
-    /// threading the emitter doesn't yet handle for synthesized functions.
-    /// Hand-written validators remain the path for those today.
+    /// Generic aliases (<c>type NonEmpty&lt;T&gt; = ...</c>) get a
+    /// type-parameterized signature: the alias's type parameters thread
+    /// through the inner type, the alias use, and the Result return so
+    /// `NonEmpty.try_from(xs: List&lt;Int&gt;)` infers T = Int from the
+    /// argument and returns <c>Result&lt;NonEmpty&lt;Int&gt;, ErrType&gt;</c>.
     /// </summary>
     private void AnnotateTypeAliasDecl(TypeAliasDecl t)
     {
@@ -451,11 +452,13 @@ public sealed class TypeChecker
             errorType = new NamedTypeRef("RefinementError", ImmutableArray<TypeRef>.Empty);
         }
 
-        // Generic refinement aliases skip auto-gen for now (see XML doc
-        // above). The hand-written validator pattern still works.
-        if (t.TypeParameters.Length > 0) return;
-
-        var aliasType = new NamedTypeRef(t.Name, ImmutableArray<TypeRef>.Empty);
+        // Build the alias-type with its type parameters surfaced as
+        // TypeVarRefs. For non-generic aliases this is the empty-arg
+        // form; for generic aliases the args mirror the parameter list.
+        var aliasArgs = t.TypeParameters
+            .Select(tp => (TypeRef)new TypeVarRef(tp))
+            .ToImmutableArray();
+        var aliasType = new NamedTypeRef(t.Name, aliasArgs);
         var resultType = new NamedTypeRef("Result",
             ImmutableArray.Create<TypeRef>(aliasType, errorType));
         var tryFrom = new FunctionTypeRef(

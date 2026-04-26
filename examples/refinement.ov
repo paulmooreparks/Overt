@@ -32,8 +32,14 @@ type Percent = Float where 0.0 <= self && self <= 100.0 else {
     ValidationError.ScoreOutOfRange { got = self }
 }
 
-// `NonEmpty<T>` is generic, so its auto-generated `try_from` is gated on a
-// follow-up. Hand-written validators stay the path for generics until then.
+// Generic refinement. The auto-generated `try_from` lowers to a
+// generic helper on both back ends, but using it directly from
+// Overt source needs generic-unification at call sites the type
+// checker doesn't do yet (T stays free, so a downstream
+// `NonEmpty<String>` annotation doesn't satisfy `NonEmpty<T>`).
+// Hand-written validators stay the practical path for generics
+// until that lands; the helpers are visible to FFI / hand-written
+// host code today.
 type NonEmpty<T> = List<T> where size(self) > 0
 
 record UserProfile {
@@ -44,11 +50,14 @@ record UserProfile {
 }
 
 fn check_non_empty(raw: List<String>) -> Result<NonEmpty<String>, ValidationError> {
-    // Flow-sensitive narrowing: inside the `if size(raw) > 0` branch the
-    // compiler narrows `List<String>` to `NonEmpty<String>`, so `Ok(raw)`
-    // type-checks even though `raw` was declared as `List<String>`. This is
-    // the same machinery that lets `Age.try_from`'s body coerce `raw: Int`
-    // to `Age` once the predicate is proven inside the if-branch.
+    // Flow-sensitive narrowing: inside the `if size(raw) > 0` branch
+    // the compiler narrows `List<String>` to `NonEmpty<String>`, so
+    // `Ok(raw)` type-checks even though `raw` was declared as
+    // `List<String>`. This is the same machinery that lets
+    // `Age.try_from`'s body coerce `raw: Int` to `Age` once the
+    // predicate is proven inside the if-branch — and it sidesteps the
+    // generic-unification gap that keeps `NonEmpty.try_from(raw)?`
+    // from type-checking against a concrete `NonEmpty<String>` slot.
     if size(raw) > 0 {
         Ok(raw)
     } else {
