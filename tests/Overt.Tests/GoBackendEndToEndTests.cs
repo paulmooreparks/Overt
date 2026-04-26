@@ -42,6 +42,53 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_EnumsAndMatch_DispatchesByVariant()
+    {
+        // Exercises enum decl emission (interface + struct-per-variant +
+        // sealing method), bare and record-shape variant constructors,
+        // match in return position with a type-switch, record-pattern
+        // arms with field bindings, and bare-variant arms (no bindings).
+        // The classify fn returns the area of each Shape; main verifies
+        // each variant routes to the expected branch.
+        AssertOvertProgramPrints(
+            """
+            module shape_e2e
+
+            enum Shape {
+                Circle { radius: Int },
+                Square { side: Int },
+                Point,
+            }
+
+            fn area(s: Shape) -> Int {
+                match s {
+                    Shape.Circle { radius = r } => r * r * 3,
+                    Shape.Square { side = side } => side * side,
+                    Shape.Point => 0,
+                }
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let c: Shape = Shape.Circle { radius = 4 }
+                let sq: Shape = Shape.Square { side = 5 }
+                let p: Shape = Shape.Point
+
+                if area(s = c) == 48 {
+                    println("circle ok")?
+                }
+                if area(s = sq) == 25 {
+                    println("square ok")?
+                }
+                if area(s = p) == 0 {
+                    println("point ok")?
+                }
+                Ok(())
+            }
+            """,
+            expectedStdout: "circle ok\nsquare ok\npoint ok\n");
+    }
+
+    [Fact]
     public void Transpiled_Records_LiteralAndFieldAccess()
     {
         // Exercises record decl emission, record literal expression
