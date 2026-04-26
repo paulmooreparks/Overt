@@ -309,6 +309,10 @@ public static class GoEmitter
                     {
                         EmitMatch(me, indent, asReturn: false);
                     }
+                    else if (es.Expression is ForEachExpr fe)
+                    {
+                        EmitForEach(fe, indent);
+                    }
                     else
                     {
                         EmitExpression(es.Expression);
@@ -347,6 +351,33 @@ public static class GoEmitter
             }
             _sb.Append(" = ");
             EmitExpression(ls.Initializer);
+        }
+
+        /// <summary>
+        /// Lower `for x in iter { body }` to Go's `for _, x := range
+        /// iter.Items { body }`. The iterable must evaluate to an
+        /// `overt.List[T]`; the runtime List wraps a Go slice as its
+        /// `Items` field, which Go's `range` walks natively. The
+        /// index is discarded with `_`. Body emits as a statement
+        /// block (the for-each value is always Unit).
+        /// </summary>
+        private void EmitForEach(ForEachExpr fe, int indent)
+        {
+            if (fe.Binder is not IdentifierPattern ip)
+            {
+                throw new NotSupportedException(
+                    "Go back end does not yet handle destructuring for-each binders; "
+                    + $"got pattern {fe.Binder.GetType().Name}.");
+            }
+            var pad = new string('\t', indent);
+            _sb.Append("for _, ");
+            _sb.Append(ip.Name);
+            _sb.Append(" := range (");
+            EmitExpression(fe.Iterable);
+            _sb.AppendLine(").Items {");
+            EmitBlock(fe.Body, indent + 1, asReturn: false);
+            _sb.Append(pad);
+            _sb.Append('}');
         }
 
         private void EmitIfStatement(IfExpr ie, int indent)

@@ -42,6 +42,28 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ForEachOverList()
+    {
+        // Exercises `for x in iter` over a List<Int> built by Int.range,
+        // a `?`-propagating call inside the loop body, and the loop's
+        // unit-typed value (no return). Each iteration prints one line;
+        // the deterministic three-line output proves the loop ran in
+        // order through every element.
+        AssertOvertProgramPrints(
+            """
+            module foreach_e2e
+
+            fn main() !{io} -> Result<(), IoError> {
+                for i in Int.range(start = 0, end = 3) {
+                    println("i=${i}")?
+                }
+                Ok(())
+            }
+            """,
+            expectedStdout: "i=0\ni=1\ni=2\n");
+    }
+
+    [Fact]
     public void Transpiled_ListAndPrelude_MapFilterFoldQuantifiers()
     {
         // Exercises Int.range, map / filter / fold / size / all / any
