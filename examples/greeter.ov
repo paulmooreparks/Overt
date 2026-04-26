@@ -1,0 +1,35 @@
+// Greeter: a small program that exercises enums with data fields,
+// match-expression dispatch, records-as-strings via interpolation,
+// list construction via the prelude, and for-each iteration.
+//
+// Runs on every back end Overt grows — no host-language extern is
+// involved. The structure is the smallest meaningful "real" program
+// shape: a domain type (the Greeting enum), a function that maps it
+// to text (render), and a main that builds a sequence and iterates.
+
+module greeter
+
+enum Greeting {
+    Hi  { who: String },
+    Bye { who: String },
+}
+
+fn render(g: Greeting) -> String {
+    match g {
+        Greeting.Hi  { who = w } => "hello, ${w}",
+        Greeting.Bye { who = w } => "bye, ${w}",
+    }
+}
+
+fn main() !{io} -> Result<(), IoError> {
+    let names: List<String> = List.concat_three(
+        first  = List.singleton(value = "alice"),
+        middle = List.singleton(value = "bob"),
+        last   = List.singleton(value = "carol"))
+
+    for n in names {
+        println(render(g = Greeting.Hi { who = n }))?
+    }
+    println(render(g = Greeting.Bye { who = "everyone" }))?
+    Ok(())
+}

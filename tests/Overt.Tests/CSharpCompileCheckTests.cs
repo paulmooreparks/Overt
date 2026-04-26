@@ -125,6 +125,7 @@ public class CSharpCompileCheckTests
     [InlineData("refinement.ov")]
     [InlineData("trace.ov")]
     [InlineData("arith_eval.ov")]
+    [InlineData("greeter.ov")]
     // C#-bucket examples — reach `extern "csharp"` for stdlib.
     [InlineData("csharp/ffi.ov")]
     [InlineData("csharp/json.ov")]
