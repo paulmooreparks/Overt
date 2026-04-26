@@ -40,13 +40,6 @@ public class GoCompileCheckTests
     // each one hits, observed by running this sweep against every
     // portable example):
     //
-    //   - state_machine.ov    `match (state, event) { ... }` — tuple-
-    //                         of-enums scrutinee. EmitMatch's path
-    //                         resolution only handles single-enum and
-    //                         stdlib-Result/Option scrutinees; tuple
-    //                         match wants either a synthesized
-    //                         per-axis nested switch or a single
-    //                         struct-key switch.
     //   - effects.ov          Higher-order user fns with effect-row
     //                         polymorphism. Needs the emitter to
     //                         thread `func(...) T` types through
@@ -82,6 +75,7 @@ public class GoCompileCheckTests
     [InlineData("arith_eval.ov")]
     [InlineData("bst.ov")]
     [InlineData("mutation.ov")]
+    [InlineData("state_machine.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())

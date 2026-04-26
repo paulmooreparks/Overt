@@ -798,6 +798,16 @@ public static class GoEmitter
                 EmitMatchStdlibShape(me, stdlib, indent, asReturn);
                 return;
             }
+            // Tuple-of-enums match: `match (a, b) { (EnumA.X, EnumB.Y)
+            // => ..., _ => ... }`. Lowers to a nested type switch
+            // (outer on a, inner on b). The trailing wildcard arm
+            // becomes the default for every level.
+            if (me.Scrutinee is TupleExpr tupleScrut
+                && TryResolveTupleEnumNames(me, tupleScrut.Elements.Length) is { } tupleEnums)
+            {
+                EmitMatchTuple(me, tupleScrut, tupleEnums, indent, asReturn);
+                return;
+            }
             // Determine the scrutinee's enum (if any) by looking at the
             // first arm's pattern path. The type checker has already
             // verified all arms are coherent; we just need a name to
@@ -981,6 +991,195 @@ public static class GoEmitter
                     IdentifierPattern ip => ip.Name,
                     _ => null,
                 };
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// For a match on a tuple scrutinee, infer one enum name per
+        /// position by scanning the arms' tuple-pattern paths. Returns
+        /// the array of names if every position is an enum the module
+        /// declares; null otherwise (in which case the standard
+        /// single-enum lowering will fail with its own diagnostic).
+        /// </summary>
+        private string[]? TryResolveTupleEnumNames(MatchExpr me, int arity)
+        {
+            var names = new string?[arity];
+            foreach (var arm in me.Arms)
+            {
+                if (arm.Pattern is not TuplePattern tp || tp.Elements.Length != arity) continue;
+                for (var i = 0; i < arity; i++)
+                {
+                    if (names[i] is not null) continue;
+                    var sub = tp.Elements[i];
+                    var path = sub switch
+                    {
+                        PathPattern p => p.Path,
+                        RecordPattern r => r.Path,
+                        ConstructorPattern c => c.Path,
+                        _ => default,
+                    };
+                    if (!path.IsDefault && path.Length == 2 && _enums.ContainsKey(path[0]))
+                    {
+                        names[i] = path[0];
+                    }
+                }
+            }
+            for (var i = 0; i < arity; i++)
+            {
+                if (names[i] is null) return null;
+            }
+            return names!;
+        }
+
+        /// <summary>
+        /// Lower a `match (a, b) { (EnumA.X, EnumB.Y) => body, ... }`
+        /// expression to nested Go type switches. The outer switch
+        /// dispatches on the first scrutinee-element's variant; for
+        /// each outer case, an inner switch dispatches on the
+        /// remaining element. A trailing wildcard arm becomes the
+        /// default for every inner switch and the outer.
+        ///
+        /// The lowering is strictly more verbose than a single-level
+        /// switch, but Go has no tuple-pattern construct and the
+        /// alternative (synthesized string keys) costs a string
+        /// allocation per dispatch. The nested-switch shape compiles
+        /// to roughly the same machine code Go generates for the
+        /// human-written equivalent.
+        /// </summary>
+        private void EmitMatchTuple(
+            MatchExpr me,
+            TupleExpr tupleScrut,
+            string[] enumNames,
+            int indent,
+            bool asReturn)
+        {
+            if (tupleScrut.Elements.Length != 2)
+            {
+                throw new NotSupportedException(
+                    "Go back end currently only handles 2-tuple match scrutinees; "
+                    + $"got arity {tupleScrut.Elements.Length}.");
+            }
+            // Bucket each arm by its (outer-variant, inner-variant)
+            // pair. Wildcard is the catch-all at every level.
+            var outerEnum = enumNames[0];
+            var innerEnum = enumNames[1];
+            // outerVariant → (innerVariant, body)[]
+            var groups = new Dictionary<string, List<(string Inner, Expression Body)>>(StringComparer.Ordinal);
+            Expression? wildcardBody = null;
+            foreach (var arm in me.Arms)
+            {
+                if (arm.Pattern is WildcardPattern || arm.Pattern is IdentifierPattern)
+                {
+                    wildcardBody = arm.Body;
+                    continue;
+                }
+                if (arm.Pattern is not TuplePattern tp || tp.Elements.Length != 2)
+                {
+                    throw new NotSupportedException(
+                        "Go back end requires every non-wildcard arm of a tuple "
+                        + "match to be a 2-tuple pattern; got "
+                        + arm.Pattern.GetType().Name);
+                }
+                var outerVar = ExtractVariantOf(tp.Elements[0], outerEnum);
+                var innerVar = ExtractVariantOf(tp.Elements[1], innerEnum);
+                if (outerVar is null || innerVar is null)
+                {
+                    throw new NotSupportedException(
+                        "Go back end tuple match requires per-element patterns to be "
+                        + "qualified variant references like `EnumName.Variant`; "
+                        + $"got {tp.Elements[0].GetType().Name} / {tp.Elements[1].GetType().Name}.");
+                }
+                if (!groups.TryGetValue(outerVar, out var list))
+                {
+                    list = new List<(string, Expression)>();
+                    groups[outerVar] = list;
+                }
+                list.Add((innerVar, arm.Body));
+            }
+
+            var pad = new string('\t', indent);
+            var outerVar2 = $"__mt_{_qCounter++}";
+            var innerVar2 = $"__mt_{_qCounter++}";
+            _sb.Append($"switch {outerVar2} := ");
+            EmitExpression(tupleScrut.Elements[0]);
+            _sb.AppendLine(".(type) {");
+            foreach (var kvp in groups)
+            {
+                _sb.Append(pad);
+                _sb.AppendLine($"case {outerEnum}_{kvp.Key}:");
+                _sb.Append(pad);
+                _sb.AppendLine($"\t_ = {outerVar2}");
+                _sb.Append(pad);
+                _sb.Append($"\tswitch {innerVar2} := ");
+                EmitExpression(tupleScrut.Elements[1]);
+                _sb.AppendLine(".(type) {");
+                foreach (var (inner, body) in kvp.Value)
+                {
+                    _sb.Append(pad);
+                    _sb.AppendLine($"\tcase {innerEnum}_{inner}:");
+                    _sb.Append(pad);
+                    _sb.AppendLine($"\t\t_ = {innerVar2}");
+                    _sb.Append(pad);
+                    _sb.Append("\t\t");
+                    EmitArmBody(body, indent + 2, asReturn);
+                }
+                if (wildcardBody is not null)
+                {
+                    _sb.Append(pad);
+                    _sb.AppendLine("\tdefault:");
+                    _sb.Append(pad);
+                    _sb.AppendLine($"\t\t_ = {innerVar2}");
+                    _sb.Append(pad);
+                    _sb.Append("\t\t");
+                    EmitArmBody(wildcardBody, indent + 2, asReturn);
+                }
+                else
+                {
+                    _sb.Append(pad);
+                    _sb.AppendLine("\tdefault:");
+                    _sb.Append(pad);
+                    _sb.AppendLine("\t\tpanic(\"unreachable: type checker proved tuple match exhaustive\")");
+                }
+                _sb.Append(pad);
+                _sb.AppendLine("\t}");
+            }
+            if (wildcardBody is not null)
+            {
+                _sb.Append(pad);
+                _sb.AppendLine("default:");
+                _sb.Append(pad);
+                _sb.AppendLine($"\t_ = {outerVar2}");
+                _sb.Append(pad);
+                _sb.Append('\t');
+                EmitArmBody(wildcardBody, indent + 1, asReturn);
+            }
+            else
+            {
+                _sb.Append(pad);
+                _sb.AppendLine("default:");
+                _sb.Append(pad);
+                _sb.AppendLine("\tpanic(\"unreachable: type checker proved tuple match exhaustive\")");
+            }
+            _sb.Append(pad);
+            _sb.Append('}');
+        }
+
+        /// <summary>Extract the variant name from a single position of a
+        /// tuple pattern, given the expected enum name. Returns null
+        /// when the pattern shape isn't a qualified variant reference.</summary>
+        private static string? ExtractVariantOf(Pattern p, string enumName)
+        {
+            ImmutableArray<string> path = p switch
+            {
+                PathPattern pp => pp.Path,
+                RecordPattern rp => rp.Path,
+                ConstructorPattern cp => cp.Path,
+                _ => default,
+            };
+            if (!path.IsDefault && path.Length == 2 && path[0] == enumName)
+            {
+                return path[1];
             }
             return null;
         }
