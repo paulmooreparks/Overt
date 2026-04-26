@@ -117,6 +117,18 @@ public static class GoEmitter
         // FieldAccess as a regular field access. Empty when no
         // TypeCheckResult was passed.
         private readonly ImmutableDictionary<SourceSpan, string> _refinementTryFromCalls;
+        // Identifier names that shadow stdlib mappings within the current
+        // function. Populated from the fn's parameter list on entry to
+        // EmitFunction; consulted by MapIdentifier so a user param named
+        // `args` (or `map`, `filter`, etc.) emits as the bare local name
+        // rather than the runtime-fn reference. The set is per-fn rather
+        // than per-block; let-bindings inside the body inherit the same
+        // shadowing rule from Go's lexical scoping (the local var
+        // dominates any same-named runtime fn). Adding let-target names
+        // here would be redundant since MapIdentifier only fires for
+        // stdlib-fn shapes, and Go's normal scoping already handles
+        // user-bound let-locals.
+        private readonly HashSet<string> _shadowingLocals = new(StringComparer.Ordinal);
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -324,13 +336,18 @@ public static class GoEmitter
             // Build the body first so the import set is known by the
             // time we render the file header.
             var hasUserMain = false;
+            var userMainTakesArgs = false;
             foreach (var decl in _module.Declarations)
             {
                 switch (decl)
                 {
                     case FunctionDecl fn:
                         EmitFunction(fn);
-                        if (fn.Name == "main") hasUserMain = true;
+                        if (fn.Name == "main")
+                        {
+                            hasUserMain = true;
+                            userMainTakesArgs = fn.Parameters.Length == 1;
+                        }
                         _sb.AppendLine();
                         break;
 
@@ -376,7 +393,17 @@ public static class GoEmitter
             if (hasUserMain)
             {
                 _sb.AppendLine("func main() {");
-                _sb.AppendLine("\tr := __overt_main()");
+                if (userMainTakesArgs)
+                {
+                    // User main takes `args: List<String>` — read os.Args
+                    // through the runtime's `Args()` (which strips the
+                    // program-path at index 0) and pass it through.
+                    _sb.AppendLine("\tr := __overt_main(overt.Args())");
+                }
+                else
+                {
+                    _sb.AppendLine("\tr := __overt_main()");
+                }
                 _sb.AppendLine("\tif !r.IsOk {");
                 _sb.AppendLine("\t\t_ = overt.Eprintln(r.Err.Error())");
                 _sb.AppendLine("\t\tos.Exit(1)");
@@ -435,6 +462,22 @@ public static class GoEmitter
         private void EmitFunction(FunctionDecl fn)
         {
             var goName = fn.Name == "main" ? "__overt_main" : fn.Name;
+
+            // Refresh the locals-shadowing set for this fn body. MapIdentifier
+            // consults it so a user param named `args` (or any other stdlib
+            // identifier we'd otherwise rewrite) emits as the bare local
+            // name, not the runtime-fn reference. Cleared on fn exit.
+            //
+            // Coverage: parameters + every let-target identifier discovered
+            // by a forward walk of the body. Lex-scoping is approximated as
+            // "any name bound somewhere in this fn shadows the stdlib"; an
+            // outer block's reference past an inner let's scope is rare in
+            // practice, and the conservative shadowing prevents the worst
+            // failure mode (silently rewriting a user variable to a runtime
+            // fn reference).
+            _shadowingLocals.Clear();
+            foreach (var p in fn.Parameters) _shadowingLocals.Add(p.Name);
+            CollectLetBindingNames(fn.Body, _shadowingLocals);
 
             _sb.Append($"func {goName}");
             // Type parameters: emit `[T any, U any, ...]` for any
@@ -1293,6 +1336,21 @@ public static class GoEmitter
                     // Hoist consumed the pre-written pad; we need a
                     // fresh one for the actual line.
                     _sb.Append(pad);
+                }
+                // Trailing-position ReturnExpr: emit `return X` regardless
+                // of asReturn. Common shape inside an if-arm body that
+                // bails out of the enclosing fn early — e.g.
+                // `if bad { eprintln(...)?; return Err(...) }`. The
+                // ReturnExpr can't lower as a value, so the asReturn
+                // path's "return EmitExpression(trailing)" prefix would
+                // produce `return return X` if we naively flowed through.
+                if (trailing is ReturnExpr rx)
+                {
+                    _sb.Append("return ");
+                    EmitExpression(rx.Value);
+                    _sb.AppendLine();
+                    _withHoists.Clear();
+                    return;
                 }
                 if (asReturn)
                 {
@@ -2703,12 +2761,163 @@ public static class GoEmitter
                     break;
 
                 case IdentifierExpr id:
-                    _sb.Append(MapIdentifier(id.Name));
+                    // Skip the stdlib mapping when the name is shadowed by
+                    // an in-scope local: `fn main(args: List<String>)` should
+                    // emit `args` as the local, not `overt.Args`.
+                    if (_shadowingLocals.Contains(id.Name))
+                    {
+                        _sb.Append(id.Name);
+                    }
+                    else
+                    {
+                        _sb.Append(MapIdentifier(id.Name));
+                    }
                     break;
 
                 default:
                     throw new NotSupportedException(
                         $"Go back end does not yet handle expression {expr.GetType().Name}.");
+            }
+        }
+
+        /// <summary>Walk an expression tree and add every let-bound and
+        /// for-each-bound identifier-pattern name to <paramref name="sink"/>.
+        /// Used to seed the per-fn shadowing set so MapIdentifier doesn't
+        /// rewrite a user-bound local to a runtime-fn reference. Conservative
+        /// over scope: a name introduced inside any block shadows for the
+        /// whole fn (see the comment on _shadowingLocals).</summary>
+        private static void CollectLetBindingNames(Expression expr, HashSet<string> sink)
+        {
+            switch (expr)
+            {
+                case BlockExpr b:
+                    foreach (var stmt in b.Statements)
+                    {
+                        switch (stmt)
+                        {
+                            case LetStmt ls when ls.Target is IdentifierPattern lip:
+                                sink.Add(lip.Name);
+                                CollectLetBindingNames(ls.Initializer, sink);
+                                break;
+                            case LetStmt ls when ls.Target is TuplePattern ltp:
+                                foreach (var el in ltp.Elements)
+                                {
+                                    if (el is IdentifierPattern ip) sink.Add(ip.Name);
+                                }
+                                CollectLetBindingNames(ls.Initializer, sink);
+                                break;
+                            case LetStmt ls:
+                                CollectLetBindingNames(ls.Initializer, sink);
+                                break;
+                            case ExpressionStmt es:
+                                CollectLetBindingNames(es.Expression, sink);
+                                break;
+                            case AssignmentStmt asn:
+                                CollectLetBindingNames(asn.Value, sink);
+                                break;
+                            case DiscardStmt ds:
+                                CollectLetBindingNames(ds.Value, sink);
+                                break;
+                        }
+                    }
+                    if (b.TrailingExpression is { } trailing)
+                    {
+                        CollectLetBindingNames(trailing, sink);
+                    }
+                    break;
+                case ForEachExpr fe:
+                    if (fe.Binder is IdentifierPattern fip) sink.Add(fip.Name);
+                    CollectLetBindingNames(fe.Iterable, sink);
+                    CollectLetBindingNames(fe.Body, sink);
+                    break;
+                case IfExpr ie:
+                    CollectLetBindingNames(ie.Condition, sink);
+                    CollectLetBindingNames(ie.Then, sink);
+                    if (ie.Else is { } els) CollectLetBindingNames(els, sink);
+                    break;
+                case WhileExpr we:
+                    CollectLetBindingNames(we.Condition, sink);
+                    CollectLetBindingNames(we.Body, sink);
+                    break;
+                case LoopExpr le:
+                    CollectLetBindingNames(le.Body, sink);
+                    break;
+                case MatchExpr me:
+                    CollectLetBindingNames(me.Scrutinee, sink);
+                    foreach (var arm in me.Arms)
+                    {
+                        // Pattern-bindings inside match arms also shadow.
+                        CollectPatternBindingNames(arm.Pattern, sink);
+                        CollectLetBindingNames(arm.Body, sink);
+                    }
+                    break;
+                case CallExpr c:
+                    CollectLetBindingNames(c.Callee, sink);
+                    foreach (var a in c.Arguments) CollectLetBindingNames(a.Value, sink);
+                    break;
+                case BinaryExpr be:
+                    CollectLetBindingNames(be.Left, sink);
+                    CollectLetBindingNames(be.Right, sink);
+                    break;
+                case UnaryExpr ue:
+                    CollectLetBindingNames(ue.Operand, sink);
+                    break;
+                case PropagateExpr pr:
+                    CollectLetBindingNames(pr.Operand, sink);
+                    break;
+                case ReturnExpr rx:
+                    CollectLetBindingNames(rx.Value, sink);
+                    break;
+                case AwaitExpr aw:
+                    CollectLetBindingNames(aw.Operand, sink);
+                    break;
+                case FieldAccessExpr fa:
+                    CollectLetBindingNames(fa.Target, sink);
+                    break;
+                case TupleExpr te:
+                    foreach (var e in te.Elements) CollectLetBindingNames(e, sink);
+                    break;
+                case RecordLiteralExpr rl:
+                    foreach (var f in rl.Fields) CollectLetBindingNames(f.Value, sink);
+                    break;
+                case WithExpr we:
+                    CollectLetBindingNames(we.Target, sink);
+                    foreach (var u in we.Updates) CollectLetBindingNames(u.Value, sink);
+                    break;
+                case InterpolatedStringExpr isx:
+                    foreach (var p in isx.Parts.OfType<StringInterpolationPart>())
+                    {
+                        CollectLetBindingNames(p.Expression, sink);
+                    }
+                    break;
+                case ParallelExpr pe:
+                    foreach (var t in pe.Tasks) CollectLetBindingNames(t, sink);
+                    break;
+                case RaceExpr re:
+                    foreach (var t in re.Tasks) CollectLetBindingNames(t, sink);
+                    break;
+                case TraceExpr tr:
+                    CollectLetBindingNames(tr.Body, sink);
+                    break;
+                // Leaf expressions (literals, bare identifiers, wildcards)
+                // contribute no bindings; nothing to recurse into.
+            }
+        }
+
+        private static void CollectPatternBindingNames(Pattern p, HashSet<string> sink)
+        {
+            switch (p)
+            {
+                case IdentifierPattern ip: sink.Add(ip.Name); break;
+                case ConstructorPattern cp:
+                    foreach (var arg in cp.Arguments) CollectPatternBindingNames(arg, sink);
+                    break;
+                case TuplePattern tp:
+                    foreach (var el in tp.Elements) CollectPatternBindingNames(el, sink);
+                    break;
+                case RecordPattern rp:
+                    foreach (var f in rp.Fields) CollectPatternBindingNames(f.Subpattern, sink);
+                    break;
             }
         }
 
@@ -2787,13 +2996,24 @@ public static class GoEmitter
 
         private void EmitRecordLiteral(RecordLiteralExpr rl)
         {
-            // Two shapes:
-            //   `Name { ... }`            single-segment record literal
+            // Three shapes:
+            //   `Name { ... }`              single-segment record literal
             //   `EnumName.Variant { ... }`  enum variant constructor with fields
+            //   `IoError { ... }` etc.      stdlib runtime type — prefix with
+            //                               `overt.` and capitalize fields
             string typeName;
+            bool isRuntimeStdlibType = false;
             if (rl.TypeTarget is IdentifierExpr typeId)
             {
-                typeName = typeId.Name;
+                if (IsRuntimeStdlibType(typeId.Name))
+                {
+                    typeName = $"overt.{typeId.Name}";
+                    isRuntimeStdlibType = true;
+                }
+                else
+                {
+                    typeName = typeId.Name;
+                }
             }
             else if (rl.TypeTarget is FieldAccessExpr fa
                 && fa.Target is IdentifierExpr enumId
@@ -2813,12 +3033,38 @@ public static class GoEmitter
             for (var i = 0; i < rl.Fields.Length; i++)
             {
                 if (i > 0) _sb.Append(", ");
-                _sb.Append(rl.Fields[i].Name);
+                // Stdlib runtime types use TitleCase fields per Go's
+                // exported-name convention; user records keep Overt's
+                // lowercase convention. Capitalize the first letter for
+                // runtime types so `IoError { narrative = ... }` lowers
+                // to `overt.IoError{Narrative: ...}`.
+                _sb.Append(isRuntimeStdlibType
+                    ? Capitalize(rl.Fields[i].Name)
+                    : rl.Fields[i].Name);
                 _sb.Append(": ");
                 EmitExpression(rl.Fields[i].Value);
             }
             _sb.Append('}');
         }
+
+        /// <summary>True when <paramref name="name"/> is one of the
+        /// stdlib runtime types defined under runtime/go/overt. The Overt
+        /// source spells them unqualified (`IoError { narrative = "..." }`);
+        /// the Go emit must prefix them with `overt.` and capitalize their
+        /// fields. Kept as a small allow-list rather than scraping the
+        /// runtime — these names are stable design decisions.</summary>
+        private static bool IsRuntimeStdlibType(string name) => name switch
+        {
+            "IoError" => true,
+            "TraceEvent" => true,
+            "RefinementError" => true,
+            _ => false,
+        };
+
+        private static string Capitalize(string s) =>
+            string.IsNullOrEmpty(s) || char.IsUpper(s[0])
+                ? s
+                : char.ToUpperInvariant(s[0]) + s[1..];
 
         private void EmitCall(CallExpr call)
         {
@@ -3206,6 +3452,7 @@ public static class GoEmitter
         {
             "println" => "overt.Println",
             "eprintln" => "overt.Eprintln",
+            "args" => "overt.Args",
             "map" => "overt.Map",
             "filter" => "overt.Filter",
             "fold" => "overt.Fold",

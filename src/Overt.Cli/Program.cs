@@ -200,22 +200,52 @@ static class Cli
     //   2  — usage errors
     public static int RunProgram(string[] args)
     {
+        // CLI args fall into two ranges. Everything before the input file is
+        // an `overt run` CLI option (--help, etc.); everything after is
+        // forwarded to the program's main(args: List<String>) parameter.
+        // The first bare positional arg is the input file. `--` marks
+        // "stop CLI parsing" for users who need to pass --flag-shaped args
+        // to their program: `overt run script.ov -- --port 8080`.
         string? inputFile = null;
-        foreach (var arg in args)
+        var programArgs = new List<string>();
+        var afterDoubleDash = false;
+        for (var i = 0; i < args.Length; i++)
         {
+            var arg = args[i];
+            if (afterDoubleDash)
+            {
+                programArgs.Add(arg);
+                continue;
+            }
+            if (inputFile is not null)
+            {
+                if (arg == "--")
+                {
+                    afterDoubleDash = true;
+                    continue;
+                }
+                programArgs.Add(arg);
+                continue;
+            }
             if (arg is "--help" or "-h")
             {
-                Console.Out.WriteLine("usage: overt run <file.ov>");
+                Console.Out.WriteLine(
+                    "usage: overt run <file.ov> [program-args...]\n"
+                    + "       overt run <file.ov> -- [program-args...]\n"
+                    + "\n"
+                    + "  Program args are forwarded to the program's main(args: List<String>)\n"
+                    + "  parameter when present. Use `--` to pass --flag-shaped args through\n"
+                    + "  unparsed by `overt run`.");
                 return 0;
+            }
+            if (arg == "--")
+            {
+                afterDoubleDash = true;
+                continue;
             }
             if (arg.StartsWith("--", StringComparison.Ordinal))
             {
                 Console.Error.WriteLine($"overt run: unknown option '{arg}'");
-                return 2;
-            }
-            if (inputFile is not null)
-            {
-                Console.Error.WriteLine("overt run: multiple input files not supported");
                 return 2;
             }
             inputFile = arg;
@@ -327,16 +357,38 @@ static class Cli
                 + "        to make it runnable, add `fn main() !{io} -> Result<(), IoError> { ... }`.");
             return 1;
         }
-        if (mainMethod.GetParameters().Length != 0)
+        // `main` accepts either no parameters or a single
+        // `args: List<String>` (lowered to `Overt.Runtime.List<string>`).
+        // Anything else is unsupported — refinement-typed args and
+        // multi-arg shapes need a richer entry-point lowering than the
+        // CLI runner does today.
+        var mainParams = mainMethod.GetParameters();
+        object?[]? invokeArgs = null;
+        if (mainParams.Length == 1)
         {
-            Console.Error.WriteLine("overt run: `main` must take no arguments");
+            var paramType = mainParams[0].ParameterType;
+            var listOfString = typeof(global::Overt.Runtime.List<string>);
+            if (paramType != listOfString)
+            {
+                Console.Error.WriteLine(
+                    $"overt run: `main`'s single parameter must be `args: List<String>`; got `{paramType.Name}`");
+                return 1;
+            }
+            var argList = new global::Overt.Runtime.List<string>(
+                programArgs.ToImmutableArray());
+            invokeArgs = new object?[] { argList };
+        }
+        else if (mainParams.Length > 1)
+        {
+            Console.Error.WriteLine(
+                "overt run: `main` accepts at most one parameter (`args: List<String>`)");
             return 1;
         }
 
         object? result;
         try
         {
-            result = mainMethod.Invoke(null, null);
+            result = mainMethod.Invoke(null, invokeArgs);
             // If `main` is async, it returns a Task<T>; unwrap to T. The async
             // entry point is async Task<Result<...>> — we .GetAwaiter().GetResult()
             // rather than block-via-.Result to preserve exception fidelity.

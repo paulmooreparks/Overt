@@ -15,6 +15,7 @@ package overt
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -363,6 +364,46 @@ func (e RefinementError) String() string {
 // code if the user mixes idioms. The default narrative matches the C#
 // runtime's RefinementError.ToString output verbatim.
 func (e RefinementError) Error() string { return e.String() }
+
+// StringParseInt parses a decimal integer string into a Result. Mirrors
+// the C# Prelude.String.parse_int contract: invariant-formatted (no
+// locale), accepts an optional leading minus, rejects whitespace and
+// trailing junk. Bad input returns Err(IoError) with a narrative that
+// echoes the offending input — matches across targets so a program
+// reading it in either back end gets the same string.
+func StringParseInt(s string) Result[int, IoError] {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return Err[int, IoError](IoError{Narrative: "could not parse '" + s + "' as Int"})
+	}
+	return Ok[int, IoError](n)
+}
+
+// StringParseFloat is the float-shaped sibling. Same contract; same
+// narrative shape on failure.
+func StringParseFloat(s string) Result[float64, IoError] {
+	d, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return Err[float64, IoError](IoError{Narrative: "could not parse '" + s + "' as Float"})
+	}
+	return Ok[float64, IoError](d)
+}
+
+// Args returns the process command-line arguments minus the executable
+// path that os.Args puts at index 0. Mirrors the C# runtime's Prelude.args()
+// — both targets observe the same shape so a program reading argv via
+// `args()` stdlib gets identical behavior across back ends. Returns the
+// empty List when there are no user-supplied args. Effect-row-tracked
+// `!{io}` because it observes process state.
+func Args() List[string] {
+	raw := os.Args
+	if len(raw) <= 1 {
+		return List[string]{Items: []string{}}
+	}
+	out := make([]string, len(raw)-1)
+	copy(out, raw[1:])
+	return List[string]{Items: out}
+}
 
 // IntRange returns the half-open integer range [start, end) as a List.
 // start >= end yields the empty List (Python semantics).

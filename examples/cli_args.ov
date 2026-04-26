@@ -1,0 +1,80 @@
+module cli_args
+
+// Showcases the synergy between `fn main(args: List<String>)` and
+// refinement types' auto-generated `try_from` validators. Each CLI
+// argument that needs validation gets a refinement type with an
+// `else { ... }` clause carrying the domain error variant. Parsing
+// the arg is one `String.parse_int` followed by one `try_from(...)?`
+// call. The compile-time type witnesses that downstream code only
+// ever sees a value the predicate already accepted.
+//
+// A real-world arg-parser library would build atop this: declare
+// the schema as a record of refinement-typed fields, derive the
+// parser from the type, surface every `else { ... }` arm as a
+// per-field error message. The pieces are all here today.
+//
+// Run with:
+//   overt run examples/cli_args.ov 8080 alice
+//   overt run examples/cli_args.ov 99999 alice    # port out of range
+//   overt run examples/cli_args.ov abc alice      # port not a number
+//   overt run examples/cli_args.ov 8080           # missing name
+
+@derive(Debug, Display)
+enum ArgError {
+    PortOutOfRange { got: Int },
+    NameTooLong    { got: String },
+}
+
+// Ports are 1-65535 by IANA; 0 is reserved for "let the OS pick" and
+// rejecting it here is a deliberate domain choice. The else-arm
+// carries the original out-of-range integer so error messages can
+// echo what the user typed.
+type Port = Int where 1 <= self && self <= 65535 else {
+    ArgError.PortOutOfRange { got = self }
+}
+
+// Names have to be present and short enough to fit on one line. The
+// else-arm covers the too-long case; the size==0 case is caught
+// upstream by an explicit check (a refinement carries one else-arm,
+// so multi-failure-mode validators stay hand-written).
+type ShortName = String where length(self) > 0 && length(self) <= 32 else {
+    ArgError.NameTooLong { got = self }
+}
+
+// Bridge the refinement try_from's domain error type to IoError so
+// main can `?`-propagate it. A real arg-parser would format each
+// ArgError variant with a per-field message; here we lean on the
+// `${e}` Display impl that comes from `@derive(Debug, Display)`.
+fn check_port(raw_int: Int) -> Result<Port, IoError> {
+    match Port.try_from(raw_int) {
+        Ok(p)  => Ok(p),
+        Err(e) => Err(IoError { narrative = "port: ${e}" }),
+    }
+}
+
+fn check_name(raw: String) -> Result<ShortName, IoError> {
+    match ShortName.try_from(raw) {
+        Ok(n)  => Ok(n),
+        Err(e) => Err(IoError { narrative = "name: ${e}" }),
+    }
+}
+
+fn main(args: List<String>) !{io} -> Result<(), IoError> {
+    if size(args) != 2 {
+        eprintln("usage: cli_args PORT NAME")?
+        return Err(IoError { narrative = "wrong arg count" })
+    }
+    let port_raw: String = List.at(list = args, index = 0)
+    let name_raw: String = List.at(list = args, index = 1)
+
+    // String.parse_int returns Result<Int, IoError>, so `?` propagates
+    // straight through main's return type. The narrative includes the
+    // offending input, so a user typing "abc" sees `could not parse
+    // 'abc' as Int` without us writing that branch.
+    let port_int: Int    = String.parse_int(s = port_raw)?
+    let port:     Port   = check_port(raw_int = port_int)?
+    let name: ShortName  = check_name(raw = name_raw)?
+
+    println("hello, ${name} on port ${port}")?
+    Ok(())
+}

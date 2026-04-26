@@ -62,6 +62,8 @@ public static class Stdlib
         b["String.starts_with"] = ImmutableArray.Create("s", "prefix");
         b["String.ends_with"] = ImmutableArray.Create("s", "suffix");
         b["String.contains"] = ImmutableArray.Create("s", "needle");
+        b["String.parse_int"] = ImmutableArray.Create("s");
+        b["String.parse_float"] = ImmutableArray.Create("s");
         b["Option.unwrap_or"] = ImmutableArray.Create("opt", "default_value");
         b["Option.unwrap_or_else"] = ImmutableArray.Create("opt", "default_fn");
         b["Result.unwrap_or"] = ImmutableArray.Create("result", "default_value");
@@ -404,6 +406,24 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
             ret: PrimitiveType.Bool));
+
+        // String.parse_int(s: String) -> Result<Int, IoError>
+        // Decimal integer parse with invariant culture. Returns Err with
+        // a narrative `could not parse '<s>' as Int` on rejection;
+        // typical pairing with refinement try_from for CLI arg / config
+        // validation: `parse_int(raw) |>? Port.try_from`.
+        e.Add(Fn("String.parse_int",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Int, Named("IoError"))));
+
+        // String.parse_float(s: String) -> Result<Float, IoError>
+        // Float-shaped sibling of parse_int. Same invariant-culture
+        // posture; same Err narrative shape.
+        e.Add(Fn("String.parse_float",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Float, Named("IoError"))));
 
         // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
         // Returns the inner T on Some, otherwise the default. The

@@ -907,6 +907,149 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_StringParseInt_ValidInput_ReturnsOkWithParsedInt()
+    {
+        const string src = """
+            module parse_int_ok
+
+            fn main() -> Result<Int, IoError> {
+                String.parse_int(s = "8080")
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "parse_int_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Equal(8080,
+            result.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_StringParseInt_InvalidInput_ReturnsErrIoError()
+    {
+        const string src = """
+            module parse_int_err
+
+            fn main() -> Result<Int, IoError> {
+                String.parse_int(s = "not a number")
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "parse_int_err");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var err = result.GetType().GetProperty("Error")!.GetValue(result);
+        Assert.NotNull(err);
+        var narrative = err!.GetType().GetProperty("narrative")!.GetValue(err) as string;
+        Assert.Contains("not a number", narrative);
+        Assert.Contains("as Int", narrative);
+    }
+
+    [Fact]
+    public void Transpiled_StringParseFloat_ValidInput_ReturnsOkWithParsedFloat()
+    {
+        const string src = """
+            module parse_float_ok
+
+            fn main() -> Result<Float, IoError> {
+                String.parse_float(s = "3.14")
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "parse_float_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var val = (double)result.GetType().GetProperty("Value")!.GetValue(result)!;
+        Assert.Equal(3.14, val, precision: 6);
+    }
+
+    [Fact]
+    public void Transpiled_MainWithArgs_ReceivesEmptyListInTestHarness()
+    {
+        // The CompileAndRun harness invokes main with null args, so a
+        // main(args) shape sees the harness-supplied empty list. Verifies
+        // the parameter shape parses, type-checks, and dispatches —
+        // actual arg forwarding is tested via the cli_args.ov example
+        // sweep and the hand-tested CLI invocation.
+        const string src = """
+            module main_with_args
+
+            fn main(args: List<String>) -> Result<Int, IoError> {
+                Ok(size(args))
+            }
+            """;
+
+        var (result, _) = CompileAndRunWithArgs(src, "main_with_args",
+            ImmutableArray.Create("first", "second", "third"));
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Equal(3,
+            result.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    /// <summary>Variant of CompileAndRun that invokes a `main(args)` shape
+    /// with caller-supplied args. The args are wrapped into the runtime's
+    /// List<string> so the user's main signature accepts them directly.
+    /// </summary>
+    private static (object? Result, string Stdout) CompileAndRunWithArgs(
+        string ovSource, string assemblyName, ImmutableArray<string> args)
+    {
+        var lex = Lexer.Lex(ovSource);
+        var parse = Parser.Parse(lex.Tokens);
+        Assert.Empty(parse.Diagnostics);
+        var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(parse.Module);
+        Assert.Empty(resolved.Diagnostics);
+        var typed = Overt.Compiler.Semantics.TypeChecker.Check(parse.Module, resolved);
+        Assert.Empty(typed.Diagnostics);
+        var csharp = CSharpEmitter.Emit(parse.Module, typed);
+
+        var tree = CSharpSyntaxTree.ParseText(csharp, new CSharpParseOptions(LanguageVersion.Latest));
+        var compilation = CSharpCompilation.Create(
+            assemblyName,
+            syntaxTrees: new[] { tree },
+            references: References,
+            options: new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable));
+
+        using var ms = new MemoryStream();
+        var emit = compilation.Emit(ms);
+        if (!emit.Success)
+        {
+            var errs = string.Join("\n", emit.Diagnostics
+                .Where(d => d.Severity == DiagnosticSeverity.Error)
+                .Select(d => "  " + d.GetMessage()));
+            throw new Xunit.Sdk.XunitException(
+                "Emitted C# failed to compile:\n" + errs + "\n\nSource:\n" + csharp);
+        }
+        ms.Position = 0;
+        var asm = Assembly.Load(ms.ToArray());
+
+        var moduleType = asm.GetTypes().FirstOrDefault(t => t.Name == "Module")
+            ?? throw new InvalidOperationException("Module type not found in emitted assembly");
+        var mainMethod = moduleType.GetMethod("main", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Module.main not found");
+
+        var argList = new global::Overt.Runtime.List<string>(args);
+        using var sw = new StringWriter();
+        var previousOut = Console.Out;
+        Console.SetOut(sw);
+        try
+        {
+            var result = mainMethod.Invoke(null, new object?[] { argList });
+            return (result, sw.ToString());
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+        }
+    }
+
+    [Fact]
     public void Transpiled_RefinementTryFrom_OkPath_ReturnsOkWithInnerValue()
     {
         // Auto-generated `Alias.try_from(raw) -> Result<Alias, ErrType>`.

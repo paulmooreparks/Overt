@@ -400,6 +400,32 @@ public static class String
     public static bool starts_with(string s, string prefix) => s.StartsWith(prefix, StringComparison.Ordinal);
     public static bool ends_with(string s, string suffix) => s.EndsWith(suffix, StringComparison.Ordinal);
     public static bool contains(string s, string needle) => s.Contains(needle, StringComparison.Ordinal);
+
+    // Parse helpers. CLI arg parsing and config readers are the typical
+    // callers; both paths want a Result to thread into refinement
+    // try_from. Invariant culture so locale doesn't affect semantics —
+    // Overt programs that need locale-aware parsing build atop these.
+    public static Result<int, IoError> parse_int(string s)
+    {
+        if (int.TryParse(s, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var n))
+        {
+            return new ResultOk<int, IoError>(n);
+        }
+        return new ResultErr<int, IoError>(
+            new IoError($"could not parse '{s}' as Int"));
+    }
+
+    public static Result<double, IoError> parse_float(string s)
+    {
+        if (double.TryParse(s, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            return new ResultOk<double, IoError>(d);
+        }
+        return new ResultErr<double, IoError>(
+            new IoError($"could not parse '{s}' as Float"));
+    }
 }
 
 /// <summary>

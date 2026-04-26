@@ -75,6 +75,7 @@ public class GoCompileCheckTests
     [InlineData("refinement.ov")]
     [InlineData("dashboard.ov")]
     [InlineData("race.ov")]
+    [InlineData("cli_args.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())
