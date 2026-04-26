@@ -738,6 +738,20 @@ public sealed class TypeChecker
                 CheckCallArity(c, ft);
                 CheckCallArgumentTypes(c, ft);
             }
+
+            // Generic-call unification: when the callee's parameter list
+            // contains TypeVarRefs (a generic fn like `NonEmpty.try_from`,
+            // `List.singleton`, `Ok`, etc.), unify each parameter against
+            // the actual argument's inferred type to bind the type
+            // variables. Apply the substitution to ft.Return so the
+            // call's expression type is concrete enough for downstream
+            // consumers (let-targets, match patterns, the emitter's
+            // generic-arg fill-ins). Without this step, a call like
+            // `NonEmpty.try_from(raw)` where raw is `List<String>`
+            // returns `Result<NonEmpty<TypeVar T>, _>`, which the
+            // backends can't render as a concrete C#/Go type.
+            var returnType = UnifyAndSubstituteReturn(ft, c);
+
             // Call-site async wrap: a user-declared fn that uses `.await` in
             // its body emits as `async Task<ReturnType>`, so the value callers
             // see is `Task<ReturnType>`. `.await` at the call site unwraps
@@ -747,13 +761,104 @@ public sealed class TypeChecker
             // Task-ness from the declared return type, not from this wrap.
             if (c.Callee is IdentifierExpr calleeId
                 && _asyncFunctionNames.Contains(calleeId.Name)
-                && ft.Return is not NamedTypeRef { Name: "Task" })
+                && returnType is not NamedTypeRef { Name: "Task" })
             {
-                return new NamedTypeRef("Task", ImmutableArray.Create<TypeRef>(ft.Return));
+                return new NamedTypeRef("Task", ImmutableArray.Create<TypeRef>(returnType));
             }
-            return ft.Return;
+            return returnType;
         }
         return UnknownType.Instance;
+    }
+
+    /// <summary>
+    /// Unify <paramref name="ft"/>'s parameter types against the call
+    /// site's argument types and apply the resulting substitution to
+    /// <c>ft.Return</c>. Returns the substituted return type, or
+    /// <c>ft.Return</c> unchanged when there are no type variables to
+    /// bind. The unification is one-shot (no two-way propagation): if
+    /// the same TypeVar appears in two parameter positions and the
+    /// args disagree, the first binding wins. Good enough for the v1
+    /// generic-fn shapes (refinement try_from, List.singleton, Ok / Err).
+    /// </summary>
+    private TypeRef UnifyAndSubstituteReturn(FunctionTypeRef ft, CallExpr c)
+    {
+        if (!ContainsTypeVar(ft.Return)) return ft.Return;
+
+        var subs = new Dictionary<string, TypeRef>(StringComparer.Ordinal);
+        var argCount = Math.Min(c.Arguments.Length, ft.Parameters.Length);
+        for (var i = 0; i < argCount; i++)
+        {
+            var argType = _expressionTypes.TryGetValue(c.Arguments[i].Value.Span, out var t)
+                ? t
+                : UnknownType.Instance;
+            CollectSubstitutions(ft.Parameters[i], argType, subs);
+        }
+        return subs.Count == 0 ? ft.Return : SubstituteTypeVars(ft.Return, subs);
+    }
+
+    /// <summary>Walk parallel param/arg type structures and bind any
+    /// <see cref="TypeVarRef"/> in the parameter to the corresponding
+    /// concrete (non-TypeVar) shape from the argument. Skips when the
+    /// argument is itself a type variable or not concrete enough — the
+    /// caller has the bind we'd produce already, or the variable stays
+    /// free for downstream code to resolve.</summary>
+    private static void CollectSubstitutions(
+        TypeRef param, TypeRef arg, Dictionary<string, TypeRef> subs)
+    {
+        switch (param)
+        {
+            case TypeVarRef tv when !subs.ContainsKey(tv.Name) && IsConcrete(arg):
+                subs[tv.Name] = arg;
+                break;
+            case NamedTypeRef pn when arg is NamedTypeRef an
+                && pn.Name == an.Name
+                && pn.TypeArguments.Length == an.TypeArguments.Length:
+                for (var i = 0; i < pn.TypeArguments.Length; i++)
+                {
+                    CollectSubstitutions(pn.TypeArguments[i], an.TypeArguments[i], subs);
+                }
+                break;
+            case FunctionTypeRef pf when arg is FunctionTypeRef af
+                && pf.Parameters.Length == af.Parameters.Length:
+                for (var i = 0; i < pf.Parameters.Length; i++)
+                {
+                    CollectSubstitutions(pf.Parameters[i], af.Parameters[i], subs);
+                }
+                CollectSubstitutions(pf.Return, af.Return, subs);
+                break;
+            case TupleTypeRef pt when arg is TupleTypeRef at
+                && pt.Elements.Length == at.Elements.Length:
+                for (var i = 0; i < pt.Elements.Length; i++)
+                {
+                    CollectSubstitutions(pt.Elements[i], at.Elements[i], subs);
+                }
+                break;
+        }
+    }
+
+    /// <summary>Apply a TypeVar → TypeRef substitution map to a TypeRef
+    /// tree. Recurses through NamedTypeRef args, FunctionTypeRef
+    /// params + return, and TupleTypeRef elements; primitives /
+    /// UnknownType / NeverType / unbound TypeVars pass through.</summary>
+    private static TypeRef SubstituteTypeVars(
+        TypeRef type, IReadOnlyDictionary<string, TypeRef> subs)
+    {
+        return type switch
+        {
+            TypeVarRef tv when subs.TryGetValue(tv.Name, out var s) => s,
+            NamedTypeRef nt => new NamedTypeRef(nt.Name,
+                nt.TypeArguments.Select(a => SubstituteTypeVars(a, subs))
+                    .ToImmutableArray()),
+            FunctionTypeRef ft => new FunctionTypeRef(
+                ft.Parameters.Select(p => SubstituteTypeVars(p, subs))
+                    .ToImmutableArray(),
+                SubstituteTypeVars(ft.Return, subs),
+                ft.Effects),
+            TupleTypeRef tt => new TupleTypeRef(
+                tt.Elements.Select(e => SubstituteTypeVars(e, subs))
+                    .ToImmutableArray()),
+            _ => type,
+        };
     }
 
     private void CheckCallArity(CallExpr c, FunctionTypeRef ft)

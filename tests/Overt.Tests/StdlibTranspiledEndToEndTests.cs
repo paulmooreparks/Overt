@@ -1050,6 +1050,83 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_GenericRefinementTryFrom_OkPath_UnifiesElementType()
+    {
+        // Generic refinement try_from: T threads from the alias's
+        // parameter list through the synthesized helper. At the call
+        // site, the type checker unifies T from the argument's element
+        // type so the let-target's `NonEmpty<Int>` annotation matches
+        // the call's `Result<NonEmpty<T>, _>` return after substitution.
+        const string src = """
+            module gen_tryfrom_ok
+
+            type NonEmpty<T> = List<T> where size(self) > 0
+
+            fn main() -> Result<NonEmpty<Int>, RefinementError> {
+                NonEmpty.try_from(List.singleton(value = 42))
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "gen_tryfrom_ok");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
+    public void Transpiled_GenericRefinementTryFrom_ErrPath_ReturnsRefinementError()
+    {
+        // Empty list violates `size(self) > 0`. Without an else-arm,
+        // the synthesized try_from constructs a generic RefinementError
+        // value. The Err arm carries the alias name and predicate
+        // text.
+        const string src = """
+            module gen_tryfrom_err
+
+            type NonEmpty<T> = List<T> where size(self) > 0
+
+            fn main() -> Result<NonEmpty<Int>, RefinementError> {
+                let empty: List<Int> = List.empty()
+                NonEmpty.try_from(empty)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "gen_tryfrom_err");
+        Assert.NotNull(result);
+        Assert.Equal("False",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var err = result.GetType().GetProperty("Error")!.GetValue(result);
+        Assert.NotNull(err);
+        Assert.Equal("NonEmpty",
+            err!.GetType().GetProperty("alias_name")!.GetValue(err) as string);
+    }
+
+    [Fact]
+    public void Transpiled_GenericCall_UnifiesAcrossNestedTypeArgs()
+    {
+        // List.singleton<T>(value: T) -> List<T>. Calling with an Int
+        // argument should infer T = Int and produce `List<Int>` for
+        // size() to consume. Without unification at call sites,
+        // size's `T` would clash against List.singleton's `T` and
+        // either type-check loosely (today's behavior) or fail.
+        const string src = """
+            module gen_unify_nested
+
+            fn main() -> Result<Int, IoError> {
+                let xs: List<Int> = List.singleton(value = 7)
+                Ok(size(xs))
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "gen_unify_nested");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Equal(1,
+            result.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
     public void Transpiled_RefinementTryFrom_OkPath_ReturnsOkWithInnerValue()
     {
         // Auto-generated `Alias.try_from(raw) -> Result<Alias, ErrType>`.
