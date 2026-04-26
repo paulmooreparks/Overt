@@ -71,6 +71,7 @@ public static class Stdlib
         b["Path.parent"] = ImmutableArray.Create("path");
         b["Path.file_name"] = ImmutableArray.Create("path");
         b["Path.extension"] = ImmutableArray.Create("path");
+        b["Process.run"] = ImmutableArray.Create("cmd", "args");
         b["Option.unwrap_or"] = ImmutableArray.Create("opt", "default_value");
         b["Option.unwrap_or_else"] = ImmutableArray.Create("opt", "default_fn");
         b["Result.unwrap_or"] = ImmutableArray.Create("result", "default_value");
@@ -131,6 +132,8 @@ public static class Stdlib
         e.Add(Type("Int"));    // namespace shape for Int.range / etc.
         e.Add(Type("File"));   // namespace shape for File.read_to_string / etc.
         e.Add(Type("Path"));   // namespace shape for Path.join / etc.
+        e.Add(Type("Process")); // namespace shape for Process.run
+        e.Add(Type("ProcessOutput")); // record returned by Process.run
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -494,6 +497,23 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Option", PrimitiveType.String)));
+
+        // ---- Process orchestration ---------------------------------------------
+
+        // Process.run(cmd: String, args: List<String>) !{io} -> Result<ProcessOutput, IoError>
+        // Synchronous, blocks until the process completes. Captures stdout
+        // and stderr in full. A non-zero exit is Ok with output.exit_code
+        // != 0; only launch failures (binary not found, etc.) surface as
+        // Err. Call sites destructure via field access on ProcessOutput.
+        e.Add(Fn("Process.run",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[]
+            {
+                PrimitiveType.String,
+                Generic("List", PrimitiveType.String),
+            },
+            ret: Generic("Result", Named("ProcessOutput"), Named("IoError")),
+            effects: new[] { "io" }));
 
         // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
         // Returns the inner T on Some, otherwise the default. The

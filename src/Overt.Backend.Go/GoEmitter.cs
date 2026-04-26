@@ -1185,6 +1185,8 @@ public static class GoEmitter
                 => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
+            NamedType { Name: "RefinementError" } => "overt.RefinementError",
+            NamedType { Name: "ProcessOutput" } => "overt.ProcessOutput",
             // Opaque host types: declared by `extern "go" type N binds
             // "..."`. The binds-string is the Go-side type expression
             // in import-path form (e.g. `*net/http.Request`); the
@@ -2762,7 +2764,11 @@ public static class GoEmitter
                 case FieldAccessExpr fa:
                     // `EnumName.Variant` (bare-variant constructor) lowers
                     // to `EnumName_Variant{}`. Other field accesses are
-                    // straight Go field reads.
+                    // straight Go field reads — except when the target's
+                    // type is a stdlib runtime record (IoError,
+                    // ProcessOutput, etc.) whose Go-side fields are
+                    // TitleCase per export rules; those need
+                    // capitalization on access.
                     if (fa.Target is IdentifierExpr typeId
                         && _enums.TryGetValue(typeId.Name, out var variants)
                         && IsVariantOf(variants, fa.FieldName))
@@ -2773,7 +2779,9 @@ public static class GoEmitter
                     {
                         EmitExpression(fa.Target);
                         _sb.Append('.');
-                        _sb.Append(fa.FieldName);
+                        _sb.Append(IsStdlibRecordTargetType(fa.Target)
+                            ? Capitalize(fa.FieldName)
+                            : fa.FieldName);
                     }
                     break;
 
@@ -3075,13 +3083,52 @@ public static class GoEmitter
             "IoError" => true,
             "TraceEvent" => true,
             "RefinementError" => true,
+            "ProcessOutput" => true,
             _ => false,
         };
 
-        private static string Capitalize(string s) =>
-            string.IsNullOrEmpty(s) || char.IsUpper(s[0])
-                ? s
-                : char.ToUpperInvariant(s[0]) + s[1..];
+        /// <summary>True when the field-access target's expression-type
+        /// resolves (via the type-check result) to a stdlib runtime
+        /// record. Used at field-access sites to decide whether to
+        /// capitalize the Overt-source field name to its Go-export
+        /// counterpart. Returns false when no type-check result is
+        /// available — keeping the safe Overt-preserving spelling.</summary>
+        private bool IsStdlibRecordTargetType(Expression target)
+        {
+            if (_typeCheck?.ExpressionTypes is not { } expr) return false;
+            if (!expr.TryGetValue(target.Span, out var type)) return false;
+            return type is NamedTypeRef nt
+                && nt.TypeArguments.Length == 0
+                && IsRuntimeStdlibType(nt.Name);
+        }
+
+        /// <summary>Convert Overt's snake_case field name to Go's
+        /// PascalCase export form: `exit_code` → `ExitCode`,
+        /// `narrative` → `Narrative`, `alias_name` → `AliasName`.
+        /// Used at every stdlib-record construction and field-access
+        /// site; a name with no underscores collapses to plain
+        /// first-letter capitalization.</summary>
+        private static string Capitalize(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            if (!s.Contains('_'))
+            {
+                return char.IsUpper(s[0]) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+            }
+            var sb = new StringBuilder(s.Length);
+            var nextUpper = true;
+            foreach (var ch in s)
+            {
+                if (ch == '_')
+                {
+                    nextUpper = true;
+                    continue;
+                }
+                sb.Append(nextUpper ? char.ToUpperInvariant(ch) : ch);
+                nextUpper = false;
+            }
+            return sb.ToString();
+        }
 
         private void EmitCall(CallExpr call)
         {
@@ -3497,7 +3544,7 @@ public static class GoEmitter
             // Allowlist gate: only known stdlib namespaces route here.
             // Unknown namespaces are most likely the user's own enum
             // (variant access) and shouldn't be camelized.
-            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Path"))
+            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Path" or "Process"))
             {
                 return null;
             }

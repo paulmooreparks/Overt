@@ -1050,6 +1050,47 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ProcessRun_CapturesStdoutAndExitCode()
+    {
+        // Run `dotnet --version` (a tool that's reliably installed in the
+        // CI / dev environment that runs this test suite) and assert the
+        // captured output looks reasonable. The exact version string
+        // varies; we just check that exit_code == 0 and stdout is
+        // non-empty. Verifies the round trip — emitter routes the call
+        // to Process.run, runtime spawns/captures, ProcessOutput
+        // destructures via field access on both sides.
+        const string src = """
+            module proc_run
+
+            record Probe {
+                exit_code: Int,
+                stdout_len: Int,
+            }
+
+            fn main() !{io} -> Result<Probe, IoError> {
+                let argv: List<String> = List.singleton(value = "--version")
+                let output: ProcessOutput = Process.run(cmd = "dotnet", args = argv)?
+                Ok(Probe {
+                    exit_code  = output.exit_code,
+                    stdout_len = length(output.stdout),
+                })
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "proc_run");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        var probe = result.GetType().GetProperty("Value")!.GetValue(result);
+        Assert.NotNull(probe);
+        Assert.Equal(0,
+            probe!.GetType().GetProperty("exit_code")!.GetValue(probe));
+        var stdoutLen = (int)probe.GetType().GetProperty("stdout_len")!.GetValue(probe)!;
+        Assert.True(stdoutLen > 0,
+            $"`dotnet --version` produced no stdout (len={stdoutLen})");
+    }
+
+    [Fact]
     public void Transpiled_FileReadToString_RoundTripsViaWriteAllText()
     {
         // Round-trip: write a known string to a temp path, read it back,
