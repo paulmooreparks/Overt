@@ -457,6 +457,12 @@ public static class Formatter
                 FormatExpr(asn.Value, ctx);
                 ctx.Newline();
                 break;
+            case DiscardStmt ds:
+                ctx.WriteIndent();
+                ctx.Write("_ = ");
+                FormatExpr(ds.Value, ctx);
+                ctx.Newline();
+                break;
             case ExpressionStmt es:
                 ctx.WriteIndent();
                 FormatExpr(es.Expression, ctx);
@@ -496,6 +502,10 @@ public static class Formatter
             case PropagateExpr pr:
                 FormatExpr(pr.Operand, ctx);
                 ctx.Write("?");
+                break;
+            case ReturnExpr rx:
+                ctx.Write("return ");
+                FormatExpr(rx.Value, ctx);
                 break;
             case BinaryExpr be: FormatBinary(be, ctx); break;
             case UnaryExpr ue:

@@ -257,6 +257,7 @@ static class Cli
             var csharp = CSharpEmitter.Emit(
                 module.Ast,
                 compiled.TypeChecks[module.Name],
+                compiled.Resolutions[module.Name],
                 module.SourcePath);
             var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
                 csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
@@ -571,7 +572,18 @@ static class Cli
     /// <summary>For a module <paramref name="module"/>, gather the typed
     /// symbol map for every symbol it imports via <c>use</c> from already-
     /// compiled modules. Downstream TypeChecker uses this so a call through
-    /// an imported symbol sees a real signature, not UnknownType.</summary>
+    /// an imported symbol sees a real signature, not UnknownType.
+    ///
+    /// Two shapes need handling. Selective <c>use a.b.{sym1, sym2}</c> only
+    /// pulls the named symbols — iterate ImportedSymbols. Aliased <c>use a.b
+    /// as name</c> exposes every export under the alias namespace, so dotted
+    /// access like <c>name.sym</c> can target any of them; pull them all.
+    /// Without the aliased case, the resolver records <c>name.sym</c> against
+    /// the synthetic module's symbol but the typer never gets that symbol's
+    /// type, and field-access inference falls back to UnknownType — which
+    /// then breaks downstream pattern lowering (e.g. Some/None on a call's
+    /// result, where the discriminant type drives variant-pattern emission).
+    /// </summary>
     static ImmutableDictionary<Symbol, TypeRef> CollectImportedSymbolTypes(
         ModuleDecl module,
         Dictionary<string, ImmutableDictionary<string, Symbol>> exportedSymbols,
@@ -582,12 +594,29 @@ static class Cli
         {
             if (!exportedSymbols.TryGetValue(use.ModuleName, out var exports)) continue;
             if (!symbolTypesByModule.TryGetValue(use.ModuleName, out var exportedTypes)) continue;
-            foreach (var name in use.ImportedSymbols)
+
+            if (use.Alias is not null)
             {
-                if (!exports.TryGetValue(name, out var sym)) continue;
-                if (exportedTypes.TryGetValue(sym, out var type))
+                foreach (var sym in exports.Values)
                 {
-                    builder[sym] = type;
+                    if (exportedTypes.TryGetValue(sym, out var type))
+                    {
+                        builder[sym] = type;
+                    }
+                }
+            }
+            else
+            {
+                foreach (var name in use.ImportedSymbols)
+                {
+                    if (!exports.TryGetValue(name, out var sym))
+                    {
+                        continue;
+                    }
+                    if (exportedTypes.TryGetValue(sym, out var type))
+                    {
+                        builder[sym] = type;
+                    }
                 }
             }
         }
@@ -876,9 +905,10 @@ static class Cli
         var compiled = CompileGraph(inputFile);
         var entry = compiled.Modules[^1]; // topologically last = the entry file
         var typed = compiled.TypeChecks[entry.Name];
+        var resolved = compiled.Resolutions[entry.Name];
 
         var sourcePath = Path.GetFullPath(inputFile);
-        var csharp = CSharpEmitter.Emit(entry.Ast, typed, sourcePath);
+        var csharp = CSharpEmitter.Emit(entry.Ast, typed, resolved, sourcePath);
         Console.Out.Write(csharp);
 
         var combined = compiled.Diagnostics;

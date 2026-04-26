@@ -261,6 +261,21 @@ public sealed record AssignmentStmt(
     Expression Value,
     SourceSpan Span) : Statement(Span);
 
+/// <summary>
+/// Explicit-discard statement: <c>_ = expr</c>. Evaluates <see cref="Value"/>
+/// for its effects and drops the result. Distinct from
+/// <see cref="ExpressionStmt"/> because it suppresses OV0307 (which would
+/// otherwise fire on a bare <c>Result&lt;T, E&gt;</c>): the user has
+/// explicitly chosen to ignore the value here, no diagnostic needed.
+/// Cheaper than <c>let _: T = expr</c> for high-frequency discards
+/// (<c>println</c>, <c>eprintln</c>) — no type annotation, no fresh
+/// binding to collide with the next discard in the same scope.
+/// </summary>
+public sealed record DiscardStmt(
+    Expression Value,
+    SourceSpan Span) : Statement(Span);
+
+
 // ---------- Expressions ----------
 
 public abstract record Expression(SourceSpan Span) : SyntaxNode(Span);
@@ -564,6 +579,19 @@ public sealed record PropagateExpr(
 /// Only legal inside a function whose effect row contains <c>async</c>.</summary>
 public sealed record AwaitExpr(
     Expression Operand,
+    SourceSpan Span) : Expression(Span);
+
+/// <summary>
+/// Early-return: <c>return expr</c>. Exits the enclosing function with
+/// <see cref="Value"/>. Modeled as an expression with <c>NeverType</c>
+/// so it can appear in any position that expects a value — match arm
+/// body, if-arm body, block trailing — and unify cleanly with the
+/// other arms' types. The C# emitter recognizes the shape and lowers
+/// the surrounding context (let/match/if) to statement form so a real
+/// <c>return ...;</c> exits the C# method.
+/// </summary>
+public sealed record ReturnExpr(
+    Expression Value,
     SourceSpan Span) : Expression(Span);
 
 /// <summary>A block expression: <c>{ stmt; stmt; trailingExpr? }</c>. If

@@ -27,6 +27,20 @@ public sealed record UnknownType : TypeRef
 }
 
 /// <summary>
+/// The "bottom" type — the type of expressions that don't return a
+/// value to the surrounding context (currently just <c>return expr</c>;
+/// future <c>panic</c> / infinite-loop forms would share it). Unifies
+/// with any expected type because the surrounding code never observes
+/// a value of this type — control flow has already left.
+/// </summary>
+public sealed record NeverType : TypeRef
+{
+    public static readonly NeverType Instance = new();
+    public override string Display => "Never";
+    private NeverType() { }
+}
+
+/// <summary>
 /// A primitive type (<c>Int</c>, <c>Float</c>, <c>Bool</c>, <c>String</c>, <c>Unit</c>).
 /// Identified by name; the backends map these to host-language primitives.
 /// </summary>

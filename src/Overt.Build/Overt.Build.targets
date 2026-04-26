@@ -59,16 +59,41 @@
     Name="OvertTranspile"
     BeforeTargets="CoreCompile"
     Condition=" '@(OvertCompile)' != '' "
-    Inputs="@(OvertCompile)"
+    Inputs="@(OvertCompile);@(OvertImportSource)"
     Outputs="@(OvertCompile->'$(OvertGeneratedOutputPath)%(Filename).g.cs')">
 
     <PropertyGroup>
       <OvertGeneratedOutputPath Condition=" '$(OvertGeneratedOutputPath)' == '' ">$(IntermediateOutputPath)overt\</OvertGeneratedOutputPath>
     </PropertyGroup>
 
+    <!--
+      EmitEntryPoint = true when the consuming csproj is a console app
+      (OutputType=Exe) AND the user hasn't opted out via
+      <OvertEmitEntryPoint>false</OvertEmitEntryPoint>. The opt-out is
+      there for the unusual case of an Exe project that defines its own
+      Program.cs with top-level statements and just happens to also have
+      an Overt module named `main`.
+    -->
+    <PropertyGroup>
+      <OvertEmitEntryPoint Condition=" '$(OvertEmitEntryPoint)' == '' AND '$(OutputType)' == 'Exe' ">true</OvertEmitEntryPoint>
+      <OvertEmitEntryPoint Condition=" '$(OvertEmitEntryPoint)' == '' ">false</OvertEmitEntryPoint>
+    </PropertyGroup>
+
+    <!--
+      Cross-project Overt-source `use`. Listing
+      <OvertImportSource Include="..\OtherProject\Foo.ov" />
+      in a consuming csproj makes that project's `.ov` symbols visible
+      to this project's resolver, so `use Other.Foo.{bar}` types
+      correctly. The referenced project's own build emits the C# for
+      its modules; this project just needs the symbols. Inputs is
+      extended so a change to the import source invalidates this
+      project's incremental cache too.
+    -->
     <OvertTranspileTask
       SourceFiles="@(OvertCompile)"
-      OutputDirectory="$(OvertGeneratedOutputPath)">
+      ImportSourceFiles="@(OvertImportSource)"
+      OutputDirectory="$(OvertGeneratedOutputPath)"
+      EmitEntryPoint="$(OvertEmitEntryPoint)">
       <Output TaskParameter="GeneratedFiles" ItemName="Compile" />
       <Output TaskParameter="GeneratedFiles" ItemName="FileWrites" />
     </OvertTranspileTask>

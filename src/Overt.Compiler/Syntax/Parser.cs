@@ -910,6 +910,20 @@ public sealed class Parser
                 continue;
             }
 
+            // `_ = expr` is an explicit-discard statement. Cheaper than the
+            // older `let _: T = expr` form: no type annotation needed,
+            // multiple discards in the same scope don't fight each other,
+            // and the typer skips OV0307 because the discard is intentional.
+            // Recognized BEFORE the rebinding-assignment branch so `_` doesn't
+            // get parsed as an identifier name to assign to.
+            if (Check(TokenKind.Identifier) && Current.Lexeme == "_"
+                && Peek(1).Kind == TokenKind.Equals)
+            {
+                statements.Add(ParseDiscardStmt());
+                RejectStrayStatementTerminator();
+                continue;
+            }
+
             // `ident = expr` at statement position is rebinding assignment (only valid for
             // `let mut` bindings; the type checker enforces that later). Named-argument
             // syntax `name = expr` never reaches here because it lives inside a call's
@@ -1072,6 +1086,16 @@ public sealed class Parser
             new SourceSpan(nameToken.Span.Start, value.Span.End));
     }
 
+    private DiscardStmt ParseDiscardStmt()
+    {
+        var underscore = Expect(TokenKind.Identifier, "discard target `_`");
+        Expect(TokenKind.Equals, "discard");
+        var value = ParseExpression();
+        return new DiscardStmt(
+            value,
+            new SourceSpan(underscore.Span.Start, value.Span.End));
+    }
+
     // ---------------------------------------------------------- expressions
 
     private Expression ParseExpression() => ParsePipe();
@@ -1207,7 +1231,25 @@ public sealed class Parser
 
         while (true)
         {
-            if (Check(TokenKind.LeftParen))
+            // `(` continues the expression as a call ONLY when it's on the
+            // same logical line as the callee. A `(` that opens a new line
+            // after a complete expression is the start of the next
+            // statement, not call arguments. Without this rule the parser
+            // greedily folds patterns like
+            //
+            //     let _ = eprintln(line)
+            //     ()
+            //
+            // into `eprintln(line)()` (calling the Result), or
+            //
+            //     let c = String.code_at(s = s, index = i)
+            //     ((48 <= c) || ...)
+            //
+            // into `String.code_at(...)(...)`. Both produced confusing
+            // diagnostics in the SemVer Kit work; gating the call suffix
+            // on same-line-ness eliminates them at the parser level.
+            if (Check(TokenKind.LeftParen)
+                && Current.Span.Start.Line == expr.Span.End.Line)
             {
                 expr = ParseCallTail(expr);
                 continue;
@@ -1469,6 +1511,15 @@ public sealed class Parser
 
             case TokenKind.KeywordMatch:
                 return ParseMatchExpr();
+
+            case TokenKind.KeywordReturn:
+            {
+                var ret = Advance();
+                var value = ParseExpression();
+                return new ReturnExpr(
+                    value,
+                    new SourceSpan(ret.Span.Start, value.Span.End));
+            }
 
             case TokenKind.KeywordParallel:
                 return ParseTaskGroup(parallel: true);

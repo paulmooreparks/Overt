@@ -228,6 +228,66 @@ public static class List
         => new(System.Collections.Immutable.ImmutableArray.Create(value));
     public static List<T> concat_three<T>(List<T> first, List<T> middle, List<T> last)
         => new(first.Items.AddRange(middle.Items).AddRange(last.Items));
+
+    // Indexed access. Out-of-range index is a programmer error (callers
+    // should size()-check first), so it surfaces as
+    // ArgumentOutOfRangeException rather than as a domain error.
+    public static T at<T>(List<T> list, int index)
+    {
+        if ((uint)index >= (uint)list.Items.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                $"List.at: index out of range [0, {list.Items.Length})");
+        }
+        return list.Items[index];
+    }
+}
+
+/// <summary>
+/// Non-generic namespace companion for <c>String.X</c> module-qualified
+/// calls in Overt source. Overt's <c>String</c> primitive lowers to .NET's
+/// <see cref="string"/>; this class collects the operations the prelude
+/// signature table exposes under that namespace.
+/// </summary>
+public static class String
+{
+    // Splits on the literal separator (no regex). Empty separator is a
+    // programmer error and throws. Adjacent separators yield empty
+    // segments (StringSplitOptions.None semantics) — callers that want
+    // empties collapsed can filter() the result.
+    public static List<string> split(string s, string sep)
+    {
+        if (sep.Length == 0)
+        {
+            throw new ArgumentException(
+                "String.split: separator must be non-empty",
+                nameof(sep));
+        }
+        var parts = s.Split(sep, StringSplitOptions.None);
+        return new List<string>(System.Collections.Immutable.ImmutableArray.Create(parts));
+    }
+
+    // Inverse of split. Empty list yields empty string.
+    public static string join(List<string> list, string sep)
+        => string.Join(sep, list.Items);
+
+    // UTF-16 code unit at the given index, as an Int. Useful for
+    // building character-class predicates (digit / alpha / etc.) by
+    // arithmetic on the result, without per-predicate FFI bindings.
+    // Out-of-range index throws.
+    public static int code_at(string s, int index)
+    {
+        if ((uint)index >= (uint)s.Length)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                index,
+                $"String.code_at: index out of range [0, {s.Length})");
+        }
+        return s[index];
+    }
 }
 
 public sealed record Map<K, V>(System.Collections.Immutable.ImmutableDictionary<K, V> Items)
@@ -275,6 +335,26 @@ public static class Prelude
         {
             return Err(new IoError(ex.Message));
         }
+    }
+
+    // The process command-line arguments, minus the executable path that
+    // .NET puts at index 0. Mirrors the contract of `static int Main(
+    // string[] args)`. Returned as an Overt List<String>; callers use
+    // size(), List.at(), etc. The list is computed once per process by
+    // the runtime; repeated calls are cheap.
+    public static List<string> args()
+    {
+        var raw = Environment.GetCommandLineArgs();
+        if (raw.Length <= 1)
+        {
+            return new List<string>(System.Collections.Immutable.ImmutableArray<string>.Empty);
+        }
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<string>(raw.Length - 1);
+        for (var i = 1; i < raw.Length; i++)
+        {
+            builder.Add(raw[i]);
+        }
+        return new List<string>(builder.MoveToImmutable());
     }
 
     public static Result<Unit, IoError> eprintln(string line)
@@ -352,6 +432,26 @@ public static class Prelude
         var acc = seed;
         foreach (var item in list.Items) acc = step(acc, item);
         return acc;
+    }
+
+    // try_map: the sequential, pure cousin of par_map. Walks the list in order
+    // and short-circuits on the first Err. Carries no io/async effect — use
+    // when the callback is a pure validator and the parallelism in par_map
+    // would force unwanted effects into the caller's row.
+    public static Result<List<U>, E> try_map<T, U, E>(List<T> list, Func<T, Result<U, E>> f)
+    {
+        var items = list.Items;
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(items.Length);
+        foreach (var item in items)
+        {
+            var r = f(item);
+            if (r is ResultErr<U, E> err)
+            {
+                return Err<E>(err.Error);
+            }
+            builder.Add(((ResultOk<U, E>)r).Value);
+        }
+        return Ok(new List<U>(builder.MoveToImmutable()));
     }
 
     // Trace is a stdlib namespace-shaped type so transpiled code can write

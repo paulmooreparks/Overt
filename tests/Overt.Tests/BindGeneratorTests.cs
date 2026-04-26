@@ -240,10 +240,13 @@ public class BindGeneratorTests
         // Int32.TryParse(string, out int) is the canonical Try-pattern
         // method. The convention layer drops the trailing out parameter
         // and emits `try` to flag the Try kind for the emitter, which
-        // generates the corresponding multi-statement body.
+        // generates the corresponding multi-statement body. System.Int32
+        // is in the primitive-numerics rule set (no I/O), so the effect
+        // row is empty — the `Option<Int>` return is the only failure
+        // channel.
         var src = BindGenerator.Generate("int32", typeof(int));
         Assert.Contains(
-            "extern \"csharp\" try fn try_parse(s: String) !{io, fails} -> Option<Int>",
+            "extern \"csharp\" try fn try_parse(s: String) -> Option<Int>",
             src);
     }
 

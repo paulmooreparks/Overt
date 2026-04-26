@@ -36,6 +36,32 @@ public static class Stdlib
         Entries.ToImmutableDictionary(e => e.Symbol, e => e.Type);
 
     /// <summary>
+    /// Per-fn parameter names. Populated only for entries that need
+    /// names at emit time — currently the namespace fns (`String.X`,
+    /// `List.X`) reachable through method-call syntax, where the
+    /// emitter must spell the underlying first-arg name when splicing
+    /// the receiver. Lookup keyed by the same fn name as
+    /// <see cref="Symbols"/>; missing entries fall back to no-name
+    /// emission, which is fine because the typer doesn't validate
+    /// argument names against parameter names today.
+    /// </summary>
+    public static ImmutableDictionary<string, ImmutableArray<string>> ParameterNames { get; } =
+        BuildParameterNames();
+
+    private static ImmutableDictionary<string, ImmutableArray<string>> BuildParameterNames()
+    {
+        var b = ImmutableDictionary.CreateBuilder<string, ImmutableArray<string>>(StringComparer.Ordinal);
+        // Names for the stdlib namespace fns whose first arg is the
+        // receiver under method-call syntax. Other fns (println,
+        // map, etc.) don't need this until method-call routes them.
+        b["String.split"]   = ImmutableArray.Create("s", "sep");
+        b["String.join"]    = ImmutableArray.Create("list", "sep");
+        b["String.code_at"] = ImmutableArray.Create("s", "index");
+        b["List.at"]        = ImmutableArray.Create("list", "index");
+        return b.ToImmutable();
+    }
+
+    /// <summary>
     /// Variant names for stdlib enum-shaped types. Consumed by the match-exhaustiveness
     /// check so <c>match opt { Some(x) =&gt; ..., None =&gt; ... }</c> and
     /// <c>match r { Ok(x) =&gt; ..., Err(e) =&gt; ... }</c> get the same treatment as
@@ -75,6 +101,7 @@ public static class Stdlib
         e.Add(Type("Ptr"));
         e.Add(Type("Trace")); // stdlib namespace shape
         e.Add(Type("Task"));  // async-boundary wrapper; see AGENTS.md §9
+        e.Add(Type("String")); // namespace shape for String.split / String.join / etc.
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -113,6 +140,16 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // args() !{io} -> List<String>
+        // Process command-line arguments, minus the exe path. `io` because
+        // it observes process state; effect-row tracking matters when a
+        // library reaches for argv (it has to declare the dependency).
+        e.Add(Fn("args",
+            typeParams: Array.Empty<string>(),
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("List", PrimitiveType.String),
             effects: new[] { "io" }));
 
         // ---- Collection operations ----------------------------------------------
@@ -178,6 +215,22 @@ public static class Stdlib
             ret: Generic("Result", Generic("List", TV("U")), TV("E")),
             effects: new[] { "io", "async" }));
 
+        // try_map<T, U, E>(list: List<T>, f: fn(T) !{E} -> Result<U, E>) !{E} -> Result<List<U>, E>
+        // Sequential, pure cousin of par_map — same shape, no io/async in the
+        // effect row. Short-circuits on the first Err in iteration order.
+        e.Add(Fn("try_map",
+            typeParams: new[] { "T", "U", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(TV("T")),
+                    Generic("Result", TV("U"), TV("E")),
+                    ImmutableArray.Create("E")),
+            },
+            ret: Generic("Result", Generic("List", TV("U")), TV("E")),
+            effects: new[] { "E" }));
+
         // fold<T, U>(list: List<T>, seed: U, step: fn(U, T) -> U) -> U
         e.Add(Fn("fold",
             typeParams: new[] { "T", "U" },
@@ -219,6 +272,45 @@ public static class Stdlib
                 Generic("List", TV("T")),
             },
             ret: Generic("List", TV("T"))));
+
+        // List.at<T>(list: List<T>, index: Int) -> T
+        // Out-of-range index throws at runtime (programmer error, not a domain
+        // condition), so the signature is total — no Result wrap.
+        e.Add(Fn("List.at",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                PrimitiveType.Int,
+            },
+            ret: TV("T")));
+
+        // String.split(s: String, sep: String) -> List<String>
+        // Empty separator throws; adjacent separators yield empty segments
+        // (StringSplitOptions.None semantics).
+        e.Add(Fn("String.split",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("List", PrimitiveType.String)));
+
+        // String.join(list: List<String>, sep: String) -> String
+        e.Add(Fn("String.join",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[]
+            {
+                Generic("List", PrimitiveType.String),
+                PrimitiveType.String,
+            },
+            ret: PrimitiveType.String));
+
+        // String.code_at(s: String, index: Int) -> Int
+        // UTF-16 code unit at the given index. Out-of-range index throws.
+        // Useful for predicate-building (digit/alpha checks via arithmetic
+        // on the result) without a per-predicate FFI binding.
+        e.Add(Fn("String.code_at",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.Int },
+            ret: PrimitiveType.Int));
 
         // Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ()) !{io} -> ()
         e.Add(Fn("Trace.subscribe",

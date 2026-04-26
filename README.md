@@ -29,6 +29,10 @@ LLMs have the inverse profile: **large context, weak causal tracking across call
 
 The target is **optimized for the agent, tolerable for the auditor**. A different point on the curve than any existing language.
 
+Here is a quote from Claude Opus 4.7, after a session spent refining the language:
+
+> The "I am the user" framing is genuinely productive — when I stopped treating my own struggles as "fact of life" and started treating them as "fixable," fixes were small.
+
 For the full argument, see [`DESIGN.md`](DESIGN.md) §1–§2.
 
 ---

@@ -59,7 +59,11 @@ public sealed class NameResolver
             module,
             resolver._resolutions.ToImmutableDictionary(),
             resolver._diagnostics.ToImmutableArray(),
-            resolver._importedSymbols.ToImmutableDictionary(StringComparer.Ordinal));
+            resolver._importedSymbols.ToImmutableDictionary(StringComparer.Ordinal),
+            resolver._aliasedModules.ToImmutableDictionary(
+                kv => kv.Key,
+                kv => kv.Value,
+                StringComparer.Ordinal));
     }
 
     private void ResolveModule()
@@ -415,6 +419,10 @@ public sealed class NameResolver
                 ResolveExpression(aw.Operand, scope);
                 break;
 
+            case ReturnExpr rx:
+                ResolveExpression(rx.Value, scope);
+                break;
+
             case BinaryExpr be:
                 ResolveExpression(be.Left, scope);
                 ResolveExpression(be.Right, scope);
@@ -539,6 +547,11 @@ public sealed class NameResolver
                         _resolutions[new SourceSpan(asn.Span.Start, asn.Span.Start)] = target;
                     }
                     ResolveExpression(asn.Value, scope);
+                    break;
+
+                case DiscardStmt ds:
+                    // `_` doesn't bind anything; just resolve the expression.
+                    ResolveExpression(ds.Value, scope);
                     break;
 
                 case ExpressionStmt es:
@@ -711,8 +724,21 @@ public sealed record ResolutionResult(
     ModuleDecl Module,
     ImmutableDictionary<SourceSpan, Symbol> Resolutions,
     ImmutableArray<Diagnostic> Diagnostics,
-    ImmutableDictionary<string, Symbol>? ImportedSymbols = null)
+    ImmutableDictionary<string, Symbol>? ImportedSymbols = null,
+    ImmutableDictionary<string, ImmutableDictionary<string, Symbol>>? AliasedModules = null)
 {
     public ImmutableDictionary<string, Symbol> ImportedSymbols { get; init; } =
         ImportedSymbols ?? ImmutableDictionary.Create<string, Symbol>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Per-alias export map for <c>use module as alias</c> imports. The
+    /// type checker uses this to drive method-call resolution: given a
+    /// value <c>s: T</c>, search every alias's exports for an instance
+    /// extern fn whose <c>self</c> type matches <c>T</c> and whose name
+    /// matches the field-access name. Lets <c>s.starts_with("0")</c>
+    /// resolve to <c>str.starts_with(self = s, value = "0")</c> without
+    /// the call site spelling out the alias.
+    /// </summary>
+    public ImmutableDictionary<string, ImmutableDictionary<string, Symbol>> AliasedModules { get; init; } =
+        AliasedModules ?? ImmutableDictionary.Create<string, ImmutableDictionary<string, Symbol>>(StringComparer.Ordinal);
 }

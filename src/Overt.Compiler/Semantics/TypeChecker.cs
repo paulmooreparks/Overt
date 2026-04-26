@@ -81,7 +81,89 @@ public sealed class TypeChecker
                 _symbolTypes[symbol] = type;
             }
         }
+
+        // Build the instance-method index: for every aliased module's
+        // exported instance extern fn, record a `(self type name, fn name)
+        // -> (alias, fn symbol, "self")` entry. Lets `s.starts_with("0")`
+        // resolve to the alias's `starts_with` extern when `s: String` is
+        // the declared self type.
+        foreach (var (alias, exports) in resolution.AliasedModules)
+        {
+            foreach (var (memberName, sym) in exports)
+            {
+                if (sym.Declaration is not ExternDecl ed) continue;
+                if (ed.Kind != ExternKind.Instance) continue;
+                if (ed.Parameters.Length < 1) continue;
+                var selfTypeName = ed.Parameters[0].Type switch
+                {
+                    NamedType nt => nt.Name,
+                    _ => null,
+                };
+                if (selfTypeName is null) continue;
+                _instanceMethods[(selfTypeName, memberName)] =
+                    (alias, sym, "self");
+            }
+        }
+
+        // Stdlib namespace fns: any entry shaped `<NsName>.<member>`
+        // whose first parameter type is recognizable as a receiver type
+        // becomes method-call-reachable on values of that type. The
+        // namespace is just the C# emit destination, NOT a constraint
+        // on the first-param type — `String.join(list: List<String>, sep)`
+        // registers under `(List, join)` so `xs.join(sep = ",")` works,
+        // even though `join` lives in the `String` namespace.
+        foreach (var (qualifiedName, sym) in Stdlib.Symbols)
+        {
+            var dotIdx = qualifiedName.IndexOf('.', StringComparison.Ordinal);
+            if (dotIdx <= 0 || dotIdx == qualifiedName.Length - 1) continue;
+            var nsName = qualifiedName[..dotIdx];
+            var memberName = qualifiedName[(dotIdx + 1)..];
+            if (!Stdlib.Types.TryGetValue(sym, out var symType)) continue;
+            if (symType is not FunctionTypeRef fnType) continue;
+            if (fnType.Parameters.Length < 1) continue;
+
+            var firstParamTypeName = fnType.Parameters[0] switch
+            {
+                NamedTypeRef nt => nt.Name,
+                PrimitiveType pt => pt.Name,
+                _ => null,
+            };
+            if (firstParamTypeName is null) continue;
+            if (!Stdlib.ParameterNames.TryGetValue(qualifiedName, out var paramNames)) continue;
+            if (paramNames.Length < 1) continue;
+
+            // Don't overwrite a more-specific instance-extern hit. If a
+            // user's `extern instance fn` already claims (Type, member),
+            // it wins — stdlib registration is the fallback.
+            var key = (firstParamTypeName, memberName);
+            if (_instanceMethods.ContainsKey(key)) continue;
+            _instanceMethods[key] =
+                (Alias: nsName, Fn: sym, ReceiverParamName: paramNames[0]);
+        }
     }
+
+    /// <summary>
+    /// Index of method-call-eligible fns by (receiver type, method name).
+    /// Two sources feed this:
+    /// <list type="bullet">
+    ///   <item>aliased extern instance fns from the resolver's per-alias exports</item>
+    ///   <item>stdlib namespace fns whose qualified name is <c>&lt;Type&gt;.&lt;m&gt;</c>
+    ///     and first parameter type is <c>&lt;Type&gt;</c></item>
+    /// </list>
+    /// Consulted by <see cref="InferFieldAccess"/> when the target is a
+    /// value (not a module alias) so that <c>s.method(args)</c> resolves
+    /// to the underlying fn with the receiver spliced under the right
+    /// parameter name.
+    /// </summary>
+    private readonly Dictionary<(string TypeName, string MethodName), (string Alias, Symbol Fn, string ReceiverParamName)> _instanceMethods =
+        new();
+
+    /// <summary>
+    /// Per-call-site resolution for method-call-syntax field accesses.
+    /// Keyed by the FieldAccess span; the emitter consults this to route
+    /// <c>s.method(args)</c> as <c>alias.method(self: s, args)</c>.
+    /// </summary>
+    private readonly Dictionary<SourceSpan, MethodCallResolution> _methodCallResolutions = new();
 
     public static TypeCheckResult Check(ModuleDecl module, ResolutionResult resolution)
         => Check(module, resolution, importedSymbolTypes: null);
@@ -98,7 +180,8 @@ public sealed class TypeChecker
             checker._symbolTypes.ToImmutableDictionary(),
             checker._expressionTypes.ToImmutableDictionary(),
             checker._diagnostics.ToImmutableArray(),
-            checker._refinementBoundaries.ToImmutableDictionary());
+            checker._refinementBoundaries.ToImmutableDictionary(),
+            checker._methodCallResolutions.ToImmutableDictionary());
     }
 
     // -------------------------------------------------------------- module
@@ -140,6 +223,7 @@ public sealed class TypeChecker
     private static bool BodyContainsAwait(Expression e) => e switch
     {
         AwaitExpr => true,
+        ReturnExpr rx => BodyContainsAwait(rx.Value),
         PropagateExpr pr => BodyContainsAwait(pr.Operand),
         UnaryExpr ue => BodyContainsAwait(ue.Operand),
         BinaryExpr be => BodyContainsAwait(be.Left) || BodyContainsAwait(be.Right),
@@ -152,6 +236,7 @@ public sealed class TypeChecker
         {
             LetStmt ls => BodyContainsAwait(ls.Initializer),
             AssignmentStmt asn => BodyContainsAwait(asn.Value),
+            DiscardStmt ds => BodyContainsAwait(ds.Value),
             ExpressionStmt es => BodyContainsAwait(es.Expression),
             _ => false,
         }) || (b.TrailingExpression is { } t && BodyContainsAwait(t)),
@@ -293,9 +378,14 @@ public sealed class TypeChecker
                         SymbolKind.Parameter, param.Name, param.Span, param);
                     _symbolTypes[paramSymbol] = LowerType(param.Type);
                 }
+                _currentReturnType = f.ReturnType is null
+                    ? PrimitiveType.Unit
+                    : LowerType(f.ReturnType);
+                _currentReturnSpan = f.Span;
                 var bodyType = AnnotateExpression(f.Body);
                 CheckReturnType(f, bodyType);
                 CheckEffectRow(f);
+                _currentReturnType = null;
                 break;
             case TypeAliasDecl t:
                 if (t.Predicate is { } pred) AnnotateExpression(pred);
@@ -304,6 +394,15 @@ public sealed class TypeChecker
         }
         _currentTypeParams = new HashSet<string>();
     }
+
+    /// <summary>
+    /// The enclosing function's declared return type, set on entry to
+    /// <see cref="AnnotateDeclaration"/> for FunctionDecl and consumed by
+    /// the <see cref="ReturnStmt"/> case in <see cref="AnnotateBlock"/>.
+    /// Null outside a function body (in module-level type-aliases, etc.).
+    /// </summary>
+    private TypeRef? _currentReturnType;
+    private SourceSpan _currentReturnSpan;
 
     // ---------------------------------------------- return type check
 
@@ -386,6 +485,7 @@ public sealed class TypeChecker
         CallExpr c => InferCall(c),
         PropagateExpr pr => InferPropagate(pr),
         AwaitExpr aw => InferAwait(aw),
+        ReturnExpr rx => InferReturn(rx),
         BinaryExpr be => InferBinary(be),
         UnaryExpr ue => InferUnary(ue),
 
@@ -442,6 +542,28 @@ public sealed class TypeChecker
         }
 
         var targetType = AnnotateExpression(fa.Target);
+
+        // Method-call syntax: `s.method(args)`. The target is a value
+        // expression (already annotated above); look up `method` in the
+        // instance-method index built from aliased extern uses. If a
+        // matching instance fn exists with self type matching the target,
+        // record the resolution so the emitter can route the call as
+        // `alias.method(self: target, ...args)`. Return the fn type with
+        // the self parameter stripped — the user's call site provides
+        // only the non-self args, so arity-check sees the right shape.
+        if (TypeNameForInstanceLookup(targetType) is { } typeName
+            && _instanceMethods.TryGetValue((typeName, fa.FieldName), out var hit))
+        {
+            _methodCallResolutions[fa.Span] = new MethodCallResolution(
+                hit.Alias, hit.Fn, hit.ReceiverParamName);
+            if (_symbolTypes.TryGetValue(hit.Fn, out var fullType)
+                && fullType is FunctionTypeRef ft
+                && ft.Parameters.Length >= 1)
+            {
+                return ft with { Parameters = ft.Parameters.RemoveAt(0) };
+            }
+        }
+
         if (targetType is NamedTypeRef nt)
         {
             var decl = _module.Declarations
@@ -462,6 +584,17 @@ public sealed class TypeChecker
         }
         return UnknownType.Instance;
     }
+
+    /// <summary>Map a target's inferred type to the type name used as
+    /// the index key in <see cref="_instanceMethods"/>. Primitives (Int,
+    /// String, Bool) and named types both contribute; unknown / function
+    /// / tuple types don't have method-call lookups.</summary>
+    private static string? TypeNameForInstanceLookup(TypeRef t) => t switch
+    {
+        NamedTypeRef nt => nt.Name,
+        PrimitiveType pt => pt.Name,
+        _ => null,
+    };
 
     private void ReportUnknownField(FieldAccessExpr fa, string recordName, RecordDecl decl)
     {
@@ -1107,6 +1240,12 @@ public sealed class TypeChecker
                 case AssignmentStmt asn:
                     AnnotateExpression(asn.Value);
                     break;
+                case DiscardStmt ds:
+                    // Discard is intentional — annotate the expression for
+                    // downstream emission, skip the OV0307 check that
+                    // ExpressionStmt fires for ignored Result values.
+                    AnnotateExpression(ds.Value);
+                    break;
                 case ExpressionStmt es:
                     var stmtType = AnnotateExpression(es.Expression);
                     CheckIgnoredResult(es.Expression, stmtType);
@@ -1122,6 +1261,47 @@ public sealed class TypeChecker
         return b.TrailingExpression is { } tail
             ? AnnotateExpression(tail)
             : PrimitiveType.Unit;
+    }
+
+    /// <summary>
+    /// Annotate the value of a <c>return expr</c> and check it matches
+    /// the enclosing function's declared return type. The expression
+    /// itself has type <see cref="NeverType"/> — it doesn't yield a
+    /// value to the surrounding context — so it slots into match arms,
+    /// if-arms, and any other expression position without forcing the
+    /// other arms to share its type.
+    /// </summary>
+    private TypeRef InferReturn(ReturnExpr rx)
+    {
+        var returnedType = AnnotateExpression(rx.Value);
+
+        if (_currentReturnType is null)
+        {
+            // Outside any function body — shouldn't happen for parsed
+            // input, but belt-and-braces.
+            ReportErrorWithHelp("OV0313",
+                "`return` outside of a function body",
+                rx.Span,
+                "`return` is only valid inside a function body");
+            return NeverType.Instance;
+        }
+
+        CheckRefinementAtBoundary(rx.Value, _currentReturnType,
+            boundaryDescription: "return value");
+
+        var declaredUnfolded = UnfoldAlias(_currentReturnType);
+        var actualUnfolded = UnfoldAlias(returnedType);
+        if (IsConcrete(declaredUnfolded) && IsConcrete(actualUnfolded)
+            && !TypesEqual(declaredUnfolded, actualUnfolded))
+        {
+            ReportErrorWithHelp("OV0301",
+                $"return value type `{returnedType.Display}` "
+                + $"does not match the function's declared return type `{_currentReturnType.Display}`",
+                rx.Value.Span,
+                "either change the declared return type or adjust the returned value");
+        }
+
+        return NeverType.Instance;
     }
 
     /// <summary>Reject <c>break</c>/<c>continue</c> outside a loop body.</summary>
@@ -1283,6 +1463,11 @@ public sealed class TypeChecker
     {
         if (a is UnknownType) return b;
         if (b is UnknownType) return a;
+        // Never is the bottom — joining with anything yields the other.
+        // Lets `if cond { return 1 } else { real_value }` type as the
+        // else-arm's type rather than collapsing to UnknownType.
+        if (a is NeverType) return b;
+        if (b is NeverType) return a;
         return TypesEqual(a, b) ? a : UnknownType.Instance;
     }
 
@@ -1297,6 +1482,12 @@ public sealed class TypeChecker
     private static bool TypesEqual(TypeRef a, TypeRef b)
     {
         if (ReferenceEquals(a, b)) return true;
+        // NeverType unifies with anything: an expression of type Never never
+        // produces a value the surrounding context observes (it transferred
+        // control out via `return`, `panic`, etc.), so its "type" can be
+        // whatever's expected. Lets `match { Ok(v) => v, Err(_) => return 1 }`
+        // type as Version even though the Err arm has no Version value.
+        if (a is NeverType || b is NeverType) return true;
         if (a.GetType() != b.GetType()) return false;
         return (a, b) switch
         {
@@ -1452,6 +1643,7 @@ public sealed class TypeChecker
                     {
                         case LetStmt ls: CollectBodyEffects(ls.Initializer, acc); break;
                         case AssignmentStmt asn: CollectBodyEffects(asn.Value, acc); break;
+                        case DiscardStmt ds: CollectBodyEffects(ds.Value, acc); break;
                         case ExpressionStmt es: CollectBodyEffects(es.Expression, acc); break;
                     }
                 }
@@ -1674,4 +1866,28 @@ public sealed record TypeCheckResult(
     ImmutableDictionary<Symbol, TypeRef> SymbolTypes,
     ImmutableDictionary<SourceSpan, TypeRef> ExpressionTypes,
     ImmutableArray<Diagnostic> Diagnostics,
-    ImmutableDictionary<SourceSpan, string>? RefinementBoundaries = null);
+    ImmutableDictionary<SourceSpan, string>? RefinementBoundaries = null,
+    ImmutableDictionary<SourceSpan, MethodCallResolution>? MethodCallResolutions = null)
+{
+    /// <summary>
+    /// Per-FieldAccess resolutions for method-call-syntax invocations
+    /// (`receiver.method(args)`). Keyed by the FieldAccess span; values
+    /// carry the alias and instance-fn symbol the emitter needs to
+    /// route the call as `alias.fn(self: receiver, ...args)`.
+    /// </summary>
+    public ImmutableDictionary<SourceSpan, MethodCallResolution> MethodCallResolutions { get; init; } =
+        MethodCallResolutions
+        ?? ImmutableDictionary<SourceSpan, MethodCallResolution>.Empty;
+}
+
+/// <summary>
+/// Resolution record for a method-call-syntax FieldAccess. Identifies
+/// the alias namespace the underlying instance fn lives in (so the
+/// C# emit can spell `alias.fn(...)`), the fn symbol itself (for
+/// signature lookup on the call site), and the receiver's parameter
+/// name on the underlying fn — the emitter splices the receiver under
+/// that name. For instance externs that's always <c>"self"</c>; for
+/// stdlib namespace fns it varies (<c>String.split</c> uses
+/// <c>"s"</c>, <c>List.at</c> uses <c>"list"</c>).
+/// </summary>
+public sealed record MethodCallResolution(string Alias, Symbol Fn, string ReceiverParamName);

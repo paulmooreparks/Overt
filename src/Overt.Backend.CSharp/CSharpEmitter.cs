@@ -98,10 +98,15 @@ public sealed class CSharpEmitter
     /// </summary>
     private TypeRef? _currentFnReturn;
 
-    private CSharpEmitter(IndentedWriter w, TypeCheckResult? types, string? sourcePath)
+    private CSharpEmitter(
+        IndentedWriter w,
+        TypeCheckResult? types,
+        ResolutionResult? resolution,
+        string? sourcePath)
     {
         _w = w;
         _types = types;
+        _resolution = resolution;
         _sourcePath = sourcePath;
     }
 
@@ -109,12 +114,27 @@ public sealed class CSharpEmitter
         ModuleDecl module,
         TypeCheckResult? types = null,
         string? sourcePath = null)
+        => Emit(module, types, resolution: null, sourcePath);
+
+    public static string Emit(
+        ModuleDecl module,
+        TypeCheckResult? types,
+        ResolutionResult? resolution,
+        string? sourcePath = null)
     {
         var sb = new StringBuilder();
-        var emitter = new CSharpEmitter(new IndentedWriter(sb), types, sourcePath);
+        var emitter = new CSharpEmitter(new IndentedWriter(sb), types, resolution, sourcePath);
         emitter.EmitModule(module);
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Optional resolution data from the name-resolver pass. Lets the
+    /// emitter look up which symbol an <see cref="IdentifierExpr"/>
+    /// refers to — used by the let-shadow rebinding to substitute
+    /// references to a renamed binding, and only those references.
+    /// </summary>
+    private readonly ResolutionResult? _resolution;
 
     /// <summary>
     /// Emit a <c>#line N "path"</c> directive so the C# compiler writes PDB entries
@@ -183,6 +203,17 @@ public sealed class CSharpEmitter
         _w.WriteLine("// the Overt file, not this generated C#.");
         _w.WriteLine("// </auto-generated>");
         _w.WriteLine("#nullable enable");
+        // Suppress analyzer warnings the user can't act on:
+        //   CS8981 — lowercase Overt-side aliases (e.g. `as int32`) become
+        //            lowercase C# identifiers; the compiler reserves those
+        //            names for future language use, but the alias choice
+        //            comes from user-authored Overt source, not us.
+        //   CS0618 — bulk-imported BCL types include obsolete members
+        //            (e.g. System.String.Copy); BindGenerator surfaces all
+        //            renderable methods so the user has the full surface,
+        //            but Csc complains about the obsolete bindings whether
+        //            or not the user calls them.
+        _w.WriteLine("#pragma warning disable CS8981, CS0618");
         _w.WriteLine();
         _w.WriteLine("using System;");
         _w.WriteLine("using System.Threading.Tasks;");
@@ -756,6 +787,26 @@ public sealed class CSharpEmitter
                 }
         }
 
+        // Hand-bound externs that target another Overt module's emitted
+        // surface (the `Module` static class on the consuming side) are a
+        // passthrough — the bound method already returns the same
+        // `Result<T, E>` we declare on the Overt side, no exception lift.
+        // Without this branch, the wrap-and-catch below would produce
+        // `Ok(call())` for a call that already returns Result, double-
+        // wrapping into `Result<Result<T, E>, E>` and tripping CS0029.
+        // The narrow heuristic — bind target is `*.Module.member` — is
+        // safe because Overt always emits user fns into a `Module`
+        // static class; a hand-bound BCL call to a class genuinely named
+        // `Module` would be exotic enough to warrant an explicit opt-out
+        // path if it ever materializes.
+        var bindsToOvertModule = returnsResult
+            && IsBindsToOvertModule(x.BindsTarget);
+        if (bindsToOvertModule)
+        {
+            _w.WriteLine($"return {callExpr};");
+            return;
+        }
+
         if (!returnsResult)
         {
             // Void or plain-typed return: pass through. Exceptions fly.
@@ -763,6 +814,20 @@ public sealed class CSharpEmitter
             {
                 _w.WriteLine($"{callExpr};");
                 _w.WriteLine("return Unit.Value;");
+            }
+            else if (x.ReturnType is NamedType { Name: "Option", TypeArguments.Length: 1 } optType)
+            {
+                // The convention layer maps a nullable BCL return (`T?`)
+                // onto Overt `Option<T>`. The underlying C# call expression
+                // still produces a possibly-null reference, so lift it into
+                // `Option<T>` here — emitting a bare `return callExpr` would
+                // hit CS0029 (string -> Option<string>).
+                var inner = LowerTypeToCSharpString(optType.TypeArguments[0]);
+                _w.WriteLine($"var __overt_extern_result = {callExpr};");
+                _w.WriteLine(
+                    $"return __overt_extern_result is null"
+                    + $" ? (Option<{inner}>)new OptionNone<{inner}>()"
+                    + $" : (Option<{inner}>)new OptionSome<{inner}>(__overt_extern_result);");
             }
             else
             {
@@ -891,6 +956,28 @@ public sealed class CSharpEmitter
     /// safer than guessing; adding more is a deliberate act.</summary>
     private static bool IsKnownNarrativeError(string name)
         => name is "IoError" or "HttpError" or "LlmError";
+
+    /// <summary>
+    /// True when a binds target points at the static <c>Module</c> class
+    /// emitted by another Overt project — i.e. a target of the shape
+    /// <c>...Module.&lt;member&gt;</c> or bare <c>Module.&lt;member&gt;</c>.
+    /// These bind into Overt-emitted code that already returns Result,
+    /// so the extern body should pass through rather than re-wrap.
+    /// </summary>
+    private static bool IsBindsToOvertModule(string bindsTarget)
+    {
+        var lastDot = bindsTarget.LastIndexOf('.');
+        if (lastDot < 1)
+        {
+            return false;
+        }
+        var typePath = bindsTarget[..lastDot];
+        if (typePath == "Module")
+        {
+            return true;
+        }
+        return typePath.EndsWith(".Module", StringComparison.Ordinal);
+    }
 
     /// <summary>Reflect on the binds target and return true if it resolves to
     /// a public static property or field (accessed bare, without parentheses)
@@ -1057,10 +1144,23 @@ public sealed class CSharpEmitter
             if (block.TrailingExpression is { } tail)
             {
                 EmitLineDirective(tail.Span);
-                EmitHoistsForExpression(tail);
-                _w.Write("return ");
-                WithExpected(declaredReturn, () => EmitExpression(tail));
-                _w.WriteLine(";");
+                if (tail is ReturnExpr rx)
+                {
+                    // The trailing expression is itself a `return X` —
+                    // unwrap it so we emit a single `return X;` rather
+                    // than the nonsensical `return return X;`.
+                    EmitHoistsForExpression(rx.Value);
+                    _w.Write("return ");
+                    WithExpected(declaredReturn, () => EmitExpression(rx.Value));
+                    _w.WriteLine(";");
+                }
+                else
+                {
+                    EmitHoistsForExpression(tail);
+                    _w.Write("return ");
+                    WithExpected(declaredReturn, () => EmitExpression(tail));
+                    _w.WriteLine(";");
+                }
             }
             else if (returnType is UnitType)
             {
@@ -1106,6 +1206,19 @@ public sealed class CSharpEmitter
         switch (stmt)
         {
             case LetStmt ls:
+                // `let _ = return X` (or any let whose initializer IS a return)
+                // is dead-code after the return — emit `return X;` and skip
+                // the binding. Without this, EmitExpression would hit a
+                // ReturnExpr in an expression slot and have nowhere to lower it.
+                if (ls.Initializer is ReturnExpr lsReturn)
+                {
+                    EmitHoistsForExpression(lsReturn.Value);
+                    _w.Write("return ");
+                    EmitExpression(lsReturn.Value);
+                    _w.WriteLine(";");
+                    break;
+                }
+
                 // When the initializer is directly an if / match containing `?`,
                 // lower to statement-level C# if/else or switch with assignments
                 // into a pre-declared temp. This lets the `?`-hoist's early-return
@@ -1120,11 +1233,23 @@ public sealed class CSharpEmitter
                 LiftNestedConditionals(CollectLiftableNestedConditionals(ls.Initializer));
 
                 EmitHoistsForExpression(ls.Initializer);
-                _w.Write("var ");
-                EmitPatternForBinding(ls.Target);
-                _w.Write(" = ");
-                EmitExpression(ls.Initializer);
-                _w.WriteLine(";");
+                if (ls.Target is WildcardPattern)
+                {
+                    // `let _ = expr` — emit the C# discard form so multiple
+                    // discards in the same scope don't redeclare `_` (CS0128).
+                    // The type annotation, if any, isn't needed for a discard.
+                    _w.Write("_ = ");
+                    EmitExpression(ls.Initializer);
+                    _w.WriteLine(";");
+                }
+                else
+                {
+                    _w.Write("var ");
+                    EmitPatternForBinding(ls.Target);
+                    _w.Write(" = ");
+                    EmitExpression(ls.Initializer);
+                    _w.WriteLine(";");
+                }
                 break;
 
             case AssignmentStmt asn:
@@ -1141,6 +1266,18 @@ public sealed class CSharpEmitter
 
             case ExpressionStmt es:
                 EmitExpressionAsStatement(es.Expression);
+                break;
+
+            case DiscardStmt ds:
+                // `_ = expr;` — C# discard form. Repeats freely in scope
+                // (no fresh binding) and also accepts non-Result types
+                // gracefully. Hoist any `?` inside the expression first
+                // (same pre-pass as let/assignment).
+                LiftNestedConditionals(CollectLiftableNestedConditionals(ds.Value));
+                EmitHoistsForExpression(ds.Value);
+                _w.Write("_ = ");
+                EmitExpression(ds.Value);
+                _w.WriteLine(";");
                 break;
 
             case BreakStmt:
@@ -1178,6 +1315,31 @@ public sealed class CSharpEmitter
         if (!NeedsStmtLowering(ls.Initializer)) return false;
 
         var targetType = LowerType(ls.Type);
+
+        // Shadow guard: if any pattern in the lowered if/match shares
+        // its binding name with the let target, the natural C# emit
+        // (`Type name; switch { case Pat(var name): ... }`) hits CS0136
+        // — C# treats sibling-scope same-name declarations as
+        // shadowing, even if textually they don't overlap. Skip the
+        // user's name entirely: emit the let target as a synthesized
+        // C# variable, and route subsequent IdentifierExpr references
+        // (the ones that resolve to *this* let binding) to the same
+        // synthesized name. Other bindings sharing the textual name —
+        // pattern bindings inside a later match arm, say — keep their
+        // own emit because resolution distinguishes them by symbol.
+        if (_resolution is not null
+            && InitializerBindingsCollideWith(ls.Initializer, ip.Name))
+        {
+            var temp = $"__let_{ip.Name}_{_letCounter++}";
+            _renamedBindings[ip.Span] = temp;
+            _w.Write(CSharpTypeDisplay(targetType));
+            _w.Write(" ");
+            _w.Write(temp);
+            _w.WriteLine(";");
+            AssignInto(temp, ls.Initializer, targetType);
+            return true;
+        }
+
         _w.Write(CSharpTypeDisplay(targetType));
         _w.Write(" ");
         _w.Write(EscapeId(ip.Name));
@@ -1185,6 +1347,49 @@ public sealed class CSharpEmitter
         AssignInto(EscapeId(ip.Name), ls.Initializer, targetType);
         return true;
     }
+
+    private int _letCounter;
+
+    /// <summary>
+    /// Map from a let-binding's declaration span to the synthesized C#
+    /// name the emitter chose for it (because the natural name would
+    /// collide with a pattern binding inside the let's lowered match).
+    /// IdentifierExpr emit consults this via the resolver so only
+    /// references to *this specific binding* get rewritten — same-named
+    /// pattern bindings inside other arms keep their natural emit.
+    /// </summary>
+    private readonly Dictionary<SourceSpan, string> _renamedBindings = new();
+
+    /// <summary>
+    /// True iff any pattern binding inside the let's initializer (across
+    /// every if/match arm we'll lower) reuses <paramref name="targetName"/>.
+    /// Drives the shadow-guard rebind in <see cref="TryEmitStmtLoweredLet"/>.
+    /// </summary>
+    private static bool InitializerBindingsCollideWith(Expression e, string targetName) => e switch
+    {
+        IfExpr ie => BlockBindingsCollide(ie.Then, targetName)
+            || (ie.Else is { } elseBlock && BlockBindingsCollide(elseBlock, targetName)),
+        MatchExpr me => me.Arms.Any(arm =>
+            PatternBindsName(arm.Pattern, targetName)
+            || (arm.Body is BlockExpr ab && BlockBindingsCollide(ab, targetName))),
+        _ => false,
+    };
+
+    private static bool BlockBindingsCollide(BlockExpr block, string targetName)
+        => block.Statements.Any(s => s switch
+        {
+            LetStmt ls when ls.Target is IdentifierPattern lp => lp.Name == targetName,
+            _ => false,
+        });
+
+    private static bool PatternBindsName(Pattern p, string name) => p switch
+    {
+        IdentifierPattern ip => ip.Name == name,
+        ConstructorPattern cp => cp.Arguments.Any(a => PatternBindsName(a, name)),
+        RecordPattern rp => rp.Fields.Any(f => PatternBindsName(f.Subpattern, name)),
+        TuplePattern tp => tp.Elements.Any(el => PatternBindsName(el, name)),
+        _ => false,
+    };
 
     private bool TryEmitStmtLoweredAssign(AssignmentStmt asn)
     {
@@ -1320,6 +1525,7 @@ public sealed class CSharpEmitter
             {
                 case LetStmt ls: Visit(ls.Initializer, false); break;
                 case AssignmentStmt asn: Visit(asn.Value, false); break;
+                case DiscardStmt ds: Visit(ds.Value, false); break;
                 case ExpressionStmt es: Visit(es.Expression, false); break;
             }
         }
@@ -1337,14 +1543,65 @@ public sealed class CSharpEmitter
         if (e is IfExpr ie)
         {
             return ContainsPropagate(ie.Then)
-                || (ie.Else is { } elseBlock && ContainsPropagate(elseBlock));
+                || (ie.Else is { } elseBlock && ContainsPropagate(elseBlock))
+                || ContainsReturn(ie.Then)
+                || (ie.Else is { } elseBlock2 && ContainsReturn(elseBlock2));
         }
         if (e is MatchExpr me)
         {
-            return me.Arms.Any(arm => ContainsPropagate(arm.Body));
+            return me.Arms.Any(arm => ContainsPropagate(arm.Body))
+                || me.Arms.Any(arm => ContainsReturn(arm.Body));
         }
         return false;
     }
+
+    /// <summary>
+    /// True iff a match-arm or if-arm body's flow exits the enclosing
+    /// method via <c>return</c> (so the C# emit shouldn't follow the
+    /// arm body with a <c>break;</c> — it'd be flagged as unreachable).
+    /// Two shapes count: the body is a <see cref="ReturnExpr"/> directly,
+    /// or it's a <see cref="BlockExpr"/> whose trailing expression is a
+    /// <see cref="ReturnExpr"/>.
+    /// </summary>
+    private static bool ArmExitsViaReturn(Expression body) => body switch
+    {
+        ReturnExpr => true,
+        BlockExpr b => b.TrailingExpression is ReturnExpr,
+        _ => false,
+    };
+
+    /// <summary>True iff the expression subtree contains a
+    /// <see cref="ReturnExpr"/>. Mirrors <see cref="ContainsPropagate"/>:
+    /// signals to <see cref="NeedsStmtLowering"/> that the surrounding
+    /// let/if/match initializer must lower to statement form so the
+    /// `return` actually exits the C# method.</summary>
+    private static bool ContainsReturn(Expression e) => e switch
+    {
+        ReturnExpr => true,
+        PropagateExpr pr => ContainsReturn(pr.Operand),
+        AwaitExpr aw => ContainsReturn(aw.Operand),
+        UnaryExpr ue => ContainsReturn(ue.Operand),
+        BinaryExpr be => ContainsReturn(be.Left) || ContainsReturn(be.Right),
+        CallExpr c => ContainsReturn(c.Callee) || c.Arguments.Any(a => ContainsReturn(a.Value)),
+        FieldAccessExpr fa => ContainsReturn(fa.Target),
+        IfExpr ie => ContainsReturn(ie.Condition) || ContainsReturn(ie.Then)
+            || (ie.Else is { } b && ContainsReturn(b)),
+        MatchExpr me => ContainsReturn(me.Scrutinee) || me.Arms.Any(a => ContainsReturn(a.Body)),
+        BlockExpr b => b.Statements.Any(s => s switch
+        {
+            LetStmt ls => ContainsReturn(ls.Initializer),
+            AssignmentStmt asn => ContainsReturn(asn.Value),
+            DiscardStmt ds => ContainsReturn(ds.Value),
+            ExpressionStmt es => ContainsReturn(es.Expression),
+            _ => false,
+        }) || (b.TrailingExpression is { } t && ContainsReturn(t)),
+        TupleExpr te => te.Elements.Any(ContainsReturn),
+        RecordLiteralExpr rl => rl.Fields.Any(f => ContainsReturn(f.Value)),
+        WithExpr we => ContainsReturn(we.Target) || we.Updates.Any(u => ContainsReturn(u.Value)),
+        InterpolatedStringExpr isx => isx.Parts.OfType<StringInterpolationPart>()
+            .Any(p => ContainsReturn(p.Expression)),
+        _ => false,
+    };
 
     /// <summary>Whether an expression subtree contains any <c>?</c> or <c>|&gt;?</c>
     /// site. Used by <see cref="NeedsStmtLowering"/> to decide between the
@@ -1375,6 +1632,7 @@ public sealed class CSharpEmitter
     {
         LetStmt ls => ContainsPropagate(ls.Initializer),
         AssignmentStmt asn => ContainsPropagate(asn.Value),
+        DiscardStmt ds => ContainsPropagate(ds.Value),
         ExpressionStmt es => ContainsPropagate(es.Expression),
         _ => false,
     };
@@ -1400,6 +1658,7 @@ public sealed class CSharpEmitter
         {
             LetStmt ls => BodyContainsAwaitExpr(ls.Initializer),
             AssignmentStmt asn => BodyContainsAwaitExpr(asn.Value),
+            DiscardStmt ds => BodyContainsAwaitExpr(ds.Value),
             ExpressionStmt es => BodyContainsAwaitExpr(es.Expression),
             _ => false,
         }) || (b.TrailingExpression is { } t && BodyContainsAwaitExpr(t)),
@@ -1464,8 +1723,30 @@ public sealed class CSharpEmitter
                         using (_w.Indent())
                         {
                             AssignIntoExpression(target, arm.Body, targetType);
-                            _w.WriteLine("break;");
+                            // Skip the `break;` when the arm exits via
+                            // `return` — C# would flag it as unreachable
+                            // (CS0162), which is an error under
+                            // TreatWarningsAsErrors. The default-arm at
+                            // the bottom keeps the switch exhaustive for
+                            // definite-assignment analysis.
+                            if (!ArmExitsViaReturn(arm.Body))
+                            {
+                                _w.WriteLine("break;");
+                            }
                         }
+                    }
+                    // Default arm so C# definite-assignment analysis sees
+                    // an exhaustive switch and the variable is provably
+                    // assigned (or the method has exited) after the
+                    // switch — the Overt typer rejects non-exhaustive
+                    // matches at OV0308, so this default is unreachable
+                    // in well-typed programs.
+                    _w.WriteLine("default:");
+                    using (_w.Indent())
+                    {
+                        _w.WriteLine(
+                            "throw new global::System.InvalidOperationException("
+                            + "\"Overt match: unreachable arm\");");
                     }
                 }
                 _w.WriteLine("}");
@@ -1507,7 +1788,16 @@ public sealed class CSharpEmitter
     /// This is the right thing when we're already at statement position.</summary>
     private void AssignIntoExpression(string target, Expression e, TypeRef targetType)
     {
-        if (e is BlockExpr b)
+        if (e is ReturnExpr rx)
+        {
+            // The "value" being assigned is itself a return — control
+            // flow exits the enclosing method here, no assignment needed.
+            EmitHoistsForExpression(rx.Value);
+            _w.Write("return ");
+            EmitExpression(rx.Value);
+            _w.WriteLine(";");
+        }
+        else if (e is BlockExpr b)
         {
             AssignIntoBlock(target, b, targetType);
         }
@@ -1745,6 +2035,18 @@ public sealed class CSharpEmitter
     {
         switch (expr)
         {
+            case ReturnExpr rx:
+                // `return X` at statement position lowers to a real C#
+                // return. Hoist any `?` inside the returned expression
+                // first so an inner Err exits via early-return rather
+                // than threading the `return` through a Result wrap.
+                LiftNestedConditionals(CollectLiftableNestedConditionals(rx.Value));
+                EmitHoistsForExpression(rx.Value);
+                _w.Write("return ");
+                EmitExpression(rx.Value);
+                _w.WriteLine(";");
+                break;
+
             case IfExpr ie:
                 _w.Write("if (");
                 EmitExpression(ie.Condition);
@@ -1909,7 +2211,20 @@ public sealed class CSharpEmitter
                 break;
 
             case IdentifierExpr id:
-                _w.Write(EscapeId(id.Name));
+                // If this identifier resolves to a let binding the
+                // shadow-guard renamed (see TryEmitStmtLoweredLet), write
+                // the synthesized C# name instead. Other identifiers —
+                // including pattern bindings that happen to share the
+                // textual name — go through the default escape path.
+                if (_resolution?.Resolutions.TryGetValue(id.Span, out var sym) == true
+                    && _renamedBindings.TryGetValue(sym.DeclarationSpan, out var rebound))
+                {
+                    _w.Write(rebound);
+                }
+                else
+                {
+                    _w.Write(EscapeId(id.Name));
+                }
                 break;
 
             case FieldAccessExpr fa:
@@ -1926,6 +2241,18 @@ public sealed class CSharpEmitter
                     // needs T to unify with the base, not the specific variant's type.
                     var baseName = ((IdentifierExpr)fa.Target).Name;
                     _w.Write($"(({baseName})new {baseName}_{fa.FieldName}())");
+                }
+                else if (fa.Target is IdentifierExpr { Name: "String" })
+                {
+                    // `String.split` / `String.join` / `String.code_at` etc. land
+                    // on the static <c>Overt.Runtime.String</c> class. Emit the
+                    // fully-qualified name; bare <c>String</c> would collide with
+                    // <c>System.String</c> (in scope via the generated `using
+                    // System;` line). User code can't add methods to the primitive
+                    // String type, so any <c>String.X</c> dotted access must be a
+                    // stdlib namespace call — the qualification is safe.
+                    _w.Write("global::Overt.Runtime.String.");
+                    _w.Write(EscapeId(fa.FieldName));
                 }
                 else
                 {
@@ -1970,6 +2297,20 @@ public sealed class CSharpEmitter
                 EmitExpression(aw.Operand);
                 _w.Write(")");
                 break;
+
+            case ReturnExpr:
+                // ReturnExpr should only be emitted via the dedicated paths
+                // in EmitStatement / AssignIntoExpression / EmitExpressionAsStatement
+                // / EmitBlockAsMethodBody / NeedsStmtLowering. Hitting this
+                // branch means a `return` slipped into an unsupported
+                // position (e.g. inside a tuple element or a record field
+                // initializer). Surface it at codegen time so the bug is
+                // visible rather than producing weird-looking C#.
+                throw new InvalidOperationException(
+                    "ReturnExpr in unsupported position — `return` must appear "
+                    + "in a statement context (block trailing, match/if arm body, "
+                    + "or as an expression statement). Lifting `return` out of a "
+                    + "deeper expression position is not yet implemented.");
 
             case BinaryExpr be:
                 EmitBinary(be);
@@ -2094,6 +2435,18 @@ public sealed class CSharpEmitter
         // `List.empty<T>()`, `None()` → `None<T>()`.
         if (TryEmitInferenceHelper(c)) return;
 
+        // Method-call syntax: `s.method(args)` where the typer resolved
+        // the FieldAccess to an aliased instance extern. Route the call
+        // as `alias.method(self: receiver, ...args)` so the underlying
+        // C# binding still receives `self` as its first parameter, but
+        // the call site reads naturally with the receiver leading.
+        if (c.Callee is FieldAccessExpr methodFa
+            && _types?.MethodCallResolutions.TryGetValue(methodFa.Span, out var methodCall) == true)
+        {
+            EmitMethodCall(c, methodFa, methodCall);
+            return;
+        }
+
         // For stdlib constructors like `Ok(x)` / `Err(e)` / `Some(x)`, the argument
         // expected type comes from the expected Result / Option type.
         var argExpectedTypes = ArgumentExpectedTypes(c);
@@ -2113,6 +2466,58 @@ public sealed class CSharpEmitter
         }
         _w.Write(")");
     }
+
+    /// <summary>
+    /// Emit a call site that the typer resolved as method-call syntax —
+    /// `receiver.method(args)`. Lowers to
+    /// <c>alias.method(receiverParamName: receiver, args...)</c>. Two
+    /// resolution sources flow through here:
+    /// <list type="bullet">
+    ///   <item>Aliased instance externs: <c>alias</c> is the user's
+    ///     `as alias` choice, receiver param name is <c>self</c>.</item>
+    ///   <item>Stdlib namespace fns: <c>alias</c> is the namespace
+    ///     name (<c>String</c>, <c>List</c>); receiver param name is
+    ///     the underlying fn's first param name. The <c>String</c>
+    ///     case picks up the existing
+    ///     <c>global::Overt.Runtime.String</c> qualifier rewrite so
+    ///     it doesn't collide with <c>System.String</c>.</item>
+    /// </list>
+    /// </summary>
+    private void EmitMethodCall(CallExpr c, FieldAccessExpr fa, MethodCallResolution res)
+    {
+        _w.Write(QualifyMethodCallAlias(res.Alias));
+        _w.Write(".");
+        _w.Write(EscapeId(fa.FieldName));
+        _w.Write("(");
+        _w.Write(EscapeId(res.ReceiverParamName));
+        _w.Write(": ");
+        EmitExpression(fa.Target);
+        foreach (var arg in c.Arguments)
+        {
+            _w.Write(", ");
+            if (arg.Name is { } name)
+            {
+                _w.Write(EscapeId(name));
+                _w.Write(": ");
+            }
+            EmitExpression(arg.Value);
+        }
+        _w.Write(")");
+    }
+
+    /// <summary>
+    /// Map an Overt-side alias to its C# class spelling. <c>String</c>
+    /// resolves to <c>global::Overt.Runtime.String</c> to avoid colliding
+    /// with the BCL <c>System.String</c> brought in by <c>using System;</c>.
+    /// Other aliases (user-chosen aliases for FFI, plus other stdlib
+    /// namespaces like <c>List</c>) emit as-is — the C# code uses them
+    /// directly.
+    /// </summary>
+    private static string QualifyMethodCallAlias(string alias) => alias switch
+    {
+        "String" => "global::Overt.Runtime.String",
+        _ => alias,
+    };
 
     /// <summary>
     /// Emit one of the small number of stdlib no-arg generic factories whose type
@@ -2301,9 +2706,15 @@ public sealed class CSharpEmitter
                     _w.Write(StripQuotesForInterp(lp.Text, isFirst: i == 0, isLast: i == isx.Parts.Length - 1));
                     break;
                 case StringInterpolationPart ip:
-                    _w.Write("{");
+                    // Wrap the inner expression in parens. C# treats `,`
+                    // (alignment) and `:` (format-spec) as terminators
+                    // inside an interpolation hole, so any expression
+                    // containing them at top level — named call args
+                    // (`fn(name = arg)` lowers to `fn(name: arg)`),
+                    // ternaries, etc. — gets misparsed without the parens.
+                    _w.Write("{(");
                     EmitExpression(ip.Expression);
-                    _w.Write("}");
+                    _w.Write(")}");
                     break;
             }
         }
@@ -2497,8 +2908,22 @@ public sealed class CSharpEmitter
             foreach (var stmt in block.Statements) EmitStatement(stmt);
             if (block.TrailingExpression is { } tail)
             {
-                EmitExpression(tail);
-                _w.WriteLine(";");
+                if (tail is ReturnExpr rx)
+                {
+                    // Trailing-expr-as-statement that's a return: emit a
+                    // real `return X;`, not `return X;` wrapped in an
+                    // expression-statement (which would re-trigger the
+                    // ReturnExpr throw in EmitExpression).
+                    EmitHoistsForExpression(rx.Value);
+                    _w.Write("return ");
+                    EmitExpression(rx.Value);
+                    _w.WriteLine(";");
+                }
+                else
+                {
+                    EmitExpression(tail);
+                    _w.WriteLine(";");
+                }
             }
         }
         _w.WriteLine("}");
@@ -2568,28 +2993,92 @@ public sealed class CSharpEmitter
             && IsPascalCase(enumName.Name)
             && IsPascalCase(fa.FieldName))
         {
+            var variantFields = LookupVariantFields(enumName.Name, fa.FieldName);
             _w.Write($"(({enumName.Name})new {enumName.Name}_{fa.FieldName}(");
-            EmitFieldInits(rl.Fields);
+            EmitFieldInits(rl.Fields, variantFields);
             _w.Write("))");
             return;
         }
 
+        var recordFields = rl.TypeTarget is IdentifierExpr recordName
+            ? LookupRecordFields(recordName.Name)
+            : null;
         _w.Write("new ");
         EmitExpression(rl.TypeTarget);
         _w.Write("(");
-        EmitFieldInits(rl.Fields);
+        EmitFieldInits(rl.Fields, recordFields);
         _w.Write(")");
     }
 
-    private void EmitFieldInits(ImmutableArray<FieldInit> fields)
+    private void EmitFieldInits(
+        ImmutableArray<FieldInit> fields,
+        ImmutableArray<RecordField>? declared)
     {
         for (var i = 0; i < fields.Length; i++)
         {
             if (i > 0) _w.Write(", ");
             _w.Write(EscapeId(fields[i].Name));
             _w.Write(": ");
-            EmitExpression(fields[i].Value);
+            // When we know the field's declared type (record or enum-variant
+            // construction in this module), thread it as the expected type so
+            // generic-inference helpers (List.empty, None) emit with explicit
+            // type arguments.
+            var expected = declared is { } decls
+                ? FindFieldType(decls, fields[i].Name)
+                : null;
+            if (expected is not null)
+            {
+                WithExpected(expected, () => EmitExpression(fields[i].Value));
+            }
+            else
+            {
+                EmitExpression(fields[i].Value);
+            }
         }
+    }
+
+    private ImmutableArray<RecordField>? LookupRecordFields(string name)
+    {
+        if (_types is null) return null;
+        foreach (var decl in _types.Module.Declarations)
+        {
+            if (decl is RecordDecl r && r.Name == name)
+            {
+                return r.Fields;
+            }
+        }
+        return null;
+    }
+
+    private ImmutableArray<RecordField>? LookupVariantFields(string enumName, string variantName)
+    {
+        if (_types is null) return null;
+        foreach (var decl in _types.Module.Declarations)
+        {
+            if (decl is EnumDecl e && e.Name == enumName)
+            {
+                foreach (var v in e.Variants)
+                {
+                    if (v.Name == variantName)
+                    {
+                        return v.Fields;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static TypeRef? FindFieldType(ImmutableArray<RecordField> fields, string name)
+    {
+        foreach (var f in fields)
+        {
+            if (f.Name == name)
+            {
+                return LowerType(f.Type);
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------ helpers

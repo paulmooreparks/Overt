@@ -54,6 +54,26 @@ public static class BindGenerator
         ("System.Convert", Array.Empty<string>(), true),
         ("System.IO.Path", Array.Empty<string>(), true), // pure string manip; not I/O
 
+        // Numeric primitives: their fallible methods (`Parse`, `Convert`)
+        // can throw, so we still want the `Result<T, IoError>` wrap
+        // (`Pure: false`). But they don't do I/O — their effect row is
+        // empty, so callers don't have to declare `!{io, fails}` just
+        // to use `Int32.Parse`. Without these explicit rules, the
+        // conservative fallback bubbled `io` into every caller of
+        // `int32.parse`, etc. — bad ergonomics for pure parsers.
+        ("System.Int32",   Array.Empty<string>(), false),
+        ("System.Int64",   Array.Empty<string>(), false),
+        ("System.UInt32",  Array.Empty<string>(), false),
+        ("System.UInt64",  Array.Empty<string>(), false),
+        ("System.Int16",   Array.Empty<string>(), false),
+        ("System.UInt16",  Array.Empty<string>(), false),
+        ("System.Byte",    Array.Empty<string>(), false),
+        ("System.SByte",   Array.Empty<string>(), false),
+        ("System.Single",  Array.Empty<string>(), false),
+        ("System.Double",  Array.Empty<string>(), false),
+        ("System.Decimal", Array.Empty<string>(), false),
+        ("System.Boolean", Array.Empty<string>(), false),
+
         // I/O with possible failure.
         ("System.IO",          new[] { "io", "fails" }, false),
         ("System.Net",         new[] { "io", "async", "fails" }, false),
@@ -184,15 +204,36 @@ public static class BindGenerator
         // we can decide whether to add an arity suffix at all. A single
         // renderable overload keeps the bare name even if some unrenderable
         // overloads share it; multiple renderable ones all get `_<arity>`.
+        //
+        // We also have to consider instance methods that share a snake-cased
+        // name with a static method (e.g. <c>String.Equals(string, string)</c>
+        // static AND <c>string.Equals(string)</c> instance both becoming
+        // <c>equals</c>). Without cross-checking, both would render with the
+        // bare name and collide at top-level scope. Pre-compute the instance-
+        // method name set so the static loop can force a suffix when its name
+        // clashes with an instance one.
         var renderableByName = methods
             .Where(m => IsRenderable(m))
             .GroupBy(m => ToSnakeCase(m.Name), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count());
+        var instanceRenderableNames = isOpaqueConstructible
+            ? targetType
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                .Where(m => !m.IsSpecialName)
+                .Where(m => IsRenderableInstance(m, targetType, knownOpaques))
+                .Select(m => ToSnakeCase(m.Name))
+                .ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var method in methods)
         {
             var overt = ToSnakeCase(method.Name);
-            var needsSuffix = renderableByName.GetValueOrDefault(overt) > 1;
+            // Force the suffix when the static name overlaps with any
+            // instance method's snake-cased name; otherwise the two would
+            // both emit with the bare `overt` and collide.
+            var collidesWithInstance = instanceRenderableNames.Contains(overt);
+            var needsSuffix = renderableByName.GetValueOrDefault(overt) > 1
+                || collidesWithInstance;
             // Disambiguate overloads by parameter types, not arity. Many BCL
             // types (Math, Convert) have overloads that share arity but
             // differ in primitive type — `Abs(int)` vs `Abs(double)` both

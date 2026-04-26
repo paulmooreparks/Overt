@@ -54,6 +54,61 @@ The human maintainer reading your code is secondary audience. They will be
 fine. Don't optimize for their pattern-matching at the expense of yours.
 Details and rationale: `DESIGN.md` §2 and §4 ("canonical-form tie-breaker").
 
+### Pattern traps from other languages
+
+These are reflexes from C# / Rust / TypeScript that look right in Overt and
+silently produce broken code or fight the parser. Each is concrete, each
+has cost an agent (this one, anyway) real iteration time. When in doubt,
+prefer the longer, flatter form and trust the type system to catch the
+boilerplate's correctness.
+
+- **For repeated `Result<_, _>`-returning calls (`println`, `eprintln`,
+  setup calls), use `_ = expr;` not `let _: T = expr;`.** Both work, but
+  `_ = expr;` doesn't introduce a binding — repeats freely in the same
+  scope, no type annotation needed. Resist the reflex to wrap repeats
+  into a `say(line)`-style helper: the function body's trailing unit
+  literal `()` would have to follow the wrapped call, and the parser is
+  conservative about what counts as a continuation, so older builds
+  could fold `helper(line)` + newline + `()` into `helper(line)()`.
+  Modern parsers gate `(` on same-line, but the wrapper still buys
+  nothing the bare `_ = expr;` doesn't already give you.
+
+- **Don't try to hand-bind to another Overt module's emitted surface
+  with the auto-wrap convention.** Reflex: `extern "csharp" fn foo(...)
+  -> Result<T, E> binds "Other.Module.foo"` should work. Trap (fixed in
+  later builds): the emitter wraps the call in `Ok(...)`, but the bound
+  method already returns `Result<T, E>`, producing a double-wrap and
+  CS0029 at compile time. Modern emitters detect a `*.Module.<member>`
+  binds-target and pass through; older builds need the call site to
+  return raw `T` and lift exceptions. Check the emitted `.g.cs` if a
+  hand-bound extern produces a confusing type error.
+
+- **`type X = T` doesn't introduce a fresh type — refinements do.**
+  Reflex: `type Email = String` to mark "this string is validated."
+  Trap: at the type level it's still `String`; nothing prevents a raw
+  `String` from flowing into an `Email` slot. The shape that works is
+  `type Email = String where is_valid_email(self)`. Without the
+  `where`, you've got documentation, not a type guarantee.
+
+- **`let x: ...; let x: ...` is illegal — no shadowing.** Reflex from
+  Rust / OCaml: rebind `x` in the same scope. Trap: OV0201 every time.
+  Pick distinct names (`x_raw`, `x`, `x_normalized`) and accept the
+  verbosity. The names also document the transformation pipeline.
+
+- **`(` only continues a call when it's on the same line.** Modern
+  parsers gate the call suffix on same-line-ness, so a `(` that opens
+  a new line after a complete expression is the start of the next
+  statement, not call arguments. Older builds folded multi-line
+  `(... || ...)` OR-chains after a `let` and trailing `()` after a
+  `let _ = call(...)` into spurious calls; the same-line gate
+  eliminates both. To split a call across lines, keep the opening `(`
+  on the callee's line.
+
+- **Building Overt itself iterates slowly.** Each Overt change requires
+  rebuilding `Overt.Build`, packing a local channel build, restoring in
+  the consuming project, and rebuilding it — easily 30s of cycle time.
+  Batch your Overt-side changes; don't ping-pong.
+
 ---
 
 ## 1. A complete program
@@ -330,12 +385,53 @@ previous newline or `;` (both accepted).
 let x: Int = 42               // immutable binding
 let mut counter = 0           // mutable rebinding of a single name
 counter = counter + 1         // assignment; only valid on `let mut`
+_ = println("side effect")    // explicit-discard statement
+return some_expr              // early-exit from the enclosing function
 break                         // only inside a loop body
 continue                      // only inside a loop body
 ```
 
 `let mut` rebinds the **local name**, not the record's fields. Field-level
 mutation doesn't exist; `with` copies instead.
+
+`_ = expr` is the canonical way to evaluate an expression for its effects
+and drop the result. It silences OV0307 (which fires on a bare
+`Result<_, _>` in statement position), can repeat freely in the same scope
+without colliding, and skips the type annotation that `let _: T = expr`
+would otherwise need. Reach for it whenever you'd ignore a return value
+in another language: `_ = println("...")`, `_ = eprintln("error: ...")`,
+`_ = some_setup_call()`.
+
+`return expr` exits the enclosing function with `expr` as its value.
+It's an expression of type `Never`, which unifies with any expected type
+— so it can sit in any position that wants a value (a match arm, an if
+arm, a let-initializer-via-block) without forcing the surrounding
+context to share its type. The most common shape is "validate at the
+top of the function, exit early on failure":
+
+```overt
+fn run_compare(argv: List<String>) !{io} -> Int {
+    if size(argv) != 3 {
+        _ = eprintln("usage: ...")
+        return 2
+    }
+    let a: Version = match sv_parse(s = ...) {
+        Ok(v) => v,
+        Err(e) => {
+            _ = eprintln("ovsemver: left: ${sv_describe(e)}")
+            return 1
+        },
+    }
+    // ...
+}
+```
+
+The match arm's `return` exits the *enclosing* function, not the match.
+The match arm's other arm produces a `Version`; the typer joins
+`Never` (the return arm) with `Version` and the match's overall type is
+`Version`. Without `return` you'd have to thread a `Result<T, E>`
+two-channel pattern through the function with `?`-propagation; with
+it, the control flow reads top-to-bottom.
 
 Shadowing across nested scopes is rejected (**OV0201**). Patterns and locals
 may reuse a prelude name (so `Some(v) => v` binds `v` without colliding with
@@ -490,9 +586,36 @@ win of seeing the flow as a single expression outweighs the cost of the
 implicit splice/unwrap mechanics. For anything with meaningful intermediate
 values worth naming, the three-let form is what to produce.
 
-There is **no method-call syntax**. Dots mean record field access or
-module-qualified stdlib lookup (`List.empty`, `Trace.subscribe`), nothing
-else.
+**Method-call syntax.** When `expr` has type `T` and some scope
+exposes a fn whose first parameter type is `T`, you can write
+`expr.method(args)` and the call resolves to the underlying fn with
+the receiver spliced under the right first-arg name. Two sources feed
+the lookup:
+
+```overt
+// (1) Aliased instance externs: `extern "csharp" instance fn` whose
+// `self: T` matches the receiver type. The receiver splices as `self:`.
+extern "csharp" use "System.String" as str
+
+let n: Int = input.index_of_string(value = "+")
+let r: String = raw.substring_int_int(start_index = 0, length_arg = 3)
+
+// (2) Stdlib namespace fns: any `<NsName>.<member>` whose first
+// parameter type matches the receiver. The receiver splices as the
+// underlying fn's first-param name (`s`, `list`, etc., NOT `self`).
+let parts: List<String> = "alpha.beta.gamma".split(sep = ".")
+let head:  String       = parts.at(index = 0)
+let csv:   String       = parts.join(sep = ",")
+```
+
+The two are equivalent to their explicit forms — pick whichever reads
+cleanest. For (1): `str.index_of_string(self = input, value = "+")`.
+For (2): `String.split(s = "alpha.beta.gamma", sep = ".")`,
+`List.at(list = parts, index = 0)`, `String.join(list = parts, sep = ",")`.
+
+For non-call dotted access — record field reads (`user.name`) and
+module-qualified stdlib lookups (`List.empty`, `Trace.subscribe`) —
+the dot has its existing meaning.
 
 ---
 
@@ -532,6 +655,53 @@ path) is demonstrated in [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 **Package consumption** (the `PackageReference` path above, through
 `dotnet pack` → local feed → `dotnet build`) is exercised by
 `OvertBuildNuGetTests` and is the shape real consumers should use.
+
+### Cross-project Overt-source `use`
+
+When a consumer csproj has a `<ProjectReference>` to a sibling project
+that contains `.ov` source, the consumer can import that project's
+Overt-side symbols natively — no hand-binding through `extern "csharp"
+fn ... binds "..."` declarations. List the library's `.ov` source as an
+`<OvertImportSource>` item in the consuming csproj:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\MyLib\MyLib.csproj" />
+</ItemGroup>
+<ItemGroup>
+  <OvertImportSource Include="..\MyLib\MyLib.ov" />
+</ItemGroup>
+```
+
+Then in the consumer's Overt source:
+
+```overt
+use MyNamespace.MyModule.{ parse, display, MyType }
+
+fn use_them(input: String) -> String {
+    match parse(input = input) {
+        Ok(v)  => display(v),
+        Err(e) => "bad: ${e}",
+    }
+}
+```
+
+Mechanics: the Overt.Build task processes each listed import source
+file (lex, parse, expand-extern, type-check) before processing the
+consumer's own source, but does **not** emit C# for them — the
+referenced project's own build is responsible for emission. The
+consumer's resolver and type-checker see the imported symbols as
+real Overt types (with proper match-exhaustiveness checking on enum
+variants, record-field access, etc.). The emitter routes calls into
+imported symbols through the imported module's namespace, which
+resolves at C# compile time via the `<ProjectReference>`'s linked
+assembly.
+
+Limitations of the current MVP:
+- The consumer must list each `.ov` file explicitly. Auto-discovery
+  via `@(ProjectReference)` is a follow-up.
+- NuGet packages don't yet ship `.ov` source as a discoverable
+  artifact; this works for in-solution sibling projects only.
 
 ---
 
@@ -713,15 +883,6 @@ refinements:
   Try methods only in v1 (instance Try-pattern such as
   `Dictionary.TryGetValue` is not yet recognised).
 
-  **Current gap**: matching the result of an aliased Try call
-  (`extern "csharp" use "X" as alias` + `match alias.try_x(...)`)
-  hits a typer issue where `Some` / `None` patterns don't resolve
-  through the alias. As a workaround, use the unaliased form
-  (`extern "csharp" use "System.Int32"` then call `try_parse`
-  directly). This is a pre-existing typer bug, not specific to Try
-  — any Option-returning aliased call sees the same shape — and is
-  tracked separately.
-
 ---
 
 ## 12. Stdlib surface (runnable subset)
@@ -759,10 +920,16 @@ fold(list: List<T>, seed: U, step: fn(U, T) -> U) -> U
 
 par_map(list: List<T>, f: fn(T) !{io, async} -> Result<U, E>)
     !{io, async} -> Result<List<U>, E>
+try_map(list: List<T>, f: fn(T) -> Result<U, E>) -> Result<List<U>, E>
 ```
 
 `par_map` runs the callback concurrently (TPL) and returns the first `Err`
 by original index on failure; order of the output list matches the input.
+
+`try_map` is the sequential, pure cousin: same shape, no `io`/`async` in the
+effect row. Reach for it when the callback is a pure validator and the
+parallelism in `par_map` would force unwanted effects into the caller's row.
+Short-circuits on the first `Err` in iteration order.
 
 ### Trace
 
@@ -803,6 +970,30 @@ When a hand-shaped binding is needed (a method whose default error
 type or effect row is wrong for the call site), drop to the per-method
 `extern "csharp" fn ... binds "..."` form. Where both apply to the
 same symbol, the per-method form wins.
+
+**Effect-row classification by namespace.** BindGenerator assigns
+default effect rows by .NET namespace. Three categories:
+
+- **Pure (no row, no Result wrap):** `System.Math`, `System.String`,
+  `System.Char`, `System.Convert`, `System.IO.Path`. These never throw
+  and never do I/O for the methods we expose; results are bare values.
+- **Pure-effects but Result-wrapped:** primitive numerics —
+  `System.Int32`, `System.Int64`, `System.Single`, `System.Double`,
+  `System.Decimal`, `System.Boolean`, etc. Their fallible methods
+  (`Parse`, `Convert`) can throw, so returns wrap in
+  `Result<T, IoError>` to surface the failure as a value. The effect
+  row is empty — no `io`/`fails` propagation, callers don't have to
+  declare an effect row just to call `Int32.Parse`.
+- **I/O effects:** `System.IO` (`!{io, fails}`), `System.Console`
+  (`!{io}`), `System.Net` (`!{io, async, fails}`), etc. Plus
+  `Result<T, IoError>` wrap.
+
+Unknown namespaces fall back to the conservative `!{io, fails}` plus
+Result wrap — over-declaring is safer than under-declaring (hidden
+side-effects laundered through pure signatures). If you see a noisy
+effect row from a namespace that's clearly pure, the fix is adding a
+rule to BindGenerator's effect table, not papering over at the call
+site.
 
 ### FFI: C# extern bindings
 

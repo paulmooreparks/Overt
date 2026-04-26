@@ -26,6 +26,13 @@
     <RootNamespace>Overt.Cli</RootNamespace>
   </PropertyGroup>
 
+  <!-- The Overt.Tests assembly drives `Cli.CompileGraph` directly to cover
+       module-graph orchestration that the unit tests against the compiler
+       library can't reach (e.g. aliased extern-use type propagation). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Overt.Tests" />
+  </ItemGroup>
+
   <!-- .NET global tool packaging. `dotnet pack` produces a nupkg that
        `dotnet tool install -g Overt` drops onto PATH as `overt`.
        See AGENTS.md §11 / ROLLOUT.md Phase 1 for the install story. -->
