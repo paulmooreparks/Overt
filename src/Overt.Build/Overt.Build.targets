@@ -22,6 +22,7 @@
 
   <PropertyGroup>
     <EnableDefaultOvertCompileItems Condition=" '$(EnableDefaultOvertCompileItems)' == '' ">true</EnableDefaultOvertCompileItems>
+    <EnableOvertImportSourceAutoDiscovery Condition=" '$(EnableOvertImportSourceAutoDiscovery)' == '' ">true</EnableOvertImportSourceAutoDiscovery>
   </PropertyGroup>
 
   <ItemGroup Condition=" '$(EnableDefaultOvertCompileItems)' == 'true' ">
@@ -80,14 +81,23 @@
     </PropertyGroup>
 
     <!--
-      Cross-project Overt-source `use`. Listing
-      <OvertImportSource Include="..\OtherProject\Foo.ov" />
-      in a consuming csproj makes that project's `.ov` symbols visible
-      to this project's resolver, so `use Other.Foo.{bar}` types
-      correctly. The referenced project's own build emits the C# for
-      its modules; this project just needs the symbols. Inputs is
-      extended so a change to the import source invalidates this
-      project's incremental cache too.
+      Cross-project Overt-source `use`. Every `<ProjectReference>` is
+      scanned for `*.ov` files and those are added to
+      `@(OvertImportSource)` automatically, so this project's resolver
+      sees the referenced project's symbols (`use Other.Foo.{bar}`
+      types correctly). The referenced project's own build emits the
+      C# for its modules; this project just needs the symbols.
+      Auto-discovery happens in `_OvertDiscoverImportSources` below.
+
+      Manual entries via
+      `<OvertImportSource Include="..\OtherProject\Foo.ov" />`
+      still work and stack with the auto-discovered set (the task
+      dedupes by full path), useful for source not exposed via a
+      ProjectReference. Opt out of auto-discovery with
+      `<EnableOvertImportSourceAutoDiscovery>false</...>`.
+
+      Inputs is extended so a change to any imported source
+      invalidates this project's incremental cache.
     -->
     <OvertTranspileTask
       SourceFiles="@(OvertCompile)"
@@ -97,6 +107,24 @@
       <Output TaskParameter="GeneratedFiles" ItemName="Compile" />
       <Output TaskParameter="GeneratedFiles" ItemName="FileWrites" />
     </OvertTranspileTask>
+  </Target>
+
+  <!--
+    Auto-discover cross-project Overt sources from `<ProjectReference>`.
+    For each referenced project, glob `*.ov` from its directory tree
+    and add to `@(OvertImportSource)`. Runs before `OvertTranspile` so
+    the discovered items are visible to the task and to the target's
+    Inputs incremental check.
+  -->
+  <Target
+    Name="_OvertDiscoverImportSources"
+    BeforeTargets="OvertTranspile"
+    Condition=" '$(EnableOvertImportSourceAutoDiscovery)' == 'true' AND '@(ProjectReference)' != '' ">
+
+    <ItemGroup>
+      <_OvertReferencedProjectDir Include="@(ProjectReference->'%(RootDir)%(Directory)')" />
+      <OvertImportSource Include="%(_OvertReferencedProjectDir.Identity)**\*.ov" />
+    </ItemGroup>
   </Target>
 
 </Project>

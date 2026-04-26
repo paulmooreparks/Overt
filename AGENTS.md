@@ -660,18 +660,29 @@ path) is demonstrated in [`samples/msbuild-smoke/`](samples/msbuild-smoke/).
 
 When a consumer csproj has a `<ProjectReference>` to a sibling project
 that contains `.ov` source, the consumer can import that project's
-Overt-side symbols natively — no hand-binding through `extern "csharp"
-fn ... binds "..."` declarations. List the library's `.ov` source as an
-`<OvertImportSource>` item in the consuming csproj:
+Overt-side symbols natively, no hand-binding through `extern "csharp"
+fn ... binds "..."` declarations. Adding the `<ProjectReference>` is
+enough; Overt.Build scans the referenced project's directory for
+`*.ov` files and registers them as imports automatically:
 
 ```xml
 <ItemGroup>
   <ProjectReference Include="..\MyLib\MyLib.csproj" />
 </ItemGroup>
+```
+
+For sources outside a referenced project (or to opt back into manual
+control), list each `.ov` file as an `<OvertImportSource>` item:
+
+```xml
 <ItemGroup>
-  <OvertImportSource Include="..\MyLib\MyLib.ov" />
+  <OvertImportSource Include="..\Sibling\extras.ov" />
 </ItemGroup>
 ```
+
+Manual entries stack with auto-discovery (the task dedupes by full
+path). Disable auto-discovery per-project with
+`<EnableOvertImportSourceAutoDiscovery>false</...>`.
 
 Then in the consumer's Overt source:
 
@@ -698,10 +709,10 @@ resolves at C# compile time via the `<ProjectReference>`'s linked
 assembly.
 
 Limitations of the current MVP:
-- The consumer must list each `.ov` file explicitly. Auto-discovery
-  via `@(ProjectReference)` is a follow-up.
 - NuGet packages don't yet ship `.ov` source as a discoverable
-  artifact; this works for in-solution sibling projects only.
+  artifact; auto-discovery works for in-solution sibling projects
+  only (where the `<ProjectReference>` resolves to a directory the
+  build can scan).
 
 ---
 

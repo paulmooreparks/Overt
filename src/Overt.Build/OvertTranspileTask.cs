@@ -91,12 +91,20 @@ public sealed class OvertTranspileTask : Microsoft.Build.Utilities.Task
             StringComparer.Ordinal);
         var importedSymbolTypesByModule = new Dictionary<string, ImmutableDictionary<Symbol, TypeRef>>(
             StringComparer.Ordinal);
+        // Dedupe imports by full path: auto-discovery from ProjectReference
+        // and a manual <OvertImportSource> for the same file would otherwise
+        // parse and register the module twice.
+        var seenImportPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in ImportSourceFiles)
         {
             var importPath = item.GetMetadata("FullPath");
             if (string.IsNullOrEmpty(importPath))
             {
                 importPath = item.ItemSpec;
+            }
+            if (!seenImportPaths.Add(Path.GetFullPath(importPath)))
+            {
+                continue;
             }
             var importResult = CompileFile(importPath, importedExportsByModule, importedSymbolTypesByModule);
             foreach (var d in importResult.Diagnostics)
