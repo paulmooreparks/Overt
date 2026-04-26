@@ -54,10 +54,14 @@ public class GoCompileCheckTests
     //     fallback) but not the parallelism. Genuine concurrency lands
     //     when the language-arc concurrency design plumbs through and
     //     the GoEmitter can fan out onto goroutines + channels.
-    //   - refinement.ov compiles, but the Go emitter does not yet
-    //     inject `where`-predicate runtime checks at boundaries the way
-    //     the C# emitter does. Refinement aliases lower as bare type
-    //     aliases for now; predicate validation is gated on a follow-up.
+    //   - refinement.ov has runtime checks for *non-generic* refinements
+    //     (the emitter wraps boundary expressions in
+    //     `__Refinement_{Alias}__Check`, which panics an
+    //     `overt.RefinementViolation` on failure; see GoBackendEndToEndTests).
+    //     Generic refinements (`NonEmpty<T>`) still lower without runtime
+    //     enforcement: Go has no implicit-operator equivalent of the C#
+    //     wrapper-record approach, and broadening the type checker's
+    //     boundary tracking to generic aliases is a follow-up.
     [Theory]
     [InlineData("hello.ov")]
     [InlineData("greeter.ov")]
@@ -115,7 +119,7 @@ public class GoCompileCheckTests
         string goSource;
         try
         {
-            goSource = GoEmitter.Emit(parse.Module);
+            goSource = GoEmitter.Emit(parse.Module, typed);
         }
         catch (NotSupportedException ex)
         {

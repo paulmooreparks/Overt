@@ -290,6 +290,50 @@ func TryMap[T, U, E any](list List[T], f func(T) Result[U, E]) Result[List[U], E
 	return Ok[List[U], E](List[U]{Items: out})
 }
 
+// RefinementViolation is the panic value raised when a value flowing
+// into a refinement-typed boundary fails the refinement's predicate
+// at runtime. The C# runtime throws an exception of the same shape
+// (Overt.Runtime.RefinementViolation); Go has no exceptions, so the
+// emitted check panics with this struct and callers that want
+// structured access can `recover()`. The default formatted output
+// (via Error / String) matches the C# message verbatim, so a panic
+// transcript reads the same on both targets.
+//
+// Compile-time checks (OV0311) catch literal violations; this covers
+// the cases that the type checker can't decide statically — non-
+// literal values, predicates calling functions like `size(self) > 0`,
+// etc.
+type RefinementViolation struct {
+	AliasName      string
+	PredicateText  string
+	OffendingValue any
+}
+
+// Error implements the error interface so a recovered RefinementViolation
+// flows naturally through error-aware code if the user mixes idioms.
+func (v RefinementViolation) Error() string {
+	return fmt.Sprintf("value %s does not satisfy refinement `%s` predicate: %s",
+		refinementRepr(v.OffendingValue), v.AliasName, v.PredicateText)
+}
+
+// String mirrors Error so `%v` and `%s` formatting both produce the
+// human-readable narrative rather than struct-dump syntax.
+func (v RefinementViolation) String() string { return v.Error() }
+
+// refinementRepr quotes strings and prints other values via %v, matching
+// the C# runtime's Repr helper so violation messages stay aligned across
+// targets.
+func refinementRepr(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return fmt.Sprintf("%q", x)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
 // IntRange returns the half-open integer range [start, end) as a List.
 // start >= end yields the empty List (Python semantics).
 func IntRange(start, end int) List[int] {

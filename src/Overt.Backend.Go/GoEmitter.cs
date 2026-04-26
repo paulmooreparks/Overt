@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Text;
+using Overt.Compiler.Semantics;
 using Overt.Compiler.Syntax;
 
 namespace Overt.Backend.Go;
@@ -34,10 +35,16 @@ public static class GoEmitter
 {
     /// <summary>Emit Go source for a single Overt module. Returns the full
     /// file content; the caller writes it to disk and arranges for `go
-    /// build` / `go run` against the runtime under `runtime/go`.</summary>
-    public static string Emit(ModuleDecl module)
+    /// build` / `go run` against the runtime under `runtime/go`.
+    /// <paramref name="typed"/> is the type-check result for the module.
+    /// When supplied, the emitter wraps refinement-boundary expressions in
+    /// per-alias <c>__Refinement_{Alias}__Check</c> helpers (matching the
+    /// C# emitter's <c>__Refinements.{Alias}__Check</c> shape). When
+    /// omitted, refinement runtime checks are skipped — literal violations
+    /// are still caught at compile time by OV0311 regardless.</summary>
+    public static string Emit(ModuleDecl module, TypeCheckResult? typed = null)
     {
-        var emitter = new EmitterInstance(module);
+        var emitter = new EmitterInstance(module, typed);
         return emitter.Emit();
     }
 
@@ -87,6 +94,16 @@ public static class GoEmitter
         // the Go target yet (see docs/ffi.md and the sweep comment
         // block).
         private readonly Dictionary<string, TypeAliasDecl> _typeAliases = new(StringComparer.Ordinal);
+        // Spans of expressions the type checker flagged as flowing into a
+        // non-generic refinement-typed slot whose predicate it could not
+        // decide statically. EmitExpression looks up incoming exprs here
+        // and wraps the matched ones in `__Refinement_{Alias}__Check(...)`.
+        // Sourced from TypeCheckResult.RefinementBoundaries; empty when no
+        // type-check result was passed to Emit() (CLI today; tests pass it).
+        // Generic refinement aliases never enter this dictionary by design
+        // — see CheckRefinementAtBoundary in TypeChecker.cs and the comment
+        // on EmitTypeAlias below.
+        private readonly ImmutableDictionary<SourceSpan, string> _refinementBoundaries;
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -102,9 +119,11 @@ public static class GoEmitter
         // null while emitting top-level decls / record fields / etc.
         private TypeExpr? _currentFnReturnType;
 
-        public EmitterInstance(ModuleDecl module)
+        public EmitterInstance(ModuleDecl module, TypeCheckResult? typed)
         {
             _module = module;
+            _refinementBoundaries = typed?.RefinementBoundaries
+                ?? ImmutableDictionary<SourceSpan, string>.Empty;
             foreach (var decl in module.Declarations)
             {
                 if (decl is EnumDecl en)
@@ -834,12 +853,25 @@ public static class GoEmitter
 
         /// <summary>
         /// Emit `type Name = <Base>` for non-generic refinement-type
-        /// aliases. The `where` predicate is dropped — refinement
-        /// runtime checks aren't injected on the Go target yet, so
-        /// the alias is purely a name for the base type. Generic
-        /// aliases skip emission entirely; LowerType substitutes
-        /// their Target with type-arg substitution at every use
-        /// site instead.
+        /// aliases. When the alias carries a `where` predicate that
+        /// the type checker couldn't decide statically, also emit a
+        /// `__Refinement_{Name}__Check` helper that evaluates the
+        /// predicate against its argument and panics with an
+        /// <c>overt.RefinementViolation</c> on failure. The C#
+        /// emitter's <c>__Refinements.{Name}__Check</c> is the
+        /// reference; we use a flat function-name form because Go
+        /// has no namespacing. Boundary wrapping at use sites lives
+        /// in <see cref="EmitExpression"/>, gated on the type
+        /// checker's <c>RefinementBoundaries</c> dictionary.
+        ///
+        /// Generic aliases skip emission entirely; LowerType
+        /// substitutes their Target with type-arg substitution at
+        /// every use site instead. They also don't get runtime
+        /// checks here — the C# back end checks generic refinements
+        /// inside their wrapper record's implicit operator, which
+        /// Go can't replicate. Genuine generic-refinement runtime
+        /// checks on the Go target would need the type checker to
+        /// broaden boundary tracking to generic aliases too.
         /// </summary>
         private void EmitTypeAlias(TypeAliasDecl ta)
         {
@@ -851,7 +883,85 @@ public static class GoEmitter
             }
             _sb.Append($"type {ta.Name} = ");
             _sb.AppendLine(LowerType(ta.Target));
+
+            if (ta.Predicate is not null)
+            {
+                EmitRefinementCheckHelper(ta);
+            }
         }
+
+        /// <summary>
+        /// Emit a `__Refinement_{Alias}__Check(self T) T` helper that
+        /// returns its argument when the predicate holds and panics
+        /// an <c>overt.RefinementViolation</c> otherwise. The
+        /// helper's parameter is named `self` so the predicate's
+        /// `self` references resolve to it directly when emitted via
+        /// the regular expression machinery. Mirrors the C#
+        /// emitter's <c>__Refinements.{Alias}__Check</c>.
+        /// </summary>
+        private void EmitRefinementCheckHelper(TypeAliasDecl ta)
+        {
+            var inner = LowerType(ta.Target);
+            var predText = FormatRefinementPredicate(ta.Predicate!);
+            var escaped = EscapeGoString(predText);
+            _sb.AppendLine();
+            _sb.AppendLine($"func __Refinement_{ta.Name}__Check(self {inner}) {inner} {{");
+            _sb.Append("\tif !(");
+            EmitExpression(ta.Predicate!);
+            _sb.AppendLine(") {");
+            _sb.AppendLine($"\t\tpanic(overt.RefinementViolation{{AliasName: \"{ta.Name}\", PredicateText: \"{escaped}\", OffendingValue: self}})");
+            _sb.AppendLine("\t}");
+            _sb.AppendLine("\treturn self");
+            _sb.AppendLine("}");
+            // The helper body contains `overt.RefinementViolation`, so
+            // the post-emit import gate (`body.Contains("overt.")`) will
+            // bring the runtime package in automatically.
+        }
+
+        /// <summary>
+        /// Render an Overt refinement predicate as its source spelling for
+        /// inclusion in RefinementViolation messages. Mirrors
+        /// CSharpEmitter.FormatPredicateText so violation messages stay
+        /// aligned across targets — same alias, same predicate text, same
+        /// quoted offender. Falls back to "..." for shapes outside the
+        /// supported subset; predicates in practice are simple boolean
+        /// algebras over comparisons and `size(self)`-style calls.
+        /// </summary>
+        private static string FormatRefinementPredicate(Expression e) => e switch
+        {
+            BinaryExpr be =>
+                $"{FormatRefinementPredicate(be.Left)} {FormatBinaryOp(be.Op)} {FormatRefinementPredicate(be.Right)}",
+            UnaryExpr { Op: UnaryOp.Negate } ue => "-" + FormatRefinementPredicate(ue.Operand),
+            UnaryExpr { Op: UnaryOp.LogicalNot } ue => "!" + FormatRefinementPredicate(ue.Operand),
+            IdentifierExpr id => id.Name,
+            IntegerLiteralExpr i => i.Lexeme,
+            FloatLiteralExpr f => f.Lexeme,
+            BooleanLiteralExpr b => b.Value ? "true" : "false",
+            CallExpr c => FormatRefinementPredicate(c.Callee) + "("
+                + string.Join(", ", c.Arguments.Select(a => FormatRefinementPredicate(a.Value))) + ")",
+            _ => "...",
+        };
+
+        private static string FormatBinaryOp(BinaryOp op) => op switch
+        {
+            BinaryOp.Add => "+",
+            BinaryOp.Subtract => "-",
+            BinaryOp.Multiply => "*",
+            BinaryOp.Divide => "/",
+            BinaryOp.Modulo => "%",
+            BinaryOp.Equal => "==",
+            BinaryOp.NotEqual => "!=",
+            BinaryOp.Less => "<",
+            BinaryOp.LessEqual => "<=",
+            BinaryOp.Greater => ">",
+            BinaryOp.GreaterEqual => ">=",
+            BinaryOp.LogicalAnd => "&&",
+            BinaryOp.LogicalOr => "||",
+            _ => "?",
+        };
+
+        private static string EscapeGoString(string s) =>
+            s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 
         /// <summary>
         /// Lower an Overt enum to Go's idiomatic sum-type pattern: an
@@ -2346,8 +2456,38 @@ public static class GoEmitter
 
         // ------------------------------------------------------ expressions
 
+        // Guard set so the boundary-wrapping recursion doesn't re-wrap the
+        // same expression. EmitExpression checks the boundaries dictionary,
+        // wraps `__Refinement_{Alias}__Check(...)` around the inner emit,
+        // and uses this set to mark the span "already wrapped" while
+        // recursing through the body emission. Cleared as the call returns.
+        private readonly HashSet<SourceSpan> _refinementBoundaryGuard = new();
+
         private void EmitExpression(Expression expr)
         {
+            // Refinement-boundary wrap: when the type checker has flagged
+            // this expression's span as flowing into a non-generic
+            // refinement-typed slot whose predicate it couldn't decide
+            // statically, wrap the body in `__Refinement_{Alias}__Check(...)`.
+            // The helper is generated by EmitTypeAlias for the same alias.
+            // Generic refinements never enter this dictionary by design.
+            if (!_refinementBoundaryGuard.Contains(expr.Span)
+                && _refinementBoundaries.TryGetValue(expr.Span, out var aliasName))
+            {
+                _refinementBoundaryGuard.Add(expr.Span);
+                try
+                {
+                    _sb.Append($"__Refinement_{aliasName}__Check(");
+                    EmitExpression(expr);
+                    _sb.Append(')');
+                }
+                finally
+                {
+                    _refinementBoundaryGuard.Remove(expr.Span);
+                }
+                return;
+            }
+
             switch (expr)
             {
                 case StringLiteralExpr sl:

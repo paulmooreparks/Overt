@@ -540,6 +540,118 @@ public class GoBackendEndToEndTests
             expectedStdout: "alice\nbob\n");
     }
 
+    [Fact]
+    public void NonGenericRefinement_RuntimeViolation_PanicsWithDescriptiveMessage()
+    {
+        // Mirrors the C# stdlib transpiled test of the same family:
+        // `take(n)` passes an out-of-range Int into an `Age`-typed slot,
+        // the type checker can't decide the predicate statically, and the
+        // emitter wraps the call argument in `__Refinement_Age__Check`.
+        // At runtime the helper panics an `overt.RefinementViolation`,
+        // which Go formats to stderr along with the goroutine trace
+        // before exiting non-zero. We assert on the violation message
+        // text and a non-zero exit; the goroutine trace's exact shape
+        // is Go-version-sensitive and not part of the contract.
+        AssertOvertProgramPanicsWith(
+            """
+            module ref_nongen_e2e
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn take(a: Age) -> Age { a }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = 999
+                let _: Age = take(n)
+                Ok(())
+            }
+            """,
+            expectedStderrSubstring:
+                "value 999 does not satisfy refinement `Age` predicate: 0 <= self && self <= 150");
+    }
+
+    [Fact]
+    public void NonGenericRefinement_ReturnPosition_PanicsWithDescriptiveMessage()
+    {
+        // Trailing-expression boundary: a fn typed `-> Age` returning a
+        // bare `Int` triggers the helper at the return site. Verifies the
+        // emitter wraps return-position values too, not just call args.
+        AssertOvertProgramPanicsWith(
+            """
+            module ref_return_e2e
+
+            type Age = Int where 0 <= self && self <= 150
+
+            fn launder(n: Int) -> Age { n }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let _: Age = launder(200)
+                Ok(())
+            }
+            """,
+            expectedStderrSubstring:
+                "value 200 does not satisfy refinement `Age` predicate: 0 <= self && self <= 150");
+    }
+
+    /// <summary>
+    /// Mirror of <see cref="AssertOvertProgramPrints"/> for programs that
+    /// are expected to panic. Asserts the binary exits non-zero and that
+    /// the captured stderr contains the substring callers expect to see
+    /// (typically the formatted RefinementViolation message). The
+    /// surrounding goroutine trace is Go-version-sensitive so we don't
+    /// pin the full output, just the contract-relevant message.
+    /// </summary>
+    private static void AssertOvertProgramPanicsWith(
+        string overtSource, string expectedStderrSubstring)
+    {
+        if (!IsGoOnPath())
+        {
+            return;
+        }
+
+        var lex = Lexer.Lex(overtSource);
+        var parse = Parser.Parse(lex.Tokens);
+        Assert.Empty(parse.Diagnostics);
+
+        var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(parse.Module);
+        Assert.Empty(resolved.Diagnostics);
+        var typed = Overt.Compiler.Semantics.TypeChecker.Check(parse.Module, resolved);
+        Assert.Empty(typed.Diagnostics);
+
+        var goSource = GoEmitter.Emit(parse.Module, typed);
+
+        var workDir = Directory.CreateTempSubdirectory("overt-go-e2e-").FullName;
+        try
+        {
+            var runtimePath = LocateRuntimePath();
+            File.WriteAllText(
+                Path.Combine(workDir, "go.mod"),
+                $$"""
+                module overt-app
+
+                go 1.21
+
+                require overt-runtime v0.0.0
+                replace overt-runtime => {{runtimePath.Replace("\\", "/")}}
+                """);
+            File.WriteAllText(Path.Combine(workDir, "main.go"), goSource);
+
+            RunGo(workDir, "mod", "tidy");
+
+            var binPath = Path.Combine(workDir, IsWindows() ? "app.exe" : "app");
+            RunGo(workDir, "build", "-o", binPath, ".");
+
+            var (_, stderr, exit) = RunBinary(binPath);
+            Assert.NotEqual(0, exit);
+            Assert.Contains(expectedStderrSubstring, stderr);
+        }
+        finally
+        {
+            try { Directory.Delete(workDir, recursive: true); }
+            catch { /* best-effort cleanup */ }
+        }
+    }
+
     /// <summary>
     /// Lex / parse / emit / `go build` / run / assert. Skips the whole
     /// pipeline when `go` is not on PATH; intentionally silent so the
@@ -563,7 +675,12 @@ public class GoBackendEndToEndTests
         var parse = Parser.Parse(lex.Tokens);
         Assert.Empty(parse.Diagnostics);
 
-        var goSource = GoEmitter.Emit(parse.Module);
+        var resolved = Overt.Compiler.Semantics.NameResolver.Resolve(parse.Module);
+        Assert.Empty(resolved.Diagnostics);
+        var typed = Overt.Compiler.Semantics.TypeChecker.Check(parse.Module, resolved);
+        Assert.Empty(typed.Diagnostics);
+
+        var goSource = GoEmitter.Emit(parse.Module, typed);
 
         var workDir = Directory.CreateTempSubdirectory("overt-go-e2e-").FullName;
         try

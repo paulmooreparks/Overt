@@ -924,7 +924,8 @@ static class Cli
         // sibling Go files for FFI shims.
         var compiled = CompileGraph(inputFile);
         var entry = compiled.Modules[^1];
-        var go = global::Overt.Backend.Go.GoEmitter.Emit(entry.Ast);
+        var typed = compiled.TypeChecks[entry.Name];
+        var go = global::Overt.Backend.Go.GoEmitter.Emit(entry.Ast, typed);
         Console.Out.Write(go);
 
         return WriteDiagnostics(inputFile, compiled.Diagnostics);
