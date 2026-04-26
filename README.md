@@ -77,6 +77,30 @@ Using Overt from an existing C# project is a `<PackageReference>` away; see [AGE
 
 ---
 
+## Projects built with Overt
+
+A growing list of open-source projects authored in Overt. Each one is
+a stress test for the language: real consumers reveal real friction,
+and the friction feeds back into the design.
+
+- **[SemVer Kit](https://github.com/paulmooreparks/SemVerKit)** —
+  Semantic-versioning library and `ovsemver` CLI. The library core
+  (parse, compare, bump per SemVer 2.0.0) and the command-line front
+  end are both authored end-to-end in Overt; the CLI consumes the
+  library through Overt-native `use` rather than C# interop. Published
+  as [`ParksComputing.SemVer`](https://www.nuget.org/packages/ParksComputing.SemVer)
+  and [`ParksComputing.SemVer.Cli`](https://www.nuget.org/packages/ParksComputing.SemVer.Cli)
+  on nuget.org. Notable as the first non-toy program written entirely
+  in Overt; several language refinements (effect-row classification of
+  primitive parsers, the bare `for x in iter` form, `String.chars()`,
+  cross-project `<OvertImportSource>` auto-discovery) were driven by
+  authoring it.
+
+Have an Overt project to add? Open a PR against this list with a
+one-paragraph description in the same shape as the entry above.
+
+---
+
 ## Design highlights
 
 A few of the decisions that define the language. Full rationale in [`DESIGN.md`](DESIGN.md).
