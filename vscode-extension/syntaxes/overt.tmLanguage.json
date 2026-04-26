@@ -10,8 +10,11 @@
         { "include": "#keywords" },
         { "include": "#annotations" },
         { "include": "#effect-row" },
+        { "include": "#await-postfix" },
+        { "include": "#discard" },
         { "include": "#operators" },
         { "include": "#types" },
+        { "include": "#builtin-functions" },
         { "include": "#functions" }
     ],
     "repository": {
@@ -43,6 +46,12 @@
                             "name": "meta.embedded.expression.overt",
                             "begin": "\\$\\{",
                             "end": "\\}",
+                            "beginCaptures": {
+                                "0": { "name": "punctuation.definition.template-expression.begin.overt" }
+                            },
+                            "endCaptures": {
+                                "0": { "name": "punctuation.definition.template-expression.end.overt" }
+                            },
                             "patterns": [
                                 { "include": "$self" }
                             ]
@@ -79,11 +88,13 @@
             "patterns": [
                 {
                     "name": "keyword.control.overt",
-                    "match": "\\b(if|else|match|for|each|while|loop|return|parallel|race|trace|with)\\b"
+                    "comment": "Control flow. `each` is the deprecated-but-still-parseable spelling for `for each x in`; bare `for x in` is the canonical form.",
+                    "match": "\\b(if|else|match|for|each|in|while|loop|break|continue|return|parallel|race|trace|with)\\b"
                 },
                 {
                     "name": "storage.type.declaration.overt",
-                    "match": "\\b(fn|let|mut|record|enum|type|module|use|pub|extern|unsafe|where|binds|from)\\b"
+                    "comment": "Declaration / modifier keywords. `binds` and `from` are contextual (only meaningful inside `extern fn`), but recognized as keywords for highlighting.",
+                    "match": "\\b(fn|let|mut|record|enum|type|module|use|as|pub|extern|unsafe|where|binds|from|await)\\b"
                 },
                 {
                     "name": "constant.language.boolean.overt",
@@ -91,6 +102,7 @@
                 },
                 {
                     "name": "constant.language.overt",
+                    "comment": "Built-in tagged-union constructors. Resolved as factory calls returning Result/Option markers.",
                     "match": "\\b(Ok|Err|Some|None)\\b"
                 }
             ]
@@ -107,6 +119,7 @@
             "patterns": [
                 {
                     "name": "meta.effect-row.overt",
+                    "comment": "Effect row syntax: !{io}, !{io, async}, !{E} (row-polymorphic). Effect-variable identifiers are uppercase; concrete effect names are lowercase.",
                     "begin": "!\\{",
                     "end": "\\}",
                     "beginCaptures": {
@@ -125,6 +138,27 @@
                             "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
                         }
                     ]
+                }
+            ]
+        },
+        "await-postfix": {
+            "patterns": [
+                {
+                    "comment": "Postfix .await is a single syntactic unit (DESIGN.md §9). Highlighted as a control keyword to mirror the JS / Rust convention.",
+                    "match": "(\\.)(await)\\b",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.overt" },
+                        "2": { "name": "keyword.control.async.overt" }
+                    }
+                }
+            ]
+        },
+        "discard": {
+            "patterns": [
+                {
+                    "comment": "Bare `_` as a let-target or pattern: discards the value, doesn't bind a name.",
+                    "name": "variable.language.discard.overt",
+                    "match": "(?<![a-zA-Z0-9_])_(?![a-zA-Z0-9_])"
                 }
             ]
         },
@@ -172,11 +206,26 @@
             "patterns": [
                 {
                     "name": "support.type.primitive.overt",
-                    "match": "\\b(Int|Int32|Int64|Float|Bool|String|Byte|Char|Unit|Option|Result|List|Map|Set|Seq|CString|Ptr|Index|TraceEvent|RaceAllFailed|OvertError|IoError|HttpError|JsonError|ParseError)\\b"
+                    "comment": "Stdlib types: real primitives (Int, Int64, Float, Bool, String, Unit), nominal stdlib generics (Option, Result, List, Map, Set, Task), error types, and FFI-boundary types. Not strictly minimal — kept permissive so common BCL bridges (Int32, Byte, Char) also highlight cleanly.",
+                    "match": "\\b(Int|Int32|Int64|Float|Bool|String|Byte|Char|Unit|Option|Result|List|Map|Set|Seq|Task|CString|Ptr|Index|TraceEvent|RaceAllFailed|OvertError|IoError|HttpError|JsonError|ParseError)\\b"
                 },
                 {
                     "name": "entity.name.type.overt",
                     "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        },
+        "builtin-functions": {
+            "patterns": [
+                {
+                    "name": "support.function.builtin.overt",
+                    "comment": "Prelude functions, ambient in every module without `use`. Mirrors Stdlib.cs entries; keep this list in sync when adding prelude exports.",
+                    "match": "\\b(println|eprintln|print|args|size|length|len|map|filter|fold|try_map|par_map|all|any)(?=\\s*\\()"
+                },
+                {
+                    "name": "support.function.namespace.overt",
+                    "comment": "Module-qualified stdlib calls (`String.chars`, `Int.range`, `List.at`, etc.). Uppercase namespace + lowercase member.",
+                    "match": "\\b(String|Int|List|Map|Set|Trace|CString)\\.[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
                 }
             ]
         },

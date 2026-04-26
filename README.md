@@ -166,6 +166,7 @@ tooling/
   install.ps1                       Publish-and-install script for the `overt` CLI (dev workflow)
   ov.ps1                            Dev-mode wrapper that targets the Debug build dir
 vscode-extension/                   TextMate grammar + language config for .ov files
+                                    (a full LSP server is scoped in docs/tooling/lsp.md)
 src/
   Overt.Compiler/                   Tier 1: lexer, parser, resolver, type-checker, formatter
     Modules/                          Module-graph resolution for cross-file `use`
