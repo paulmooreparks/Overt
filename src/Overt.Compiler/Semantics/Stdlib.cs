@@ -54,10 +54,10 @@ public static class Stdlib
         // Names for the stdlib namespace fns whose first arg is the
         // receiver under method-call syntax. Other fns (println,
         // map, etc.) don't need this until method-call routes them.
-        b["String.split"]   = ImmutableArray.Create("s", "sep");
-        b["String.join"]    = ImmutableArray.Create("list", "sep");
+        b["String.split"] = ImmutableArray.Create("s", "sep");
+        b["String.join"] = ImmutableArray.Create("list", "sep");
         b["String.code_at"] = ImmutableArray.Create("s", "index");
-        b["List.at"]        = ImmutableArray.Create("list", "index");
+        b["List.at"] = ImmutableArray.Create("list", "index");
         return b.ToImmutable();
     }
 

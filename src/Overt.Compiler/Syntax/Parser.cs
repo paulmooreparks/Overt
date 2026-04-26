@@ -1513,13 +1513,13 @@ public sealed class Parser
                 return ParseMatchExpr();
 
             case TokenKind.KeywordReturn:
-            {
-                var ret = Advance();
-                var value = ParseExpression();
-                return new ReturnExpr(
-                    value,
-                    new SourceSpan(ret.Span.Start, value.Span.End));
-            }
+                {
+                    var ret = Advance();
+                    var value = ParseExpression();
+                    return new ReturnExpr(
+                        value,
+                        new SourceSpan(ret.Span.Start, value.Span.End));
+                }
 
             case TokenKind.KeywordParallel:
                 return ParseTaskGroup(parallel: true);
