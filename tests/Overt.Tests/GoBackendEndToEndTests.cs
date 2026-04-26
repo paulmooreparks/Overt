@@ -42,6 +42,41 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Records_LiteralAndFieldAccess()
+    {
+        // Exercises record decl emission, record literal expression
+        // (with named fields), field access on a record-typed value,
+        // and a record passed across a fn boundary as both parameter
+        // and return value.
+        AssertOvertProgramPrints(
+            """
+            module records_e2e
+
+            record Greeting {
+                salutation: String,
+                name: String,
+            }
+
+            fn make_greeting(who: String) -> Greeting {
+                Greeting { salutation = "hello", name = who }
+            }
+
+            fn print_greeting(g: Greeting) !{io} -> Result<(), IoError> {
+                println(g.salutation)?
+                println(g.name)?
+                Ok(())
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let g: Greeting = make_greeting(who = "world")
+                print_greeting(g = g)?
+                Ok(())
+            }
+            """,
+            expectedStdout: "hello\nworld\n");
+    }
+
+    [Fact]
     public void Transpiled_Arithmetic_LetIfElse()
     {
         // Exercises: integer literals, Int parameters, arithmetic

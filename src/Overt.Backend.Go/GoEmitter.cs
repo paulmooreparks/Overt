@@ -44,17 +44,22 @@ public static class GoEmitter
         var hasUserMain = false;
         foreach (var decl in module.Declarations)
         {
-            if (decl is FunctionDecl fn)
+            switch (decl)
             {
-                EmitFunction(sb, fn);
-                if (fn.Name == "main") hasUserMain = true;
-                sb.AppendLine();
-            }
-            else
-            {
-                throw new NotSupportedException(
-                    $"Go back end does not yet handle {decl.GetType().Name}; "
-                    + "currently only FunctionDecl is supported.");
+                case FunctionDecl fn:
+                    EmitFunction(sb, fn);
+                    if (fn.Name == "main") hasUserMain = true;
+                    sb.AppendLine();
+                    break;
+
+                case RecordDecl rec:
+                    EmitRecord(sb, rec);
+                    sb.AppendLine();
+                    break;
+
+                default:
+                    throw new NotSupportedException(
+                        $"Go back end does not yet handle {decl.GetType().Name}.");
             }
         }
 
@@ -113,10 +118,10 @@ public static class GoEmitter
 
     /// <summary>
     /// Lower an Overt <see cref="TypeExpr"/> to a Go type string. Covers the
-    /// primitive subset the scaffold currently supports (Int, Bool, String,
-    /// Unit). Each unsupported case throws so silent miscompilation isn't
-    /// possible. The C# back end's analogous lowering lives in CSharpEmitter
-    /// alongside the generic-type-arg handling we don't have yet.
+    /// primitive subset, the stdlib generics (Result / Option), and any
+    /// user-declared NamedType that's already a known struct in the same
+    /// emitted package (records). Unrecognized cases throw so silent
+    /// miscompilation isn't possible.
     /// </summary>
     private static string LowerType(TypeExpr? type) => type switch
     {
@@ -131,11 +136,37 @@ public static class GoEmitter
         NamedType { Name: "Option" } nt when nt.TypeArguments.Length == 1
             => $"overt.Option[{LowerType(nt.TypeArguments[0])}]",
         NamedType { Name: "IoError" } => "overt.IoError",
+        // User-declared record types: the parser produces NamedType with
+        // the record's source name and zero type arguments. Refer to it
+        // by the same name in Go (we emit records into `package main`).
+        NamedType nt when nt.TypeArguments.Length == 0 => nt.Name,
         null => "overt.Unit",
         _ => throw new NotSupportedException(
             "Go back end does not yet handle type expression " + type.GetType().Name
             + (type is NamedType nm ? $" (Name = {nm.Name})" : "")),
     };
+
+    /// <summary>
+    /// Lower an Overt <see cref="RecordDecl"/> to a Go struct type. Records
+    /// are immutable in Overt; Go has no first-class immutable struct, but
+    /// the emitter never emits mutation against fields, so the consumer
+    /// observes the same semantics. Field names are kept lowercase, which
+    /// makes them unexported in Go terms — fine for our single-package
+    /// `package main` layout. Cross-package use will need a capitalization
+    /// pass when we get there.
+    /// </summary>
+    private static void EmitRecord(StringBuilder sb, RecordDecl rec)
+    {
+        sb.AppendLine($"type {rec.Name} struct {{");
+        foreach (var field in rec.Fields)
+        {
+            sb.Append('\t');
+            sb.Append(field.Name);
+            sb.Append(' ');
+            sb.AppendLine(LowerType(field.Type));
+        }
+        sb.AppendLine("}");
+    }
 
     private static void EmitReturnType(StringBuilder sb, TypeExpr? type)
     {
@@ -415,6 +446,43 @@ public static class GoEmitter
 
             case CallExpr call:
                 EmitCall(sb, call);
+                break;
+
+            case RecordLiteralExpr rl:
+                // Overt: `Name { field = value, ... }`
+                // Go:    `Name{field: value, ...}`
+                // The TypeTarget is parsed as either an IdentifierExpr
+                // (single-segment record name) or a FieldAccess chain
+                // (Mod.Type). For the scaffold we only handle the
+                // single-segment form.
+                if (rl.TypeTarget is IdentifierExpr typeId)
+                {
+                    sb.Append(typeId.Name);
+                }
+                else
+                {
+                    throw new NotSupportedException(
+                        "Go back end does not yet handle dotted record-type targets; "
+                        + $"got {rl.TypeTarget.GetType().Name}.");
+                }
+                sb.Append('{');
+                for (var i = 0; i < rl.Fields.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(rl.Fields[i].Name);
+                    sb.Append(": ");
+                    EmitExpression(sb, rl.Fields[i].Value);
+                }
+                sb.Append('}');
+                break;
+
+            case FieldAccessExpr fa:
+                // Plain Go field access. The type checker already
+                // resolved that the LHS has a field by this name,
+                // and Go accepts the same dot syntax.
+                EmitExpression(sb, fa.Target);
+                sb.Append('.');
+                sb.Append(fa.FieldName);
                 break;
 
             case IdentifierExpr id:
