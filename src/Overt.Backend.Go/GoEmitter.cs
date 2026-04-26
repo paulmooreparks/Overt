@@ -832,6 +832,7 @@ public static class GoEmitter
             NamedType { Name: "List" } nt when nt.TypeArguments.Length == 1
                 => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
+            NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
             // Opaque host types: declared by `extern "go" type N binds
             // "..."`. The binds-string is the Go-side type expression
             // in import-path form (e.g. `*net/http.Request`); the
@@ -867,14 +868,39 @@ public static class GoEmitter
             }
             if (block.TrailingExpression is not null)
             {
+                // Peel TraceExpr wrappers off the trailing expression.
+                // With no Trace.subscribe consumer attached, a `trace
+                // { ... }` block is zero-cost pass-through; the
+                // emitter just emits the inner expression at the same
+                // position. A trace body with leading statements is
+                // not yet supported (would require flattening into
+                // the outer block's statement list).
+                var trailing = block.TrailingExpression;
+                while (trailing is TraceExpr te)
+                {
+                    if (te.Body.Statements.Length > 0)
+                    {
+                        throw new NotSupportedException(
+                            "Go back end does not yet handle trace blocks with "
+                            + "leading statements; only single-trailing-expression "
+                            + "trace bodies are supported.");
+                    }
+                    if (te.Body.TrailingExpression is null)
+                    {
+                        // `trace { }` with no body is a Unit-valued
+                        // no-op. Erase it.
+                        return;
+                    }
+                    trailing = te.Body.TrailingExpression;
+                }
                 _sb.Append(pad);
-                if (block.TrailingExpression is PropagateExpr trailingPe)
+                if (trailing is PropagateExpr trailingPe)
                 {
                     EmitPropagate(trailingPe, indent);
                     _sb.AppendLine();
                     return;
                 }
-                if (asReturn && block.TrailingExpression is IfExpr trailingIf)
+                if (asReturn && trailing is IfExpr trailingIf)
                 {
                     EmitIfAsReturn(trailingIf, indent);
                     _sb.AppendLine();
@@ -887,12 +913,12 @@ public static class GoEmitter
                 // `|>?` is currently handled; using it in non-trailing
                 // expression positions throws via the bare BinaryExpr
                 // path below.
-                if (asReturn && IsPipeChainContainingPropagate(block.TrailingExpression, out var pipeChain))
+                if (asReturn && IsPipeChainContainingPropagate(trailing, out var pipeChain))
                 {
                     EmitPipeChainAsReturn(pipeChain, indent);
                     return;
                 }
-                if (block.TrailingExpression is MatchExpr trailingMatch)
+                if (trailing is MatchExpr trailingMatch)
                 {
                     // Match in trailing position. asReturn flag passes
                     // through: return-position fn body recurses with
@@ -904,25 +930,25 @@ public static class GoEmitter
                     _sb.AppendLine();
                     return;
                 }
-                if (block.TrailingExpression is WhileExpr trailingWhile)
+                if (trailing is WhileExpr trailingWhile)
                 {
                     EmitWhile(trailingWhile, indent);
                     _sb.AppendLine();
                     return;
                 }
-                if (block.TrailingExpression is LoopExpr trailingLoop)
+                if (trailing is LoopExpr trailingLoop)
                 {
                     EmitLoop(trailingLoop, indent);
                     _sb.AppendLine();
                     return;
                 }
-                if (block.TrailingExpression is ForEachExpr trailingForEach)
+                if (trailing is ForEachExpr trailingForEach)
                 {
                     EmitForEach(trailingForEach, indent);
                     _sb.AppendLine();
                     return;
                 }
-                if (block.TrailingExpression is IfExpr trailingIfStmt && !asReturn)
+                if (trailing is IfExpr trailingIfStmt && !asReturn)
                 {
                     // If-as-trailing in a Unit-typed body. The earlier
                     // path only handled return-position (asReturn = true).
@@ -930,7 +956,7 @@ public static class GoEmitter
                     _sb.AppendLine();
                     return;
                 }
-                if (asReturn && block.TrailingExpression is WithExpr trailingWith)
+                if (asReturn && trailing is WithExpr trailingWith)
                 {
                     var tempName = EmitWithExprAsTemp(trailingWith, indent);
                     _sb.Append(new string('\t', indent));
@@ -942,7 +968,7 @@ public static class GoEmitter
                 {
                     _sb.Append("return ");
                 }
-                EmitExpression(block.TrailingExpression);
+                EmitExpression(trailing);
                 _sb.AppendLine();
             }
         }

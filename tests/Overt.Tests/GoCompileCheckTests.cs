@@ -51,8 +51,17 @@ public class GoCompileCheckTests
     //                         emitter injects `where`-predicate
     //                         validations at every boundary; the Go
     //                         emitter doesn't.
-    //   - trace.ov            `trace { ... }` blocks. Not yet wired
-    //                         in the Go emitter.
+    //   - trace.ov            `trace { ... }` blocks themselves are
+    //                         lowered as zero-cost pass-through, and
+    //                         Trace.subscribe / TraceEvent are wired
+    //                         in the runtime — but the example also
+    //                         has `Ok(order with { ... })`, a
+    //                         WithExpr inside a CallExpr argument.
+    //                         The current WithExpr lowering only
+    //                         handles trailing-position, let-init,
+    //                         and assignment-RHS contexts; arbitrary
+    //                         expression positions need a hoist-and-
+    //                         substitute pass that doesn't exist yet.
     //   - csharp/*            Reach into `extern "csharp" use "..."` —
     //                         the Go target has no equivalent FFI, by
     //                         design. These will never enter this

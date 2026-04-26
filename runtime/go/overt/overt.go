@@ -96,6 +96,36 @@ func Eprintln(s string) Result[Unit, IoError] {
 	return Ok[Unit, IoError](UnitValue)
 }
 
+// TraceEvent is the (placeholder) shape of an event emitted by a
+// `trace { ... }` block. The C# runtime carries fn-entry / fn-exit /
+// binding / branch / arm structured events; the Go target ships a
+// minimal stub for now so trace blocks compile and the
+// Trace.subscribe call has a fn-typed argument to bind to. With no
+// real events emitted (the GoEmitter currently lowers trace blocks
+// as zero-cost pass-throughs), the stub is sufficient.
+type TraceEvent struct {
+	Description string
+}
+
+// String implements fmt.Stringer so `%v` interpolation against a
+// TraceEvent renders the description rather than struct dump syntax.
+func (e TraceEvent) String() string { return e.Description }
+
+// traceConsumer is the registered subscriber, if any. Singleton
+// because Overt's Trace.subscribe replaces the previous registration
+// rather than chaining; that's the C# runtime's behavior too.
+var traceConsumer func(TraceEvent) Result[Unit, IoError]
+
+// TraceSubscribe registers a consumer for trace events. The Overt
+// fn shape is `Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ())`
+// returning Unit. Today the GoEmitter doesn't actually emit events
+// (trace blocks are pass-through), so this records the consumer for
+// when it does. When the emitter grows event emission, this is
+// where dispatch hooks in.
+func TraceSubscribe(consumer func(TraceEvent) Result[Unit, IoError]) {
+	traceConsumer = consumer
+}
+
 // List is Overt's persistent, immutable sequence type. The Go layout is
 // a thin wrapper around a slice; the emitter never emits mutation
 // against List values, so the slice is treated as read-only by
