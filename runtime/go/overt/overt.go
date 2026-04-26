@@ -114,15 +114,16 @@ func (e TraceEvent) String() string { return e.Description }
 // traceConsumer is the registered subscriber, if any. Singleton
 // because Overt's Trace.subscribe replaces the previous registration
 // rather than chaining; that's the C# runtime's behavior too.
-var traceConsumer func(TraceEvent) Result[Unit, IoError]
+var traceConsumer func(TraceEvent)
 
 // TraceSubscribe registers a consumer for trace events. The Overt
 // fn shape is `Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ())`
-// returning Unit. Today the GoEmitter doesn't actually emit events
+// returning Unit; the Go-side parameter mirrors the Unit-return as
+// no-return-slot. Today the GoEmitter doesn't actually emit events
 // (trace blocks are pass-through), so this records the consumer for
 // when it does. When the emitter grows event emission, this is
 // where dispatch hooks in.
-func TraceSubscribe(consumer func(TraceEvent) Result[Unit, IoError]) {
+func TraceSubscribe(consumer func(TraceEvent)) {
 	traceConsumer = consumer
 }
 

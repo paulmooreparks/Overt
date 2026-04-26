@@ -1001,6 +1001,27 @@ public static class GoEmitter
             switch (stmt)
             {
                 case ExpressionStmt es:
+                    // `match X { arm => body }?` rewrites to
+                    // `match X { arm => body? }` — push the propagate
+                    // into each arm. Same semantics; avoids needing a
+                    // value-form match lowering (var temp; switch
+                    // arms assign to temp; if !temp.IsOk return Err).
+                    // Only valid when the match's value is unused
+                    // (statement position), which is what the
+                    // ExpressionStmt wrapper guarantees.
+                    if (es.Expression is PropagateExpr { Operand: MatchExpr matchOp } pmatch)
+                    {
+                        var rewrittenArms = matchOp.Arms
+                            .Select(arm => new MatchArm(
+                                arm.Pattern,
+                                new PropagateExpr(arm.Body, arm.Body.Span),
+                                arm.Span))
+                            .ToImmutableArray();
+                        var rewrittenMatch = new MatchExpr(
+                            matchOp.Scrutinee, rewrittenArms, matchOp.Span);
+                        EmitMatch(rewrittenMatch, indent, asReturn: false);
+                        break;
+                    }
                     if (es.Expression is PropagateExpr pe)
                     {
                         EmitPropagate(pe, indent);

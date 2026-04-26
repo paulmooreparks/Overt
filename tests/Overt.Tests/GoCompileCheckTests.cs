@@ -51,22 +51,6 @@ public class GoCompileCheckTests
     //                         emitter injects `where`-predicate
     //                         validations at every boundary; the Go
     //                         emitter doesn't.
-    //   - trace.ov            `trace { ... }` blocks lower as
-    //                         zero-cost pass-through, Trace.subscribe
-    //                         / TraceEvent are wired in the runtime,
-    //                         and WithExpr-as-expression-position
-    //                         hoists correctly via the
-    //                         PreHoistEmbeddedWithExprs pass. Last
-    //                         remaining gap: `match ... ?` in main —
-    //                         a MatchExpr wrapped in PropagateExpr,
-    //                         where the match is in expression
-    //                         position. Needs an assignment-form
-    //                         match lowering (emit the match as
-    //                         `var __m = ...; switch ... { case ...:
-    //                         __m = ...; }` instead of return-form)
-    //                         so the propagate operand can be
-    //                         hoisted. That's a separate commit's
-    //                         worth of work.
     //   - csharp/*            Reach into `extern "csharp" use "..."` —
     //                         the Go target has no equivalent FFI, by
     //                         design. These will never enter this
@@ -84,6 +68,7 @@ public class GoCompileCheckTests
     [InlineData("state_machine.ov")]
     [InlineData("pipeline.ov")]
     [InlineData("effects.ov")]
+    [InlineData("trace.ov")]
     public void Emit_Example_ProducesCompilableGo(string file)
     {
         if (!IsGoOnPath())
