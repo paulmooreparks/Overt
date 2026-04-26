@@ -42,6 +42,34 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_StringInterpolation_FmtSprintf()
+    {
+        // Exercises ${expr} interpolation across primitive types,
+        // an arithmetic sub-expression inside an interpolation, and
+        // multiple interpolations in one string. Output is fmt.Sprintf-
+        // shaped: %v for each value, with the surrounding literal
+        // re-encoded for Go (escapes preserved, % doubled).
+        AssertOvertProgramPrints(
+            """
+            module interp_e2e
+
+            fn main() !{io} -> Result<(), IoError> {
+                let n: Int = 42
+                let name: String = "alice"
+                let flag: Bool = true
+                println("name=${name} n=${n} flag=${flag}")?
+                println("computed=${n + 8}")?
+                println("literal-percent: 100%")?
+                Ok(())
+            }
+            """,
+            // Go's `%v` formats: int as decimal, string as itself, bool as
+            // "true"/"false". The literal "%" survives the format-string
+            // re-encoding and prints once.
+            expectedStdout: "name=alice n=42 flag=true\ncomputed=50\nliteral-percent: 100%\n");
+    }
+
+    [Fact]
     public void Transpiled_EnumsAndMatch_DispatchesByVariant()
     {
         // Exercises enum decl emission (interface + struct-per-variant +
