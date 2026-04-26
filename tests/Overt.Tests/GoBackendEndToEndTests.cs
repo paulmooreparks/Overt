@@ -26,24 +26,59 @@ public class GoBackendEndToEndTests
     [Fact]
     public void Transpiled_Hello_PrintsToStdout()
     {
-        if (!IsGoOnPath())
-        {
-            // Go toolchain not present — silently pass. The intent is
-            // covered by the C# back end's e2e tests; this one is
-            // additive coverage for the Go target.
-            return;
-        }
-
-        const string src = """
+        // Go's fmt.Fprintln always writes a single LF regardless of OS,
+        // while .NET's StreamReader on Windows doesn't translate the LF
+        // to CRLF when reading from a pipe — so a literal "\n" matches.
+        AssertOvertProgramPrints(
+            """
             module hello
 
             fn main() !{io} -> Result<(), IoError> {
                 println("hello from Go")?
                 Ok(())
             }
-            """;
+            """,
+            expectedStdout: "hello from Go\n");
+    }
 
-        var lex = Lexer.Lex(src);
+    [Fact]
+    public void Transpiled_Parameters_ReceiveAndUseString()
+    {
+        // Exercises String parameters, identifier-expression references
+        // inside the body, and a user-fn call from main with a named
+        // argument. Each `greet` call propagates ? through the user fn
+        // back into main's Result<Unit, IoError> return.
+        AssertOvertProgramPrints(
+            """
+            module greet
+
+            fn greet(name: String) !{io} -> Result<(), IoError> {
+                println(name)?
+                Ok(())
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                greet(name = "alice")?
+                greet(name = "bob")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "alice\nbob\n");
+    }
+
+    /// <summary>
+    /// Lex / parse / emit / `go build` / run / assert. Skips the whole
+    /// pipeline when `go` is not on PATH; intentionally silent so the
+    /// suite stays green for contributors without Go installed.
+    /// </summary>
+    private static void AssertOvertProgramPrints(string overtSource, string expectedStdout)
+    {
+        if (!IsGoOnPath())
+        {
+            return;
+        }
+
+        var lex = Lexer.Lex(overtSource);
         var parse = Parser.Parse(lex.Tokens);
         Assert.Empty(parse.Diagnostics);
 
@@ -78,10 +113,7 @@ public class GoBackendEndToEndTests
             var (stdout, stderr, exit) = RunBinary(binPath);
             Assert.Equal(0, exit);
             Assert.Equal("", stderr);
-            // Go's fmt.Fprintln always writes a single LF regardless of
-            // OS, while .NET's StreamReader on Windows leaves the LF
-            // unmodified (no CRLF translation when reading from a pipe).
-            Assert.Equal("hello from Go\n", stdout);
+            Assert.Equal(expectedStdout, stdout);
         }
         finally
         {

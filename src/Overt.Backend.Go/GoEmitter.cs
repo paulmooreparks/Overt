@@ -91,43 +91,57 @@ public static class GoEmitter
         // coexist with it; everything else keeps its source name.
         var goName = fn.Name == "main" ? "__overt_main" : fn.Name;
 
-        // Parameters: only zero-arg fns supported for now.
-        if (fn.Parameters.Length != 0)
+        sb.Append($"func {goName}(");
+        for (var i = 0; i < fn.Parameters.Length; i++)
         {
-            throw new NotSupportedException(
-                "Go back end does not yet handle parameters; "
-                + $"`fn {fn.Name}` declares {fn.Parameters.Length}.");
+            if (i > 0) sb.Append(", ");
+            var p = fn.Parameters[i];
+            sb.Append(p.Name);
+            sb.Append(' ');
+            sb.Append(LowerType(p.Type));
         }
-
-        sb.Append($"func {goName}() ");
+        sb.Append(") ");
         EmitReturnType(sb, fn.ReturnType);
         sb.AppendLine(" {");
         EmitBlock(sb, fn.Body, indent: 1);
         sb.AppendLine("}");
     }
 
+    /// <summary>
+    /// Lower an Overt <see cref="TypeExpr"/> to a Go type string. Covers the
+    /// primitive subset the scaffold currently supports (Int, Bool, String,
+    /// Unit). Each unsupported case throws so silent miscompilation isn't
+    /// possible. The C# back end's analogous lowering lives in CSharpEmitter
+    /// alongside the generic-type-arg handling we don't have yet.
+    /// </summary>
+    private static string LowerType(TypeExpr? type) => type switch
+    {
+        NamedType { Name: "Int" } => "int",
+        NamedType { Name: "Int64" } => "int64",
+        NamedType { Name: "Bool" } => "bool",
+        NamedType { Name: "String" } => "string",
+        NamedType { Name: "Float" } => "float64",
+        UnitType => "overt.Unit",
+        NamedType { Name: "Result" } nt when nt.TypeArguments.Length == 2
+            => $"overt.Result[{LowerType(nt.TypeArguments[0])}, {LowerType(nt.TypeArguments[1])}]",
+        NamedType { Name: "Option" } nt when nt.TypeArguments.Length == 1
+            => $"overt.Option[{LowerType(nt.TypeArguments[0])}]",
+        NamedType { Name: "IoError" } => "overt.IoError",
+        null => "overt.Unit",
+        _ => throw new NotSupportedException(
+            "Go back end does not yet handle type expression " + type.GetType().Name
+            + (type is NamedType nm ? $" (Name = {nm.Name})" : "")),
+    };
+
     private static void EmitReturnType(StringBuilder sb, TypeExpr? type)
     {
-        // The only currently-recognized return type is
-        // `Result<(), IoError>`, which lowers to
-        // `overt.Result[overt.Unit, overt.IoError]`. Everything else
-        // is a wide-open follow-up.
-        if (type is NamedType { Name: "Result" } nt && nt.TypeArguments.Length == 2
-            && nt.TypeArguments[0] is UnitType
-            && nt.TypeArguments[1] is NamedType { Name: "IoError" })
-        {
-            sb.Append("overt.Result[overt.Unit, overt.IoError]");
-            return;
-        }
         if (type is null || type is UnitType)
         {
             // `-> ()` becomes a Go fn with no return; emit the empty
             // return-type slot.
             return;
         }
-        throw new NotSupportedException(
-            "Go back end currently only emits return type "
-            + "`Result<(), IoError>` or `()`; got: " + (type?.ToString() ?? "<null>"));
+        sb.Append(LowerType(type));
     }
 
     private static void EmitBlock(StringBuilder sb, BlockExpr block, int indent)
