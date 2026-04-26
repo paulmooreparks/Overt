@@ -366,6 +366,46 @@ public class TypeDiagnosticTests
         Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
     }
 
+    [Fact]
+    public void OV0308_TupleOfDataVariants_AllCombinationsCovered_NoDiagnostic()
+    {
+        // Data-bearing variants (`Variant { field = pat }`) in tuple positions.
+        // Mirrors the SemVer Kit `compare_pre_id` shape, where each enum has
+        // a data field and the cascade pairs every (left, right) combination.
+        var r = Check(
+            "module t\n"
+            + "enum P { Numeric { value: Int }, Alphanumeric { text: String } }\n"
+            + "fn f(a: P, b: P) -> Int {\n"
+            + "    match (a, b) {\n"
+            + "        (P.Numeric { value = _ }, P.Numeric { value = _ }) => 0,\n"
+            + "        (P.Numeric { value = _ }, P.Alphanumeric { text = _ }) => 1,\n"
+            + "        (P.Alphanumeric { text = _ }, P.Numeric { value = _ }) => 2,\n"
+            + "        (P.Alphanumeric { text = _ }, P.Alphanumeric { text = _ }) => 3,\n"
+            + "    }\n"
+            + "}");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0308");
+    }
+
+    [Fact]
+    public void OV0308_TupleOfDataVariants_MissingCombination_Fires()
+    {
+        // Same shape as above but missing the (Alphanumeric, Numeric) arm —
+        // the cartesian-product check must catch the gap with data variants.
+        var r = Check(
+            "module t\n"
+            + "enum P { Numeric { value: Int }, Alphanumeric { text: String } }\n"
+            + "fn f(a: P, b: P) -> Int {\n"
+            + "    match (a, b) {\n"
+            + "        (P.Numeric { value = _ }, P.Numeric { value = _ }) => 0,\n"
+            + "        (P.Numeric { value = _ }, P.Alphanumeric { text = _ }) => 1,\n"
+            + "        (P.Alphanumeric { text = _ }, P.Alphanumeric { text = _ }) => 3,\n"
+            + "    }\n"
+            + "}");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0308");
+        Assert.Contains("P.Alphanumeric", d.Message);
+        Assert.Contains("P.Numeric", d.Message);
+    }
+
     // ------------------------------- OV0308 on stdlib enums (Option, Result)
 
     [Fact]
