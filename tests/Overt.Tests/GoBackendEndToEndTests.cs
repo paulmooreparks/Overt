@@ -42,6 +42,44 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ListAndPrelude_MapFilterFoldQuantifiers()
+    {
+        // Exercises Int.range, map / filter / fold / size / all / any
+        // with named-fn callbacks (Overt has no inline-lambda syntax),
+        // and string interpolation displaying the computed values.
+        // Output is a single deterministic line that can only be
+        // produced if the whole prelude pipeline emitted and ran
+        // correctly.
+        AssertOvertProgramPrints(
+            """
+            module list_e2e
+
+            fn double(n: Int) -> Int { n * 2 }
+            fn add(a: Int, b: Int) -> Int { a + b }
+            fn is_even(n: Int) -> Bool { n - (n / 2) * 2 == 0 }
+            fn is_zero(n: Int) -> Bool { n == 0 }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let xs: List<Int> = Int.range(start = 1, end = 5)
+                let doubled: List<Int> = map(list = xs, f = double)
+                let evens: List<Int> = filter(list = xs, predicate = is_even)
+                let total: Int = fold(list = xs, seed = 0, step = add)
+                let n: Int = size(list = xs)
+                let only_evens: Bool = all(list = evens, predicate = is_even)
+                let has_zero: Bool = any(list = xs, predicate = is_zero)
+                let first_doubled: Int = List.at(list = doubled, index = 0)
+
+                println("size=${n} total=${total} all-even=${only_evens} any-zero=${has_zero} first2x=${first_doubled}")?
+                Ok(())
+            }
+            """,
+            // xs = [1,2,3,4]; doubled = [2,4,6,8]; evens = [2,4];
+            // total = 1+2+3+4 = 10; size = 4;
+            // all-even on evens = true; any-zero on xs = false; first2x = 2.
+            expectedStdout: "size=4 total=10 all-even=true any-zero=false first2x=2\n");
+    }
+
+    [Fact]
     public void Transpiled_StringInterpolation_FmtSprintf()
     {
         // Exercises ${expr} interpolation across primitive types,

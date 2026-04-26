@@ -239,6 +239,8 @@ public static class GoEmitter
                 => $"overt.Result[{LowerType(nt.TypeArguments[0])}, {LowerType(nt.TypeArguments[1])}]",
             NamedType { Name: "Option" } nt when nt.TypeArguments.Length == 1
                 => $"overt.Option[{LowerType(nt.TypeArguments[0])}]",
+            NamedType { Name: "List" } nt when nt.TypeArguments.Length == 1
+                => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             // User-declared record / enum types: NamedType with zero type
             // arguments. Refer to it by its source name (single-package layout).
@@ -790,6 +792,32 @@ public static class GoEmitter
                 return;
             }
 
+            // Module-qualified stdlib calls (`Int.range(0, 4)`,
+            // `List.empty()`, `String.chars(s)`, etc.) route through a
+            // flat Go function name in the runtime package. Distinct
+            // from FieldAccess in expression position, where the same
+            // shape might be a variant constructor (`Shape.Point`).
+            // Variant constructors with no args are emitted via the
+            // FieldAccessExpr path in EmitExpression, so we don't need
+            // to distinguish them here — but a record-shaped variant
+            // with args reaches us via RecordLiteralExpr, not CallExpr.
+            // What we WILL see here: stdlib namespace calls.
+            if (call.Callee is FieldAccessExpr { Target: IdentifierExpr nsId } facCallee)
+            {
+                if (MapNamespaceCall(nsId.Name, facCallee.FieldName) is { } mapped)
+                {
+                    _sb.Append(mapped);
+                    _sb.Append('(');
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        if (i > 0) _sb.Append(", ");
+                        EmitExpression(call.Arguments[i].Value);
+                    }
+                    _sb.Append(')');
+                    return;
+                }
+            }
+
             EmitExpression(call.Callee);
             _sb.Append('(');
             for (var i = 0; i < call.Arguments.Length; i++)
@@ -828,11 +856,61 @@ public static class GoEmitter
                 "Go back end does not yet handle unary operator " + op),
         };
 
+        /// <summary>
+        /// Map an unqualified Overt identifier in expression position to its
+        /// Go-runtime equivalent. Names not in this table emit verbatim,
+        /// which is correct for user-declared fns and let-bindings.
+        ///
+        /// Go uses CamelCase for exported identifiers, so the Overt-side
+        /// snake_case prelude names (`map`, `filter`, etc.) all gain a
+        /// capitalized first letter at this boundary. Snake-case names
+        /// with multiple segments (`unwrap_or` etc., when they show up
+        /// at the bare-call level — not the case today) would split
+        /// here too.
+        /// </summary>
         private static string MapIdentifier(string name) => name switch
         {
             "println" => "overt.Println",
             "eprintln" => "overt.Eprintln",
+            "map" => "overt.Map",
+            "filter" => "overt.Filter",
+            "fold" => "overt.Fold",
+            "all" => "overt.All",
+            "any" => "overt.Any",
+            "size" => "overt.Size",
+            "len" => "overt.Len",
+            "length" => "overt.Length",
             _ => name,
         };
+
+        /// <summary>
+        /// Map an Overt module-qualified identifier (`Int.range`,
+        /// `List.empty`, etc.) to its flat Go-runtime function name.
+        /// Returns null when the path isn't a known stdlib namespace
+        /// member, so the caller can decide whether to fall back to
+        /// regular field access. Naming convention: camelize the
+        /// member, drop the dot, prepend the namespace name, e.g.
+        /// `String.starts_with` → `overt.StringStartsWith`.
+        /// </summary>
+        private static string? MapNamespaceCall(string namespaceName, string member)
+        {
+            // Allowlist gate: only known stdlib namespaces route here.
+            // Unknown namespaces are most likely the user's own enum
+            // (variant access) and shouldn't be camelized.
+            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString"))
+            {
+                return null;
+            }
+            // Camelize: split on _, uppercase each segment, join.
+            var parts = member.Split('_');
+            var camel = new StringBuilder();
+            foreach (var part in parts)
+            {
+                if (part.Length == 0) continue;
+                camel.Append(char.ToUpperInvariant(part[0]));
+                if (part.Length > 1) camel.Append(part[1..]);
+            }
+            return $"overt.{namespaceName}{camel}";
+        }
     }
 }

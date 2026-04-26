@@ -94,3 +94,122 @@ func Eprintln(s string) Result[Unit, IoError] {
 	}
 	return Ok[Unit, IoError](UnitValue)
 }
+
+// List is Overt's persistent, immutable sequence type. The Go layout is
+// a thin wrapper around a slice; the emitter never emits mutation
+// against List values, so the slice is treated as read-only by
+// convention even though Go's type system can't enforce it. The C#
+// runtime uses ImmutableArray<T> for the same shape; Go's lack of an
+// immutable-collection equivalent is the practical reason for the
+// convention rather than the enforcement.
+type List[T any] struct {
+	Items []T
+}
+
+// ListEmpty constructs the empty List. Type parameter is explicit
+// because there's no value to infer from.
+func ListEmpty[T any]() List[T] {
+	return List[T]{Items: []T{}}
+}
+
+// ListSingleton wraps one value as a one-element List.
+func ListSingleton[T any](v T) List[T] {
+	return List[T]{Items: []T{v}}
+}
+
+// ListAt returns the element at the given index. Out-of-range index
+// panics — matches the C# runtime's ArgumentOutOfRangeException
+// behavior. Callers can guard with a Size check or use Option-shaped
+// helpers when a missing element should be a value, not a fault.
+func ListAt[T any](list List[T], index int) T {
+	return list.Items[index]
+}
+
+// ListConcatThree appends three Lists end-to-end. Mirrors the Overt
+// `List.concat_three(first, middle, last)` shape; useful when the
+// front end has unrolled a small sequence at compile time.
+func ListConcatThree[T any](first, middle, last List[T]) List[T] {
+	out := make([]T, 0, len(first.Items)+len(middle.Items)+len(last.Items))
+	out = append(out, first.Items...)
+	out = append(out, middle.Items...)
+	out = append(out, last.Items...)
+	return List[T]{Items: out}
+}
+
+// Size, Len, and Length are three names for closely related operations.
+// Size and Len both return the element count of a List; Length returns
+// the byte length of a string. Overt's prelude exposes all three names
+// (size and len as synonyms for List, length for String); the runtime
+// faithfully provides each so the emitter doesn't have to rewrite at
+// the call site.
+func Size[T any](list List[T]) int   { return len(list.Items) }
+func Len[T any](list List[T]) int    { return len(list.Items) }
+func Length(s string) int            { return len(s) }
+
+// Map applies f to each element of list, returning a new List with the
+// results in order. Pure: does not mutate either input.
+func Map[T, U any](list List[T], f func(T) U) List[U] {
+	out := make([]U, len(list.Items))
+	for i, v := range list.Items {
+		out[i] = f(v)
+	}
+	return List[U]{Items: out}
+}
+
+// Filter returns a new List with only those elements of list for
+// which pred returns true. Order is preserved.
+func Filter[T any](list List[T], pred func(T) bool) List[T] {
+	out := make([]T, 0, len(list.Items))
+	for _, v := range list.Items {
+		if pred(v) {
+			out = append(out, v)
+		}
+	}
+	return List[T]{Items: out}
+}
+
+// Fold folds list left-to-right with seed as the initial accumulator;
+// step receives the accumulator and the current element and returns
+// the next accumulator value.
+func Fold[T, U any](list List[T], seed U, step func(U, T) U) U {
+	acc := seed
+	for _, v := range list.Items {
+		acc = step(acc, v)
+	}
+	return acc
+}
+
+// All returns true iff pred holds for every element. Vacuously true
+// on the empty List. Short-circuits on the first false.
+func All[T any](list List[T], pred func(T) bool) bool {
+	for _, v := range list.Items {
+		if !pred(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// Any returns true iff pred holds for at least one element. Vacuously
+// false on the empty List. Short-circuits on the first true.
+func Any[T any](list List[T], pred func(T) bool) bool {
+	for _, v := range list.Items {
+		if pred(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// IntRange returns the half-open integer range [start, end) as a List.
+// start >= end yields the empty List (Python semantics).
+func IntRange(start, end int) List[int] {
+	if start >= end {
+		return List[int]{Items: []int{}}
+	}
+	out := make([]int, 0, end-start)
+	for i := start; i < end; i++ {
+		out = append(out, i)
+	}
+	return List[int]{Items: out}
+}
