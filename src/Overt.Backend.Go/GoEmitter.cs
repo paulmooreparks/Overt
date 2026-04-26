@@ -69,6 +69,13 @@ public static class GoEmitter
         // the generated shim (`method(c, ...)`) instead of emitting
         // verbatim Go field access. See docs/ffi.md §5.
         private readonly HashSet<string> _instanceExterns = new(StringComparer.Ordinal);
+        // WithExpr → emitted-temp-name map for the
+        // hoist-then-substitute pass that handles WithExpr in
+        // arbitrary expression positions (e.g. as a fn-call
+        // argument). Pre-emitted before each return-position
+        // expression line; cleared per line. EmitExpression's
+        // WithExpr case checks here first.
+        private readonly Dictionary<SourceSpan, string> _withHoists = new();
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -964,12 +971,28 @@ public static class GoEmitter
                     _sb.AppendLine(tempName);
                     return;
                 }
+                // Pre-hoist any embedded WithExpr in the trailing
+                // expression. They can't be emitted inline (the
+                // lowering is multi-statement); instead each one
+                // becomes a temp on a preceding line, and
+                // EmitExpression substitutes the temp's name at the
+                // WithExpr's site. The pad we already wrote becomes
+                // the lead-in for the FIRST hoist line; if no
+                // hoists are needed, it's the lead-in for the line
+                // we're about to emit.
+                if (PreHoistEmbeddedWithExprs(trailing, indent, padAlreadyWritten: true))
+                {
+                    // Hoist consumed the pre-written pad; we need a
+                    // fresh one for the actual line.
+                    _sb.Append(pad);
+                }
                 if (asReturn)
                 {
                     _sb.Append("return ");
                 }
                 EmitExpression(trailing);
                 _sb.AppendLine();
+                _withHoists.Clear();
             }
         }
 
@@ -1184,6 +1207,101 @@ public static class GoEmitter
             EmitBlock(le.Body, indent + 1, asReturn: false);
             _sb.Append(pad);
             _sb.Append('}');
+        }
+
+        /// <summary>
+        /// Pre-emit hoists for any WithExpr embedded in <paramref name="e"/>
+        /// (excluding `e` itself if it IS a WithExpr — that case is
+        /// handled by the caller's own dispatch, e.g. as a let-init or
+        /// trailing-return). Each hoist becomes a `__w_N := target;
+        /// __w_N.f = v; ...` block at the current indent level.
+        /// Records (span → temp name) in <see cref="_withHoists"/>
+        /// so EmitExpression can substitute the temp name when it
+        /// reaches the WithExpr's site.
+        ///
+        /// <paramref name="padAlreadyWritten"/> indicates whether the
+        /// caller has written one pad on _sb (the standard
+        /// statement-emit contract). Returns true if any hoist was
+        /// emitted; in that case the caller's pre-written pad has
+        /// been consumed and the caller needs a fresh pad for its
+        /// continuation line. Returns false if no hoist was needed,
+        /// in which case the pre-written pad is still in place.
+        /// </summary>
+        private bool PreHoistEmbeddedWithExprs(Expression e, int indent, bool padAlreadyWritten)
+        {
+            var found = new List<WithExpr>();
+            CollectEmbeddedWithExprs(e, found);
+            if (found.Count == 0) return false;
+            var pad = new string('\t', indent);
+            for (var i = 0; i < found.Count; i++)
+            {
+                if (i > 0 || !padAlreadyWritten)
+                {
+                    _sb.Append(pad);
+                }
+                var temp = EmitWithExprAsTemp(found[i], indent);
+                _withHoists[found[i].Span] = temp;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Walk an expression tree, collect every WithExpr it contains
+        /// (excluding the root if the root IS a WithExpr — those go
+        /// through the caller's own dispatch). Doesn't recurse into a
+        /// WithExpr's own children: <see cref="EmitWithExprAsTemp"/>
+        /// handles nested-WithExpr-in-field-init internally.
+        /// </summary>
+        private static void CollectEmbeddedWithExprs(Expression e, List<WithExpr> found)
+        {
+            CollectInner(e, isRoot: true);
+
+            void CollectInner(Expression node, bool isRoot)
+            {
+                switch (node)
+                {
+                    case WithExpr we:
+                        if (!isRoot) found.Add(we);
+                        // Don't recurse: EmitWithExprAsTemp handles nested.
+                        return;
+                    case CallExpr c:
+                        CollectInner(c.Callee, isRoot: false);
+                        foreach (var a in c.Arguments) CollectInner(a.Value, isRoot: false);
+                        return;
+                    case BinaryExpr be:
+                        CollectInner(be.Left, isRoot: false);
+                        CollectInner(be.Right, isRoot: false);
+                        return;
+                    case UnaryExpr ue:
+                        CollectInner(ue.Operand, isRoot: false);
+                        return;
+                    case FieldAccessExpr fa:
+                        CollectInner(fa.Target, isRoot: false);
+                        return;
+                    case PropagateExpr pe:
+                        CollectInner(pe.Operand, isRoot: false);
+                        return;
+                    case RecordLiteralExpr rl:
+                        foreach (var f in rl.Fields) CollectInner(f.Value, isRoot: false);
+                        return;
+                    case InterpolatedStringExpr ie:
+                        foreach (var p in ie.Parts)
+                        {
+                            if (p is StringInterpolationPart ip)
+                            {
+                                CollectInner(ip.Expression, isRoot: false);
+                            }
+                        }
+                        return;
+                    // Leaves and language constructs whose bodies are
+                    // their own statement scope (Block, If, Match,
+                    // Loop, While, ForEach, etc.) don't contribute
+                    // hoists at the enclosing line level — they have
+                    // their own pre-hoist boundaries.
+                    default:
+                        return;
+                }
+            }
         }
 
         /// <summary>
@@ -1827,12 +1945,24 @@ public static class GoEmitter
                 _sb.AppendLine();
                 return;
             }
+            // Pre-hoist embedded WithExprs the same way EmitBlock
+            // does for trailing expressions. Caller has already
+            // written one pad on _sb (the EmitMatch / EmitMatchTuple
+            // paths Append('\t') before EmitArmBody); we consume it
+            // for the first hoist line if any, then re-pad for the
+            // actual return line.
+            var pad = new string('\t', indent);
+            if (PreHoistEmbeddedWithExprs(body, indent, padAlreadyWritten: true))
+            {
+                _sb.Append(pad);
+            }
             if (asReturn)
             {
                 _sb.Append("return ");
             }
             EmitExpression(body);
             _sb.AppendLine();
+            _withHoists.Clear();
         }
 
         // ------------------------------------------------------ propagate
@@ -1987,6 +2117,13 @@ public static class GoEmitter
 
                 case CallExpr call:
                     EmitCall(call);
+                    break;
+
+                case WithExpr we when _withHoists.TryGetValue(we.Span, out var withTemp):
+                    // Pre-hoisted by PreHoistEmbeddedWithExprs at the
+                    // enclosing statement boundary; emit the temp's
+                    // name in this slot.
+                    _sb.Append(withTemp);
                     break;
 
                 case RecordLiteralExpr rl:
