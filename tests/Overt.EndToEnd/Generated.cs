@@ -7,6 +7,7 @@
 // the Overt file, not this generated C#.
 // </auto-generated>
 #nullable enable
+#pragma warning disable CS8981, CS0618
 
 using System;
 using System.Threading.Tasks;

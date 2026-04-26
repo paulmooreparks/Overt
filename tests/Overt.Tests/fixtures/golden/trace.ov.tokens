@@ -268,24 +268,15 @@ Arrow(->) @ 51:41..51:43
 LeftParen(() @ 51:44..51:45
 RightParen()) @ 51:45..51:46
 LeftBrace({) @ 51:47..51:48
-KeywordLet(let) @ 53:5..53:8
+Identifier(_) @ 53:5..53:6
 LineComment(// Discard the Result explicitly (DESIGN.md §11: ignored Results are errors).) @ 52:5..52:82
-Identifier(_) @ 53:9..53:10
-Colon(:) @ 53:10..53:11
-Identifier(Result) @ 53:12..53:18
-Less(<) @ 53:18..53:19
-LeftParen(() @ 53:19..53:20
-RightParen()) @ 53:20..53:21
-Comma(,) @ 53:21..53:22
-Identifier(IoError) @ 53:23..53:30
-Greater(>) @ 53:30..53:31
-Equals(=) @ 53:32..53:33
-Identifier(println) @ 53:34..53:41
-LeftParen(() @ 53:41..53:42
-StringHead("[trace] ) @ 53:42..53:51
-Dollar($) @ 53:51..53:52
-Identifier(event) @ 53:52..53:57
-StringTail(") @ 53:57..53:58
-RightParen()) @ 53:58..53:59
+Equals(=) @ 53:7..53:8
+Identifier(println) @ 53:9..53:16
+LeftParen(() @ 53:16..53:17
+StringHead("[trace] ) @ 53:17..53:26
+Dollar($) @ 53:26..53:27
+Identifier(event) @ 53:27..53:32
+StringTail(") @ 53:32..53:33
+RightParen()) @ 53:33..53:34
 RightBrace(}) @ 54:1..54:2
 EndOfFile() @ 55:1..55:1

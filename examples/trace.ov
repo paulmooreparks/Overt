@@ -50,5 +50,5 @@ fn main() !{io} -> Result<(), IoError> {
 
 fn print_event(event: TraceEvent) !{io} -> () {
     // Discard the Result explicitly (DESIGN.md §11: ignored Results are errors).
-    let _: Result<(), IoError> = println("[trace] $event")
+    _ = println("[trace] $event")
 }

@@ -32,24 +32,15 @@ RightBrace(}) @ 11:31..11:32
 Arrow(->) @ 11:33..11:35
 Identifier(Int) @ 11:36..11:39
 LeftBrace({) @ 11:40..11:41
-KeywordLet(let) @ 12:5..12:8
-Identifier(_) @ 12:9..12:10
-Colon(:) @ 12:10..12:11
-Identifier(Result) @ 12:12..12:18
-Less(<) @ 12:18..12:19
-LeftParen(() @ 12:19..12:20
-RightParen()) @ 12:20..12:21
-Comma(,) @ 12:21..12:22
-Identifier(IoError) @ 12:23..12:30
-Greater(>) @ 12:30..12:31
-Equals(=) @ 12:32..12:33
-Identifier(println) @ 12:34..12:41
-LeftParen(() @ 12:41..12:42
-StringHead("doubling ) @ 12:42..12:52
-Dollar($) @ 12:52..12:53
-Identifier(n) @ 12:53..12:54
-StringTail(") @ 12:54..12:55
-RightParen()) @ 12:55..12:56
+Identifier(_) @ 12:5..12:6
+Equals(=) @ 12:7..12:8
+Identifier(println) @ 12:9..12:16
+LeftParen(() @ 12:16..12:17
+StringHead("doubling ) @ 12:17..12:27
+Dollar($) @ 12:27..12:28
+Identifier(n) @ 12:28..12:29
+StringTail(") @ 12:29..12:30
+RightParen()) @ 12:30..12:31
 Identifier(n) @ 13:5..13:6
 Star(*) @ 13:7..13:8
 IntegerLiteral(2) @ 13:9..13:10

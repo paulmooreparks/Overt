@@ -67,7 +67,10 @@ public class CSharpEmitterTests
     {
         var csharp = EmitSource(
             "module m\nfn f() { let msg = \"Hello, $name!\" }");
-        Assert.Contains("$\"Hello, {name}!\"", csharp);
+        // Hole expression is paren-wrapped so named-args / colons /
+        // commas inside don't get reinterpreted as alignment / format
+        // spec by the C# interpolation parser.
+        Assert.Contains("$\"Hello, {(name)}!\"", csharp);
     }
 
     [Fact]
