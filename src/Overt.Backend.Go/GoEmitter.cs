@@ -64,6 +64,11 @@ public static class GoEmitter
         // shape; the binds-string is what gets emitted at every use
         // site. See docs/ffi.md §2.
         private readonly Dictionary<string, string> _externTypes = new(StringComparer.Ordinal);
+        // Names of `extern "go" instance fn` declarations so EmitCall
+        // can route a method-call-shaped site (`c.method(...)`) to
+        // the generated shim (`method(c, ...)`) instead of emitting
+        // verbatim Go field access. See docs/ffi.md §5.
+        private readonly HashSet<string> _instanceExterns = new(StringComparer.Ordinal);
         // Set of Go-side import paths the emitted code needs. The
         // header is assembled after the body is emitted, so we know
         // exactly which packages to import. Initially seeded with the
@@ -96,6 +101,12 @@ public static class GoEmitter
                     {
                         _imports.Add(importPath);
                     }
+                }
+                else if (decl is ExternDecl efn
+                    && efn.Platform == "go"
+                    && efn.Kind == ExternKind.Instance)
+                {
+                    _instanceExterns.Add(efn.Name);
                 }
             }
         }
@@ -349,17 +360,39 @@ public static class GoEmitter
 
         private void EmitExternGoShim(ExternDecl ext)
         {
-            // Two binding shapes:
-            //   - `binds "pkg.Member"` (with optional `from "<path>"`):
+            // Three binding shapes:
+            //   - Static + `binds "pkg.Member"` (optional `from "<path>"`):
             //     out-of-package; emit `pkg.Member(args)`.
-            //   - `binds "Member" from ""` (or any binds-string with no
-            //     dot): the bound function lives in the SAME Go package
-            //     as the emitted code (`package main`). Emit
-            //     `Member(args)` unqualified. Useful for hand-written
-            //     Go-side shims that sit alongside the emitted file.
+            //   - Static + `binds "Member"` (or `from ""`): the bound
+            //     symbol lives in the same Go package as the emitted
+            //     code. Emit `Member(args)` unqualified.
+            //   - Instance + `binds "Method"`: the bound symbol is a
+            //     method on the first parameter's host type. Emit
+            //     `self.Method(rest)`. The receiver's package import
+            //     comes from its extern "go" type declaration; nothing
+            //     to add at this site.
             string? selector;
             string member;
-            if (ext.BindsTarget.Contains('.'))
+            var isInstance = ext.Kind == ExternKind.Instance;
+            if (isInstance)
+            {
+                if (ext.Parameters.Length == 0)
+                {
+                    throw new NotSupportedException(
+                        "Go back end `extern \"go\" instance fn` requires a `self` "
+                        + $"first parameter; `{ext.Name}` declares none.");
+                }
+                if (ext.BindsTarget.Contains('.'))
+                {
+                    throw new NotSupportedException(
+                        "Go back end `extern \"go\" instance fn` binds-target must "
+                        + "be a bare method name (e.g. `binds \"ReadMessage\"`); "
+                        + $"got `{ext.BindsTarget}`.");
+                }
+                selector = null;
+                member = ext.BindsTarget;
+            }
+            else if (ext.BindsTarget.Contains('.'))
             {
                 (selector, member) = SplitBindsTarget(ext.BindsTarget);
                 // Empty `from ""` means "no import needed because the
@@ -401,7 +434,7 @@ public static class GoEmitter
             // See docs/ffi.md §6.
             if (TryGetResultIoErrorTypeArg(ext.ReturnType) is { } innerType)
             {
-                EmitResultWrappedShimBody(ext, selector, member, innerType);
+                EmitResultWrappedShimBody(ext, selector, member, innerType, isInstance);
                 _sb.AppendLine("}");
                 return;
             }
@@ -413,6 +446,34 @@ public static class GoEmitter
             _sb.Append('\t');
             var hasReturnSlot = ext.ReturnType is not null && ext.ReturnType is not UnitType;
             if (hasReturnSlot) _sb.Append("return ");
+            EmitShimCall(ext, selector, member, isInstance);
+            _sb.AppendLine();
+            _sb.AppendLine("}");
+        }
+
+        /// <summary>
+        /// Emit the call expression that the shim forwards to. For
+        /// static externs, this is `pkg.Member(arg1, ...)` or
+        /// `Member(...)` for in-package binds. For instance externs,
+        /// the first Overt parameter is the receiver; emit
+        /// `self.Member(rest...)`.
+        /// </summary>
+        private void EmitShimCall(ExternDecl ext, string? selector, string member, bool isInstance)
+        {
+            if (isInstance)
+            {
+                _sb.Append(ext.Parameters[0].Name);
+                _sb.Append('.');
+                _sb.Append(member);
+                _sb.Append('(');
+                for (var i = 1; i < ext.Parameters.Length; i++)
+                {
+                    if (i > 1) _sb.Append(", ");
+                    _sb.Append(ext.Parameters[i].Name);
+                }
+                _sb.Append(')');
+                return;
+            }
             if (selector is not null)
             {
                 _sb.Append(selector);
@@ -425,8 +486,7 @@ public static class GoEmitter
                 if (i > 0) _sb.Append(", ");
                 _sb.Append(ext.Parameters[i].Name);
             }
-            _sb.AppendLine(")");
-            _sb.AppendLine("}");
+            _sb.Append(')');
         }
 
         /// <summary>
@@ -452,40 +512,26 @@ public static class GoEmitter
         /// type is `Result&lt;T, IoError&gt;`. The Go-side bound
         /// function is assumed to return either `(T, error)` (when T
         /// isn't Unit) or `error` (when T is Unit). The shim does the
-        /// err-check and wraps into Result on either branch.
+        /// err-check and wraps into Result on either branch. Same
+        /// shape works for static and instance externs; the difference
+        /// is only in how the underlying call is written.
         /// </summary>
-        private void EmitResultWrappedShimBody(ExternDecl ext, string? selector, string member, TypeExpr innerType)
+        private void EmitResultWrappedShimBody(
+            ExternDecl ext, string? selector, string member, TypeExpr innerType, bool isInstance)
         {
             var innerGoType = LowerType(innerType);
             var isUnit = innerType is UnitType;
 
-            // Build the call expression: `pkg.Member(arg1, arg2, ...)`
-            // or just `Member(...)` for in-package binds.
-            var call = new StringBuilder();
-            if (selector is not null)
-            {
-                call.Append(selector);
-                call.Append('.');
-            }
-            call.Append(member);
-            call.Append('(');
-            for (var i = 0; i < ext.Parameters.Length; i++)
-            {
-                if (i > 0) call.Append(", ");
-                call.Append(ext.Parameters[i].Name);
-            }
-            call.Append(')');
-
             if (isUnit)
             {
                 // `error`-only return shape:
-                //   if err := pkg.Member(...); err != nil {
+                //   if err := <call>; err != nil {
                 //       return overt.Err[overt.Unit, overt.IoError](
                 //           overt.IoError{Narrative: err.Error()})
                 //   }
                 //   return overt.Ok[overt.Unit, overt.IoError](overt.UnitValue)
                 _sb.Append("\tif err := ");
-                _sb.Append(call);
+                EmitShimCall(ext, selector, member, isInstance);
                 _sb.AppendLine("; err != nil {");
                 _sb.AppendLine($"\t\treturn overt.Err[overt.Unit, overt.IoError](overt.IoError{{Narrative: err.Error()}})");
                 _sb.AppendLine("\t}");
@@ -494,14 +540,14 @@ public static class GoEmitter
             }
 
             // `(T, error)` return shape:
-            //   __r, err := pkg.Member(...)
+            //   __r, err := <call>
             //   if err != nil {
             //       return overt.Err[T, overt.IoError](
             //           overt.IoError{Narrative: err.Error()})
             //   }
             //   return overt.Ok[T, overt.IoError](__r)
             _sb.Append("\t__r, err := ");
-            _sb.Append(call);
+            EmitShimCall(ext, selector, member, isInstance);
             _sb.AppendLine();
             _sb.AppendLine("\tif err != nil {");
             _sb.AppendLine($"\t\treturn overt.Err[{innerGoType}, overt.IoError](overt.IoError{{Narrative: err.Error()}})");
@@ -1815,6 +1861,28 @@ public static class GoEmitter
                 EmitResultTypeArgsOrFallback();
                 _sb.Append("](");
                 EmitExpression(call.Arguments[0].Value);
+                _sb.Append(')');
+                return;
+            }
+
+            // Method-call syntax against an `extern "go" instance fn`:
+            // `c.method(args)` parses as a FieldAccess callee but
+            // should route to the shim `method(c, args)`, since
+            // the shim is what holds the binds-target ↔ Go-method-
+            // name mapping. Without this, the emitter would write
+            // `c.method(...)` verbatim and Go would complain about
+            // the case-mismatched method name.
+            if (call.Callee is FieldAccessExpr fac
+                && _instanceExterns.Contains(fac.FieldName))
+            {
+                _sb.Append(fac.FieldName);
+                _sb.Append('(');
+                EmitExpression(fac.Target);
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    _sb.Append(", ");
+                    EmitExpression(call.Arguments[i].Value);
+                }
                 _sb.Append(')');
                 return;
             }

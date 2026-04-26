@@ -117,6 +117,51 @@ public class GoBackendEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_ExternGo_InstanceFn()
+    {
+        // Exercises `extern "go" instance fn`. The first Overt
+        // parameter is `self`; the binds-target is the bare method
+        // name (no package qualifier; receiver type implies the
+        // package). Call site uses method-call syntax (`c.add(...)`)
+        // which the type checker's MethodCallResolutions routes to
+        // `add(self = c, ...)`.
+        AssertOvertProgramPrints(
+            """
+            module instance_fn_e2e
+
+            extern "go" type Counter binds "*Counter"
+
+            extern "go" fn new_counter() -> Counter binds "NewCounter" from ""
+            extern "go" instance fn add(self: Counter, x: Int) -> Int binds "Add"
+
+            fn main() !{io} -> Result<(), IoError> {
+                let c: Counter = new_counter()
+                let n1: Int = c.add(x = 5)
+                let n2: Int = c.add(x = 7)
+                println("n1=${n1} n2=${n2}")?
+                Ok(())
+            }
+            """,
+            expectedStdout: "n1=5 n2=12\n",
+            extraGoSource: """
+                package main
+
+                type Counter struct {
+                    n int
+                }
+
+                func NewCounter() *Counter {
+                    return &Counter{}
+                }
+
+                func (c *Counter) Add(x int) int {
+                    c.n += x
+                    return c.n
+                }
+                """);
+    }
+
+    [Fact]
     public void Transpiled_ExternGo_FunctionTypedParameter()
     {
         // Exercises a function-typed parameter on an `extern "go" fn`.
