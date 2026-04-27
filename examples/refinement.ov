@@ -119,10 +119,9 @@ fn main() !{io} -> Result<(), IoError> {
 
     // Empty friends — `check_non_empty` returns Err(NoFriends). Demonstrates
     // that hand-written validators compose with auto-generated ones at the
-    // same call site. The empty list is bound to a typed local so the Go
-    // emitter pins List.empty's element type from the let-target's
-    // annotation rather than the call-arg position.
-    let empty: List<String> = List.empty()
+    // same call site. Form-3 syntax `List<String>.empty()` puts the type
+    // args directly on the type, no inference required.
+    let empty: List<String> = List<String>.empty()
     report(label = "no-friends", result = make_profile(
         name      = "ada",
         age_raw   = 36,

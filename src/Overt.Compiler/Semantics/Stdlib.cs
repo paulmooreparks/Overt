@@ -769,7 +769,8 @@ public static class Stdlib
         var type = new FunctionTypeRef(
             parameters.ToImmutableArray(),
             ret,
-            (effects ?? Array.Empty<string>()).ToImmutableArray());
+            (effects ?? Array.Empty<string>()).ToImmutableArray(),
+            typeParams.ToImmutableArray());
         return (symbol, type);
     }
 

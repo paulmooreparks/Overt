@@ -300,6 +300,23 @@ public abstract record Expression(SourceSpan Span) : SyntaxNode(Span);
 
 public sealed record IdentifierExpr(string Name, SourceSpan Span) : Expression(Span);
 
+/// <summary>
+/// A type used as the namespace of a static / namespace-qualified call —
+/// <c>List&lt;Int&gt;.empty()</c>, <c>Map&lt;String, Int&gt;.empty()</c>.
+/// Only legal as the <c>Target</c> of a <see cref="FieldAccessExpr"/>; the
+/// resolver / type checker reject it elsewhere.
+/// <para>
+/// The form is the canonical way to call a generic-type-namespaced
+/// function whose return type can't be inferred from value-typed arguments
+/// (chiefly the zero-arg <c>empty()</c> family). Form-3 design choice;
+/// see DESIGN.md / docs/osl.md for the rationale.
+/// </para>
+/// </summary>
+public sealed record GenericTypeExpr(
+    string Name,
+    ImmutableArray<TypeExpr> TypeArguments,
+    SourceSpan Span) : Expression(Span);
+
 /// <summary>A string literal with no interpolations. <see cref="Value"/> is the raw lexeme
 /// including surrounding quotes; escape-sequence decoding happens at a later pass.</summary>
 public sealed record StringLiteralExpr(string Value, SourceSpan Span) : Expression(Span);

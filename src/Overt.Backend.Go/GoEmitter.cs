@@ -1550,15 +1550,7 @@ public static class GoEmitter
                 _sb.Append(LowerType(ls.Type));
             }
             _sb.Append(" = ");
-            // Thread the let-target type as an expected-type hint so
-            // generic helpers like `List.empty()` can read T from the
-            // declared shape. Restore the prior value on exit; nesting
-            // is rare but possible (let inside an initializer block),
-            // and we don't want a stale hint to leak to a sibling let.
-            var prior = _expectedListElementType;
-            _expectedListElementType = ls.Type;
-            try { EmitExpression(ls.Initializer); }
-            finally { _expectedListElementType = prior; }
+            EmitExpression(ls.Initializer);
         }
 
         /// <summary>
@@ -2585,128 +2577,6 @@ public static class GoEmitter
                 + "the type checker should have caught this.");
         }
 
-        // Per-emit "expected type at this position" hint, set by callers
-        // that know the surrounding type the value will land in (today:
-        // EmitLet when the let-target carries a type annotation). Read by
-        // EmitListElementTypeOrFallback to pin `List.empty()`'s element
-        // type without relying on the fn-return-type fallback path.
-        // Cleared when the caller's scope ends. Single slot is enough —
-        // List.empty doesn't nest inside another List.empty in practice,
-        // and the existing fn-return / Result-of-List heuristics handle
-        // the call-arg-of-Result-returning-fn case where it might.
-        private TypeExpr? _expectedListElementType;
-
-        /// <summary>
-        /// Emit the element type for a `List.empty()` call. Three sources
-        /// in priority order:
-        ///
-        ///   1. The caller-supplied <see cref="_expectedListElementType"/>
-        ///      hint — set by, e.g., <see cref="EmitLet"/> when the
-        ///      let-target type is known. Most precise.
-        ///   2. The enclosing fn's return type, when it's
-        ///      <c>List&lt;T&gt;</c>-shaped. Covers `fn f() -> List&lt;Int&gt;
-        ///      { List.empty() }` directly.
-        ///   3. <c>Result&lt;List&lt;T&gt;, E&gt;</c> peeling — covers
-        ///      `Ok(List.empty())` inside a Result-returning fn.
-        ///
-        /// Falls through to <c>any</c> when none of the above pin the
-        /// element type. Compiles, but the call site may surface a usage
-        /// mismatch elsewhere; the typed `let x: List&lt;T&gt; = ...`
-        /// idiom is the user-side workaround.
-        /// </summary>
-        private void EmitListElementTypeOrFallback()
-        {
-            if (_expectedListElementType is NamedType { Name: "List" } expected
-                && expected.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(expected.TypeArguments[0]));
-                return;
-            }
-            if (_currentFnReturnType is NamedType { Name: "List" } nt
-                && nt.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(nt.TypeArguments[0]));
-                return;
-            }
-            // Common case: fn returns Result<List<T>, E> and the List.empty()
-            // sits inside an Ok(...) wrap. The Ok-arg slot is List<T>, so
-            // peel one layer through Result and reuse the same lookup.
-            if (_currentFnReturnType is NamedType { Name: "Result" } rt
-                && rt.TypeArguments.Length == 2
-                && rt.TypeArguments[0] is NamedType { Name: "List" } innerList
-                && innerList.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(innerList.TypeArguments[0]));
-                return;
-            }
-            _sb.Append("any");
-        }
-
-        /// <summary>Emit `K, V` for `Map.empty()`. Mirrors
-        /// EmitListElementTypeOrFallback's sources in priority order:
-        /// the let-target hint (despite the name, _expectedListElementType
-        /// holds whatever container type the surrounding let-init was
-        /// declared as), the enclosing fn return type, and the
-        /// Result-of-Map peel for Ok-wraps. Falls through to
-        /// `any, any`.</summary>
-        private void EmitMapTypeArgsOrFallback()
-        {
-            if (_expectedListElementType is NamedType { Name: "Map" } expected
-                && expected.TypeArguments.Length == 2)
-            {
-                _sb.Append(LowerType(expected.TypeArguments[0]));
-                _sb.Append(", ");
-                _sb.Append(LowerType(expected.TypeArguments[1]));
-                return;
-            }
-            if (_currentFnReturnType is NamedType { Name: "Map" } nt
-                && nt.TypeArguments.Length == 2)
-            {
-                _sb.Append(LowerType(nt.TypeArguments[0]));
-                _sb.Append(", ");
-                _sb.Append(LowerType(nt.TypeArguments[1]));
-                return;
-            }
-            if (_currentFnReturnType is NamedType { Name: "Result" } rt
-                && rt.TypeArguments.Length == 2
-                && rt.TypeArguments[0] is NamedType { Name: "Map" } innerMap
-                && innerMap.TypeArguments.Length == 2)
-            {
-                _sb.Append(LowerType(innerMap.TypeArguments[0]));
-                _sb.Append(", ");
-                _sb.Append(LowerType(innerMap.TypeArguments[1]));
-                return;
-            }
-            _sb.Append("any, any");
-        }
-
-        /// <summary>Emit `T` for `Set.empty()`. Same priority order as
-        /// EmitMapTypeArgsOrFallback.</summary>
-        private void EmitSetElementTypeOrFallback()
-        {
-            if (_expectedListElementType is NamedType { Name: "Set" } expected
-                && expected.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(expected.TypeArguments[0]));
-                return;
-            }
-            if (_currentFnReturnType is NamedType { Name: "Set" } nt
-                && nt.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(nt.TypeArguments[0]));
-                return;
-            }
-            if (_currentFnReturnType is NamedType { Name: "Result" } rt
-                && rt.TypeArguments.Length == 2
-                && rt.TypeArguments[0] is NamedType { Name: "Set" } innerSet
-                && innerSet.TypeArguments.Length == 1)
-            {
-                _sb.Append(LowerType(innerSet.TypeArguments[0]));
-                return;
-            }
-            _sb.Append("any");
-        }
-
         /// <summary>
         /// Emit `T, E` for an `Ok(...)` / `Err(...)` constructor call
         /// targeting the current fn's return type. Falls back to the
@@ -3288,35 +3158,11 @@ public static class GoEmitter
                 // type (when it's List<T>) into the explicit type-arg
                 // slot. Without this, a fn shaped `-> List<Int>` whose
                 // body returns `List.empty()` would fail Go's inference.
-                if (nsId.Name == "List" && facCallee.FieldName == "empty"
-                    && call.Arguments.Length == 0)
-                {
-                    _sb.Append("overt.ListEmpty[");
-                    EmitListElementTypeOrFallback();
-                    _sb.Append("]()");
-                    return;
-                }
-                // `Map.empty()` / `Set.empty()` — same target-typing
-                // shape as `List.empty()`. The let-target hint
-                // (_expectedListElementType, despite the historical
-                // name, holds whatever container type the surrounding
-                // let-init is declared as) carries the type args.
-                if (nsId.Name == "Map" && facCallee.FieldName == "empty"
-                    && call.Arguments.Length == 0)
-                {
-                    _sb.Append("overt.MapEmpty[");
-                    EmitMapTypeArgsOrFallback();
-                    _sb.Append("]()");
-                    return;
-                }
-                if (nsId.Name == "Set" && facCallee.FieldName == "empty"
-                    && call.Arguments.Length == 0)
-                {
-                    _sb.Append("overt.SetEmpty[");
-                    EmitSetElementTypeOrFallback();
-                    _sb.Append("]()");
-                    return;
-                }
+                // Form-3 generic-namespaced calls — `List<Int>.empty()` etc.
+                // — go through the GenericTypeExpr branch below, with type
+                // args supplied directly by the user. No inference / fallback
+                // needed at this site; `List.empty()` (Form 1) is no longer
+                // accepted.
                 if (MapNamespaceCall(nsId.Name, facCallee.FieldName) is { } mapped)
                 {
                     _sb.Append(mapped);
@@ -3329,6 +3175,30 @@ public static class GoEmitter
                     _sb.Append(')');
                     return;
                 }
+            }
+
+            // Form-3 generic-namespaced call: `List<Int>.empty()` lowers to
+            // `overt.ListEmpty[int]()`. The user-supplied type args splice
+            // into Go's `[T, U]` instantiation slot directly — no inference,
+            // no fallback machinery needed because the args are explicit.
+            if (call.Callee is FieldAccessExpr { Target: GenericTypeExpr genericNs } genFa
+                && MapNamespaceCall(genericNs.Name, genFa.FieldName) is { } genMapped)
+            {
+                _sb.Append(genMapped);
+                _sb.Append('[');
+                for (var i = 0; i < genericNs.TypeArguments.Length; i++)
+                {
+                    if (i > 0) _sb.Append(", ");
+                    _sb.Append(LowerType(genericNs.TypeArguments[i]));
+                }
+                _sb.Append("](");
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    if (i > 0) _sb.Append(", ");
+                    EmitExpression(call.Arguments[i].Value);
+                }
+                _sb.Append(')');
+                return;
             }
 
             EmitExpression(call.Callee);

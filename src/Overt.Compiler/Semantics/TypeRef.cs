@@ -79,12 +79,25 @@ public sealed record NamedTypeRef(
 /// the effective type of declared functions. Effects are captured as a list of names
 /// (concrete effects like <c>io</c> and effect-row type variables like <c>E</c>);
 /// v1 does not distinguish them at the type level.
+/// <para>
+/// <c>TypeParameters</c> carries the names of the function's generic type parameters
+/// in declaration order — used by Form-3 generic-type instantiation
+/// (<c>List&lt;Int&gt;.empty()</c>) to substitute user-supplied type args into the
+/// function's <see cref="TypeVarRef"/>s. Empty for non-generic functions.
+/// </para>
 /// </summary>
 public sealed record FunctionTypeRef(
     ImmutableArray<TypeRef> Parameters,
     TypeRef Return,
-    ImmutableArray<string> Effects) : TypeRef
+    ImmutableArray<string> Effects,
+    ImmutableArray<string> TypeParameters) : TypeRef
 {
+    public FunctionTypeRef(
+        ImmutableArray<TypeRef> parameters,
+        TypeRef ret,
+        ImmutableArray<string> effects)
+        : this(parameters, ret, effects, ImmutableArray<string>.Empty) { }
+
     public override string Display
     {
         get

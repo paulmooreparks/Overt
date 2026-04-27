@@ -50,7 +50,7 @@ fn contains(tree: Tree, value: Int) -> Bool {
 // accessed via module-qualified calls — no `extern` needed for stdlib.
 fn to_sorted_list(tree: Tree) -> List<Int> {
     match tree {
-        Tree.Empty => List.empty(),
+        Tree.Empty => List<Int>.empty(),
         Tree.Node { value = v, left = l, right = r } => {
             let left_values:  List<Int> = to_sorted_list(l)
             let right_values: List<Int> = to_sorted_list(r)

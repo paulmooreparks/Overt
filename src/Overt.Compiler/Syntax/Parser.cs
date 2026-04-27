@@ -887,6 +887,88 @@ public sealed class Parser
         return args.ToImmutable();
     }
 
+    /// <summary>
+    /// Speculatively parse a generic-type instantiation in expression
+    /// position, e.g. <c>List&lt;Int&gt;</c> as the receiver of a
+    /// <c>.method(...)</c> call. Returns true and yields the
+    /// <see cref="GenericTypeExpr"/> when (a) the type-arg list parses
+    /// cleanly and (b) the next token after the closing <c>&gt;</c> is
+    /// a dot. Returns false and leaves the cursor / diagnostics
+    /// unchanged otherwise; the caller proceeds as if the leading
+    /// <c>&lt;</c> were a comparison operator.
+    /// </summary>
+    private bool TryParseGenericTypeInstantiation(
+        IdentifierExpr id, out GenericTypeExpr generic)
+    {
+        generic = default!;
+        var savedCursor = _cursor;
+        var savedDiagnosticCount = _diagnostics.Count;
+
+        // Speculation start: consume the `<`.
+        if (!Match(TokenKind.Less))
+        {
+            return false;
+        }
+
+        var args = ImmutableArray.CreateBuilder<TypeExpr>();
+        var ok = true;
+        if (!Check(TokenKind.Greater))
+        {
+            args.Add(ParseTypeExpr());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.Greater)) break;
+                args.Add(ParseTypeExpr());
+            }
+        }
+
+        if (!Check(TokenKind.Greater))
+        {
+            ok = false;
+        }
+        Token? closing = null;
+        if (ok)
+        {
+            closing = Advance(); // consume `>`
+            // The disambiguator: only a `.` immediately following the
+            // `>` makes this a generic-type instantiation. Anything else
+            // means the `<` was a comparison and we have to back out.
+            if (!Check(TokenKind.Dot))
+            {
+                ok = false;
+            }
+        }
+
+        // Defensive: any error reported during speculative parse is
+        // not a real diagnostic for the user's program — back out by
+        // trimming the diagnostics list.
+        if (!ok || _diagnostics.Count > savedDiagnosticCount && closing is null)
+        {
+            _cursor = savedCursor;
+            while (_diagnostics.Count > savedDiagnosticCount)
+            {
+                _diagnostics.RemoveAt(_diagnostics.Count - 1);
+            }
+            return false;
+        }
+
+        // Trim any diagnostics produced during the speculative type-arg
+        // parse — they only make sense if we commit. If the lookahead
+        // succeeded but the type args themselves had a parse error,
+        // the diagnostics will re-surface when the user's intended
+        // shape is parsed.
+        while (_diagnostics.Count > savedDiagnosticCount)
+        {
+            _diagnostics.RemoveAt(_diagnostics.Count - 1);
+        }
+
+        generic = new GenericTypeExpr(
+            id.Name,
+            args.ToImmutable(),
+            new SourceSpan(id.Span.Start, closing!.Span.End));
+        return true;
+    }
+
     // ---------------------------------------------------------- statements
 
     private BlockExpr ParseBlock()
@@ -1242,6 +1324,21 @@ public sealed class Parser
     private Expression ParsePostfix()
     {
         var expr = ParsePrimary();
+
+        // Generic-type instantiation in expression position: `Identifier<TypeArgs>`
+        // wraps the bare IdentifierExpr in a GenericTypeExpr when followed by `.`.
+        // This is the Form-3 syntax for namespace-qualified generic calls
+        // (`List<Int>.empty()`, `Map<String, Int>.insert(...)`). The lookahead is
+        // disambiguated by the trailing `.`: if speculative parsing of the type-arg
+        // list succeeds AND a dot follows, commit; otherwise the `<` is a comparison
+        // operator and we backtrack untouched.
+        if (expr is IdentifierExpr id && Check(TokenKind.Less))
+        {
+            if (TryParseGenericTypeInstantiation(id, out var generic))
+            {
+                expr = generic;
+            }
+        }
 
         while (true)
         {

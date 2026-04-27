@@ -25,9 +25,9 @@ fn load_dashboard() !{io, async} -> Result<Dashboard, LoadError> {
 }
 
 fn fetch_users() !{io, async} -> Result<List<User>, LoadError> {
-    Ok(List.empty())
+    Ok(List<User>.empty())
 }
 
 fn fetch_orders() !{io, async} -> Result<List<Order>, LoadError> {
-    Ok(List.empty())
+    Ok(List<Order>.empty())
 }

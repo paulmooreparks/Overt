@@ -2379,6 +2379,28 @@ public sealed class CSharpEmitter
                     _w.Write("global::Overt.Runtime.String.");
                     _w.Write(EscapeId(fa.FieldName));
                 }
+                else if (fa.Target is GenericTypeExpr genericTarget)
+                {
+                    // Form-3 namespace call with explicit type args:
+                    // `List<Int>.empty()` lowers to `List<int>.empty()`.
+                    // The static method on the non-generic companion class
+                    // is the entry point; the type args land on the
+                    // (generic) companion class form. C# happens to allow
+                    // both `List.empty<int>()` and `List<int>.empty()`,
+                    // and since our companion is non-generic, we use the
+                    // method-level form for compatibility — the `<args>`
+                    // in source becomes `<args>` on the method call.
+                    _w.Write(EscapeId(genericTarget.Name));
+                    _w.Write(".");
+                    _w.Write(EscapeId(fa.FieldName));
+                    _w.Write("<");
+                    for (var i = 0; i < genericTarget.TypeArguments.Length; i++)
+                    {
+                        if (i > 0) _w.Write(", ");
+                        _w.Write(CSharpTypeDisplay(LowerType(genericTarget.TypeArguments[i])));
+                    }
+                    _w.Write(">");
+                }
                 else
                 {
                     EmitExpression(fa.Target);
@@ -2669,33 +2691,12 @@ public sealed class CSharpEmitter
     {
         if (_expectedType is null) return false;
 
-        // `List.empty()` — callee shape is FieldAccess(Ident("List"), "empty").
-        if (c.Arguments.Length == 0
-            && c.Callee is FieldAccessExpr { FieldName: "empty" } faEmpty
-            && faEmpty.Target is IdentifierExpr { Name: "List" }
-            && _expectedType is NamedTypeRef { Name: "List", TypeArguments: { Length: 1 } emptyArgs })
-        {
-            _w.Write($"List.empty<{CSharpTypeDisplay(emptyArgs[0])}>()");
-            return true;
-        }
-
-        // `Map.empty()` / `Set.empty()` — same target-typing trick.
-        if (c.Arguments.Length == 0
-            && c.Callee is FieldAccessExpr { FieldName: "empty" } faMap
-            && faMap.Target is IdentifierExpr { Name: "Map" }
-            && _expectedType is NamedTypeRef { Name: "Map", TypeArguments: { Length: 2 } mapArgs })
-        {
-            _w.Write($"Map.empty<{CSharpTypeDisplay(mapArgs[0])}, {CSharpTypeDisplay(mapArgs[1])}>()");
-            return true;
-        }
-        if (c.Arguments.Length == 0
-            && c.Callee is FieldAccessExpr { FieldName: "empty" } faSet
-            && faSet.Target is IdentifierExpr { Name: "Set" }
-            && _expectedType is NamedTypeRef { Name: "Set", TypeArguments: { Length: 1 } setArgs })
-        {
-            _w.Write($"Set.empty<{CSharpTypeDisplay(setArgs[0])}>()");
-            return true;
-        }
+        // Form-3 generic-namespaced calls — `List<Int>.empty()` etc. — emit
+        // their type args directly via the FieldAccessExpr/GenericTypeExpr
+        // path in EmitExpressionBody. No inference helper is needed for
+        // those; this is the historical home of `List.empty()` /
+        // `Map.empty()` / `Set.empty()` target-typing tricks, removed
+        // when Form 3 became canonical (see docs/osl.md).
 
         // `None()` — bare identifier, used as a call. Expected is `Option<T>`.
         if (c.Arguments.Length == 0

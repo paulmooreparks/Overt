@@ -417,6 +417,31 @@ public sealed class NameResolver
                         _resolutions[fa.Span] = aliasedSym;
                     }
                 }
+                else if (fa.Target is GenericTypeExpr genericType)
+                {
+                    // Form-3 generic-namespaced call: `List<Int>.empty()` etc.
+                    // The resolver looks up the qualified symbol on the bare
+                    // namespace name; the type args participate at type-check
+                    // time, where they substitute the synthesized fn's type
+                    // variables.
+                    if (Stdlib.Symbols.TryGetValue(
+                            $"{genericType.Name}.{fa.FieldName}", out var stdlibSym))
+                    {
+                        _resolutions[fa.Span] = stdlibSym;
+                    }
+                }
+                break;
+
+            case GenericTypeExpr generic:
+                // Validate the type-arg list — each one resolves the same way
+                // a type annotation does. The bare namespace name itself
+                // doesn't resolve to a value symbol; the wrapping
+                // FieldAccessExpr handles the qualified lookup via
+                // Stdlib.Symbols.
+                foreach (var arg in generic.TypeArguments)
+                {
+                    ResolveType(arg, scope);
+                }
                 break;
 
             case PropagateExpr pr:

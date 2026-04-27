@@ -555,6 +555,10 @@ public sealed class TypeChecker
 
         IdentifierExpr id => InferIdentifier(id),
         FieldAccessExpr fa => InferFieldAccess(fa),
+        // GenericTypeExpr only appears as the target of a FieldAccessExpr;
+        // standalone, it has no value type. The wrapping FieldAccessExpr
+        // is what InferFieldAccess inspects to do the type-arg substitution.
+        GenericTypeExpr => UnknownType.Instance,
         CallExpr c => InferCall(c),
         PropagateExpr pr => InferPropagate(pr),
         AwaitExpr aw => InferAwait(aw),
@@ -611,6 +615,28 @@ public sealed class TypeChecker
             && _symbolTypes.TryGetValue(resolved, out var resolvedType))
         {
             AnnotateExpression(fa.Target); // still walk the target for nested annotation
+
+            // Form-3 generic-type instantiation: `List<Int>.empty()`. Substitute
+            // the user-supplied type args into the function's type-parameter
+            // positions so the resulting fn type is concrete enough for
+            // downstream consumers (call-arg checks, let-targets, match
+            // patterns, emitters).
+            if (fa.Target is GenericTypeExpr generic
+                && resolvedType is FunctionTypeRef fnType
+                && fnType.TypeParameters.Length == generic.TypeArguments.Length)
+            {
+                var subs = new Dictionary<string, TypeRef>(StringComparer.Ordinal);
+                for (var i = 0; i < generic.TypeArguments.Length; i++)
+                {
+                    subs[fnType.TypeParameters[i]] = LowerType(generic.TypeArguments[i]);
+                }
+                return new FunctionTypeRef(
+                    fnType.Parameters.Select(p => SubstituteTypeVars(p, subs)).ToImmutableArray(),
+                    SubstituteTypeVars(fnType.Return, subs),
+                    fnType.Effects,
+                    ImmutableArray<string>.Empty); // type params consumed
+            }
+
             return resolvedType;
         }
 

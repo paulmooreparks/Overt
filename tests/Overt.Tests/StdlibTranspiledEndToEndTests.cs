@@ -803,7 +803,7 @@ public class StdlibTranspiledEndToEndTests
             @derive(Debug)
             enum Bad { WasEmpty }
 
-            fn empty_ints() -> List<Int> { List.empty() }
+            fn empty_ints() -> List<Int> { List<Int>.empty() }
 
             fn force_wrap(xs: List<Int>) -> Result<NonEmpty<Int>, Bad> {
                 Ok(xs)
@@ -1232,7 +1232,7 @@ public class StdlibTranspiledEndToEndTests
             module map_basic
 
             fn main() -> Result<Int, IoError> {
-                let m: Map<String, Int> = Map.empty()
+                let m: Map<String, Int> = Map<String, Int>.empty()
                 let m1: Map<String, Int> = Map.insert(map = m, key = "a", value = 10)
                 let m2: Map<String, Int> = Map.insert(map = m1, key = "b", value = 20)
                 Ok(Map.size(map = m2))
@@ -1254,7 +1254,7 @@ public class StdlibTranspiledEndToEndTests
             module map_get_missing
 
             fn main() -> Result<Bool, IoError> {
-                let m: Map<String, Int> = Map.empty()
+                let m: Map<String, Int> = Map<String, Int>.empty()
                 let m1: Map<String, Int> = Map.insert(map = m, key = "alice", value = 30)
                 let opt: Option<Int> = Map.get(map = m1, key = "bob")
                 match opt {
@@ -1277,7 +1277,7 @@ public class StdlibTranspiledEndToEndTests
             module map_remove
 
             fn main() -> Result<Bool, IoError> {
-                let m: Map<String, Int> = Map.empty()
+                let m: Map<String, Int> = Map<String, Int>.empty()
                 let m1: Map<String, Int> = Map.insert(map = m, key = "x", value = 1)
                 let m2: Map<String, Int> = Map.remove(map = m1, key = "x")
                 Ok(!Map.contains_key(map = m2, key = "x"))
@@ -1299,7 +1299,7 @@ public class StdlibTranspiledEndToEndTests
             module map_entries
 
             fn main() -> Result<Int, IoError> {
-                let m: Map<String, Int> = Map.empty()
+                let m: Map<String, Int> = Map<String, Int>.empty()
                 let m1: Map<String, Int> = Map.insert(map = m, key = "a", value = 1)
                 let m2: Map<String, Int> = Map.insert(map = m1, key = "b", value = 2)
                 let m3: Map<String, Int> = Map.insert(map = m2, key = "c", value = 4)
@@ -1326,8 +1326,8 @@ public class StdlibTranspiledEndToEndTests
             module map_merge
 
             fn main() -> Result<Int, IoError> {
-                let empty_l: Map<String, Int> = Map.empty()
-                let empty_r: Map<String, Int> = Map.empty()
+                let empty_l: Map<String, Int> = Map<String, Int>.empty()
+                let empty_r: Map<String, Int> = Map<String, Int>.empty()
                 let left: Map<String, Int> = Map.insert(
                     map = empty_l, key = "x", value = 1)
                 let right: Map<String, Int> = Map.insert(
@@ -1353,7 +1353,7 @@ public class StdlibTranspiledEndToEndTests
             module set_basic
 
             fn main() -> Result<Bool, IoError> {
-                let s: Set<String> = Set.empty()
+                let s: Set<String> = Set<String>.empty()
                 let s1: Set<String> = Set.insert(set = s, value = "alice")
                 let s2: Set<String> = Set.insert(set = s1, value = "bob")
                 let s3: Set<String> = Set.insert(set = s2, value = "alice")
@@ -1376,8 +1376,8 @@ public class StdlibTranspiledEndToEndTests
             module set_ops
 
             fn main() -> Result<Bool, IoError> {
-                let empty_a: Set<String> = Set.empty()
-                let empty_b: Set<String> = Set.empty()
+                let empty_a: Set<String> = Set<String>.empty()
+                let empty_b: Set<String> = Set<String>.empty()
                 let a0: Set<String> = Set.insert(set = empty_a, value = "alice")
                 let a:  Set<String> = Set.insert(set = a0,      value = "bob")
                 let b0: Set<String> = Set.insert(set = empty_b, value = "bob")
@@ -1435,7 +1435,7 @@ public class StdlibTranspiledEndToEndTests
             type NonEmpty<T> = List<T> where size(self) > 0
 
             fn main() -> Result<NonEmpty<Int>, RefinementError> {
-                let empty: List<Int> = List.empty()
+                let empty: List<Int> = List<Int>.empty()
                 NonEmpty.try_from(empty)
             }
             """;

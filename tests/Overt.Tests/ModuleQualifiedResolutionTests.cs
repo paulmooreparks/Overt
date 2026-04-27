@@ -33,11 +33,12 @@ public class ModuleQualifiedResolutionTests
     [Fact]
     public void Resolve_ListEmpty_MapsToStdlibQualifiedSymbol()
     {
-        var source = "module t\nfn f() -> List<Int> { List.empty() }";
+        // Form-3 syntax: `List<Int>.empty()`. The FieldAccessExpr target is a
+        // GenericTypeExpr; the resolver looks up the qualified `List.empty`
+        // stdlib symbol on the bare namespace name.
+        var source = "module t\nfn f() -> List<Int> { List<Int>.empty() }";
         var r = Resolve(source);
 
-        // The FieldAccessExpr's span should have a recorded resolution to the qualified
-        // `List.empty` stdlib symbol.
         var fn = (FunctionDecl)r.Module.Declarations[0];
         var call = (CallExpr)fn.Body.TrailingExpression!;
         var fa = (FieldAccessExpr)call.Callee;
@@ -50,15 +51,15 @@ public class ModuleQualifiedResolutionTests
     [Fact]
     public void TypeCheck_ListEmpty_CallReturnsListT()
     {
-        var r = Check("module t\nfn f() -> List<Int> { List.empty() }");
+        var r = Check("module t\nfn f() -> List<Int> { List<Int>.empty() }");
 
         var fn = (FunctionDecl)r.Module.Declarations[0];
         var call = (CallExpr)fn.Body.TrailingExpression!;
         var callType = r.ExpressionTypes[call.Span];
 
-        // Call returns the function's declared return type `List<T>`; T is still a
-        // variable until unification, so it shows up in the Display string.
-        Assert.Equal("List<T>", callType.Display);
+        // Form-3 substitution: T is bound to Int from the user's `<Int>`,
+        // so the call's return type is concrete.
+        Assert.Equal("List<Int>", callType.Display);
     }
 
     [Fact]

@@ -494,6 +494,16 @@ public static class Formatter
             case UnitExpr: ctx.Write("()"); break;
             case IdentifierExpr id: ctx.Write(id.Name); break;
             case InterpolatedStringExpr isx: FormatInterpolatedString(isx, ctx); break;
+            case GenericTypeExpr g:
+                ctx.Write(g.Name);
+                ctx.Write("<");
+                for (var i = 0; i < g.TypeArguments.Length; i++)
+                {
+                    if (i > 0) ctx.Write(", ");
+                    FormatType(g.TypeArguments[i], ctx);
+                }
+                ctx.Write(">");
+                break;
             case FieldAccessExpr fa:
                 FormatExpr(fa.Target, ctx);
                 ctx.Write($".{fa.FieldName}");

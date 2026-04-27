@@ -18,6 +18,41 @@ section. Promotions and rejections are PRs against this file.
 
 ## Design principles
 
+### Generic-namespaced calls use Form 3.
+
+Static / namespace-qualified calls on a generic type spell the type
+arguments **on the type, before the dot**:
+
+```overt
+List<Int>.empty()
+Map<String, Int>.empty()
+Set<String>.empty()
+NonEmpty<Int>.try_from(xs)
+```
+
+Form 3 (`Type<Args>.method(...)`) is the canonical and only-accepted
+form for generic-typed namespace calls whose return type can't be
+inferred from value-typed arguments. Earlier shorthand forms
+(`List.empty()` with target-type inference; `List.empty<Int>()` with
+method-level type args) were considered and rejected: Form 3 is
+type-theoretically defensible (`List` alone is a type *constructor*,
+not a type; `List<Int>` is the type the static method belongs to),
+context-independent (works the same in let-init, call-arg, or any
+expression position — no inference-where-does-it-fire mental model),
+and grep-friendly (every construction has the type literally present
+at the call site).
+
+Where the type args can be inferred from value arguments, the call
+stays unqualified — `List.singleton(value = 42)` infers `T = Int`
+from the arg and doesn't need explicit type args. The Form-3 rule
+applies only when the *namespace identifier is a generic type* and
+the type args can't be reconstructed from the call's value args.
+
+Unqualified prelude factories (`Ok`, `Err`, `Some`, `None`,
+`println`, etc.) stay unqualified by design — they're explicitly
+in the unqualified-prelude scope and the type info comes from the
+call's value arg or surrounding context.
+
 ### Vocabulary is English; grammar is Latin.
 
 The OSL is **promiscuous about what enters** and **conservative about how
