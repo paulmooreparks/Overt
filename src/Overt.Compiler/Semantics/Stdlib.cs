@@ -1080,6 +1080,16 @@ public static class Stdlib
             parameters: new TypeRef[] { Generic("Set", TV("T")), Generic("Set", TV("T")) },
             ret: Generic("Set", TV("T"))));
 
+        // Set.values<T>(set: Set<T>) -> List<T>
+        // Iteration escape hatch — every other Set op produces a Set,
+        // and without this you can't get the elements back into a List
+        // for further processing. Iteration order is unspecified
+        // (matches Map.values).
+        e.Add(Fn("Set.values",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")) },
+            ret: Generic("List", TV("T"))));
+
         // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
         // Returns the inner T on Some, otherwise the default. The
         // default is evaluated eagerly; for a lazily-computed default

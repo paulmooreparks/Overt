@@ -91,3 +91,14 @@ func SetDifference[T comparable](left Set[T], right Set[T]) Set[T] {
 	}
 	return Set[T]{Items: out}
 }
+
+// SetValues returns the set's elements as a List in iteration order.
+// Iteration order is hash-defined and not stable across hosts; programs
+// that need a deterministic order sort the returned list.
+func SetValues[T comparable](set Set[T]) List[T] {
+	out := make([]T, 0, len(set.Items))
+	for k := range set.Items {
+		out = append(out, k)
+	}
+	return List[T]{Items: out}
+}

@@ -35,4 +35,12 @@ public static class Set
 
     public static Set<T> difference<T>(Set<T> left, Set<T> right)
         => new(left.Items.Except(right.Items));
+
+    /// <summary>Iteration escape hatch. Returns the set's elements as a
+    /// <see cref="List{T}"/> in iteration order (filesystem-/hash-defined,
+    /// not stable across hosts — same caveat as <c>Map.keys</c> /
+    /// <c>Map.values</c>). Without this, every other Set op produces a
+    /// Set with no way to walk it.</summary>
+    public static List<T> values<T>(Set<T> set)
+        => new(System.Collections.Immutable.ImmutableArray.CreateRange(set.Items));
 }
