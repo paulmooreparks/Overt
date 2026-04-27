@@ -1,0 +1,202 @@
+module valconf
+
+// `valconf` reads a JSON config file, validates each field against
+// refinement-typed boundaries, and reports either a one-line success
+// summary or the first validation failure. Pure-Overt CLI (no C#
+// entry point), parallel in spirit with `diffconf` (`valconf` checks
+// one config; `diffconf` compares two).
+//
+// Refresh of the original `samples/config-validate/` (which had a C#
+// Program.cs handling argv + file I/O + JSON deserialize because, at
+// the time, Overt couldn't do those steps cleanly). The 0.2 stdlib
+// has all the pieces; this version is end-to-end Overt.
+//
+// Usage:
+//   overt run valconf.ov configs/valid.json
+//   overt run valconf.ov configs/invalid-port.json
+//
+// Exit code: 0 on validation success, 1 on validation failure or
+// I/O / parse error.
+//
+// What this sample shows:
+//
+//   - **Refinement types** push domain rules (port range, non-empty
+//     host, known log level, non-empty upstream list) out of
+//     scattered runtime checks and into the type signatures callers
+//     read. Once a field has type `Port`, no caller has to revalidate.
+//   - **Errors as values** with `@derive(Debug)` enums + exhaustive
+//     match in `describe`. Adding a new variant forces every consumer
+//     to handle it (OV0308).
+//   - **`?` propagation** makes the happy path linear: `validate` runs
+//     five checks, each one either narrowing its field to the refined
+//     type or short-circuiting to the first Err.
+
+// ---------------------------------------------------------------- refinements
+
+// Valid TCP port. Zero and negative numbers are ruled out by the
+// lower bound; 65535 is the ceiling for the 16-bit port field.
+type Port = Int where 1 <= self && self <= 65535
+
+// Upper bound is arbitrary; it's here to catch transposition typos
+// (e.g. 10000 where someone meant 100) rather than system limits.
+type WorkerCount = Int where 1 <= self && self <= 256
+
+type NonEmptyString = String where length(self) > 0
+
+type NonEmpty<T> = List<T> where size(self) > 0
+
+// ---------------------------------------------------------------- types
+
+// Named with the App- prefix to avoid shadowing the stdlib's
+// `LogLevel` (Debug / Info / Warn / Error), which any module that
+// imports the prelude already has in scope. The app's level enum
+// extends with `Trace` for verbose-mode debugging the upstreams.
+enum AppLogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+// Raw shape as it comes out of the JSON deserializer. Fields are
+// the wide base types; no invariants are enforced here.
+record ConfigJson {
+    host: String,
+    port: Int,
+    worker_count: Int,
+    log_level: String,
+    upstream_urls: List<String>,
+}
+
+// Validated shape. Any code that takes a `Config` can rely on every
+// field matching its refinement type without re-checking.
+record Config {
+    host: NonEmptyString,
+    port: Port,
+    worker_count: WorkerCount,
+    log_level: AppLogLevel,
+    upstream_urls: NonEmpty<String>,
+}
+
+@derive(Debug)
+enum ValidationError {
+    EmptyHost,
+    PortOutOfRange { got: Int },
+    WorkerCountOutOfRange { got: Int },
+    UnknownLogLevel { got: String },
+    EmptyUpstreamUrls,
+}
+
+// ---------------------------------------------------------------- FFI
+
+// Same JSON deserialize path as samples/diffconf. JsonSerializer
+// matches Overt snake_case fields to JSON snake_case keys directly;
+// no PropertyNameCaseInsensitive option needed.
+extern "csharp" fn parse_config_json(text: String) -> ConfigJson
+    binds "System.Text.Json.JsonSerializer.Deserialize<ConfigJson>"
+
+// ---------------------------------------------------------------- per-field checks
+
+fn check_host(raw: String) -> Result<NonEmptyString, ValidationError> {
+    if length(raw) > 0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.EmptyHost)
+    }
+}
+
+fn check_port(raw: Int) -> Result<Port, ValidationError> {
+    if 1 <= raw && raw <= 65535 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.PortOutOfRange { got = raw })
+    }
+}
+
+fn check_worker_count(raw: Int) -> Result<WorkerCount, ValidationError> {
+    if 1 <= raw && raw <= 256 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.WorkerCountOutOfRange { got = raw })
+    }
+}
+
+// Match-on-String-literal replaces the older if-else-if chain. Reads
+// as a small dispatch table; adding a new level is one arm.
+fn check_log_level(raw: String) -> Result<AppLogLevel, ValidationError> {
+    match raw {
+        "trace" => Ok(AppLogLevel.Trace),
+        "debug" => Ok(AppLogLevel.Debug),
+        "info" => Ok(AppLogLevel.Info),
+        "warn" => Ok(AppLogLevel.Warn),
+        "error" => Ok(AppLogLevel.Error),
+        _ => Err(ValidationError.UnknownLogLevel { got = raw }),
+    }
+}
+
+fn check_upstream_urls(raw: List<String>) -> Result<NonEmpty<String>, ValidationError> {
+    if size(raw) > 0 {
+        Ok(raw)
+    } else {
+        Err(ValidationError.EmptyUpstreamUrls)
+    }
+}
+
+// ---------------------------------------------------------------- validation
+
+// Each `?` is a boundary check that either narrows its field to the
+// refined type or short-circuits with the first Err. The Config
+// constructor below compiles because every field has been proven to
+// satisfy its refinement.
+fn validate(raw: ConfigJson) -> Result<Config, ValidationError> {
+    let host: NonEmptyString = check_host(raw = raw.host)?
+    let port: Port = check_port(raw = raw.port)?
+    let workers: WorkerCount = check_worker_count(raw = raw.worker_count)?
+    let level: AppLogLevel = check_log_level(raw = raw.log_level)?
+    let urls: NonEmpty<String> = check_upstream_urls(raw = raw.upstream_urls)?
+    Ok(Config { host = host, port = port, worker_count = workers, log_level = level, upstream_urls = urls })
+}
+
+// ---------------------------------------------------------------- formatting
+
+// Human-readable error text. Exhaustive match on ValidationError:
+// adding a new variant forces a new arm here, so the error surface
+// can't silently grow past what the user is told about.
+fn describe(e: ValidationError) -> String {
+    match e {
+        ValidationError.EmptyHost => "host must not be empty",
+        ValidationError.PortOutOfRange { got = g } => "port ${g} is out of range; expected 1..65535",
+        ValidationError.WorkerCountOutOfRange { got = g } => "worker_count ${g} is out of range; expected 1..256",
+        ValidationError.UnknownLogLevel { got = g } => "log_level '${g}' is not recognized; expected one of: trace, debug, info, warn, error",
+        ValidationError.EmptyUpstreamUrls => "upstream_urls must not be empty",
+    }
+}
+
+// Summary for the success case. Takes a validated Config, so every
+// field access here is safe: the types guarantee it.
+fn ok_summary(c: Config) -> String {
+    "validated: listening on ${c.host}:${c.port}, ${c.worker_count} workers"
+}
+
+// ---------------------------------------------------------------- main
+
+fn main(args: List<String>) !{io} -> Result<(), IoError> {
+    if size(args) != 1 {
+        eprintln("usage: valconf <path-to-config.json>")?
+        return Err(IoError { narrative = "expected one path" })
+    }
+    let path: String = List.at(list = args, index = 0)
+    let text: String = File.read_to_string(path = path)?
+    let raw: ConfigJson = parse_config_json(text = text)
+    match validate(raw = raw) {
+        Ok(config) => {
+            println(ok_summary(c = config))?
+            Ok(())
+        },
+        Err(e) => {
+            eprintln("validation failed: ${describe(e = e)}")?
+            Err(IoError { narrative = "validation failed" })
+        },
+    }
+}

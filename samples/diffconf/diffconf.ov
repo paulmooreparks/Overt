@@ -2,7 +2,7 @@ module diffconf
 
 // `diffconf` reads two JSON config files, deserializes both into a
 // `Config` record, and prints the per-field differences. Pairs visually
-// with `samples/config-validate/`: validate verifies a single config;
+// with `samples/valconf/`: valconf verifies a single config;
 // diffconf compares two.
 //
 // Usage:

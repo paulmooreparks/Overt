@@ -54,12 +54,12 @@ Deliverables:
   explicit awaits, etc.) and what each buys an agent. This is the
   piece a curious reader will actually argue with, so it needs to be
   honest about what's hypothesis vs. validated.
-- [ ] One real sample application under `samples/`. Not an isolated
-  feature demo (examples/ already plays that role), but a small
-  end-to-end CLI tool written in Overt. Candidates: `json-flatten`,
-  `config-validate`, `log-summarize`. `samples/config-validate/` is
-  partly built; finish or rewrite in light of the 0.2 stdlib (Bytes,
-  File, Directory, Path, Process, Log, expanded List / String / Map).
+- [x] One real sample application under `samples/`. **Five shipped:**
+  `valconf` (refinement-typed JSON validation), `diffconf` (per-field
+  config diff), `logtally` (line-oriented log histogram), `envcheck`
+  (closure-based .env schema validation), `pingall` (par_map +
+  Process.run fan-out). All pure-Overt CLIs runnable via `overt run`.
+  `msbuild-smoke` covers the C#-host-consumes-Overt path separately.
 - [ ] `overt` CLI installable via `dotnet tool install --global`.
   Prerequisite for anyone wanting to "try it" without cloning the repo.
   Packaging is in place (the `OvertCliTool` test pack/installs locally

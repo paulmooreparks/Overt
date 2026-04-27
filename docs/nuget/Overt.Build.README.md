@@ -47,6 +47,6 @@ Console.WriteLine(Module.greet("world"));
 ## Links
 
 - [GitHub repository](https://github.com/paulmooreparks/Overt)
-- [Worked sample: config-validate](https://github.com/paulmooreparks/Overt/tree/main/samples/config-validate) &mdash; a CLI that validates JSON against a refinement-typed schema written in Overt
+- [Worked sample: msbuild-smoke](https://github.com/paulmooreparks/Overt/tree/main/samples/msbuild-smoke) &mdash; minimal C# project that calls into a one-line Overt module via the build integration
 - [Design document](https://github.com/paulmooreparks/Overt/blob/main/DESIGN.md)
 - [AGENTS.md](https://github.com/paulmooreparks/Overt/blob/main/AGENTS.md) &mdash; operational reference for agents authoring Overt

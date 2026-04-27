@@ -2,7 +2,7 @@
 
 A small CLI that diffs two JSON config files. Reads both, deserializes
 each into a `Config` record, walks the fields, and prints what
-changed. Pairs visually with [`config-validate`](../config-validate/):
+changed. Pairs visually with [`valconf`](../valconf/):
 *validate* checks one config; *diffconf* compares two.
 
 The intended use case is CI drift checks — `diffconf prod.json

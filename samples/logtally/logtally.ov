@@ -8,7 +8,7 @@ module logtally
 // The shape it expects is exactly what the Overt runtime's default Log
 // consumer emits — `[DEBUG]`, `[INFO]`, `[WARN]`, `[ERROR]` lines
 // (and `[TRACE]` for programs that extend with their own enum, like
-// the config-validate sample). Read its own output back, in other words.
+// the valconf sample). Read its own output back, in other words.
 //
 // Usage:
 //   overt run logtally.ov logs/busy.log

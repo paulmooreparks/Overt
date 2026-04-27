@@ -8,15 +8,16 @@ levels seen. Lines that don't match the format are counted as
 The shape it expects is exactly what the Overt runtime's default `Log`
 consumer emits — `[DEBUG]`, `[INFO]`, `[WARN]`, `[ERROR]` lines (and
 `[TRACE]` for programs that extend with their own enum, like the
-config-validate sample). Read its own output back, in other words.
+valconf sample). Read its own output back, in other words.
 
 ## What this sample shows
 
-This is the first end-to-end Overt CLI in `samples/`: argv parsing,
-file I/O *and* stdin, parsing, aggregation, sorted output, and split
-stdout/stderr — all written in `.ov`, with no C# entry point. Compare
-to [`config-validate`](../config-validate/), which keeps a thin C#
-boundary; this one demonstrates that a real CLI doesn't need one.
+A pure-Overt CLI: argv parsing, file I/O *and* stdin, parsing,
+aggregation, sorted output, and split stdout/stderr — all written
+in `.ov`, with no C# entry point. The other pure-Overt CLI samples
+(`valconf`, `diffconf`, `envcheck`, `pingall`) take this same
+shape; `samples/msbuild-smoke/` covers the C#-host-consumes-Overt
+path separately.
 
 Three patterns worth lifting:
 

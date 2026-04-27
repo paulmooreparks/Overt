@@ -90,7 +90,7 @@ traces resolve to `.ov`, not `.g.cs`).
   rows, refinement types, records, match, Result/`?`, async/`.await`, FFI
   via `extern "csharp"`. This is the reference you'll load into your
   context every time you write Overt.
-- **Worked sample**: [samples/config-validate/](samples/config-validate/).
+- **Worked sample**: [samples/msbuild-smoke/](samples/msbuild-smoke/).
   A CLI that validates a JSON config against a refinement-typed schema. The
   Overt module is ~160 lines; the C# boundary is ~60.
 - **Feature-level examples**: [examples/](examples/). One `.ov` per

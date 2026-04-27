@@ -37,7 +37,7 @@ Hello, LLM!
 
 ## Using Overt inside a C# project
 
-Add the [`Overt.Build`](https://www.nuget.org/packages/Overt.Build) package to any `.csproj`; drop `.ov` files next to your `.cs` files; `dotnet build` compiles them all together. See [samples/config-validate/](https://github.com/paulmooreparks/Overt/tree/main/samples/config-validate) for a worked example.
+Add the [`Overt.Build`](https://www.nuget.org/packages/Overt.Build) package to any `.csproj`; drop `.ov` files next to your `.cs` files; `dotnet build` compiles them all together. See [samples/msbuild-smoke/](https://github.com/paulmooreparks/Overt/tree/main/samples/msbuild-smoke) for a worked example.
 
 ## Links
 
