@@ -675,6 +675,177 @@ public static class File
     /// (not a directory). Predicates don't return Result; pair with
     /// <see cref="read_to_string"/> when you actually want the contents.</summary>
     public static bool exists(string path) => global::System.IO.File.Exists(path);
+
+    /// <summary>Read the file as UTF-8, splitting on newlines. Each line
+    /// excludes the trailing `\n` (and `\r\n` on Windows). The final line
+    /// is included even if it lacks a trailing newline. Empty file → empty
+    /// list.</summary>
+    public static Result<List<string>, IoError> read_lines(string path)
+    {
+        try
+        {
+            var lines = global::System.IO.File.ReadAllLines(path);
+            return new ResultOk<List<string>, IoError>(
+                new List<string>(System.Collections.Immutable.ImmutableArray.Create(lines)));
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<List<string>, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Append <paramref name="contents"/> to <paramref name="path"/>
+    /// (UTF-8). Creates the file if it doesn't exist.</summary>
+    public static Result<Unit, IoError> append_text(string path, string contents)
+    {
+        try
+        {
+            global::System.IO.File.AppendAllText(path, contents);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Delete the file at <paramref name="path"/>. Deleting a
+    /// non-existent file is a no-op (matches .NET File.Delete and POSIX
+    /// `rm -f`-ish semantics — programs that want a "missing" diagnostic
+    /// guard with <see cref="exists"/> first).</summary>
+    public static Result<Unit, IoError> delete(string path)
+    {
+        try
+        {
+            global::System.IO.File.Delete(path);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Size of the file in bytes. Errors (not found, permission
+    /// denied, etc.) surface as Err.</summary>
+    public static Result<int, IoError> size(string path)
+    {
+        try
+        {
+            var info = new global::System.IO.FileInfo(path);
+            // FileInfo.Length is long; clamp to int. Files larger than
+            // 2 GB are vanishingly rare for the v1 stdlib's audience and
+            // can FFI to FileInfo directly when they matter.
+            var len = info.Length;
+            if (len > int.MaxValue)
+            {
+                return new ResultErr<int, IoError>(new IoError(
+                    $"File.size: file '{path}' exceeds Int range ({len} bytes); use FFI for large files"));
+            }
+            return new ResultOk<int, IoError>((int)len);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<int, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Atomic-where-supported rename. On the same filesystem this
+    /// is the rename(2) primitive; across filesystems .NET falls back to
+    /// copy + delete. Programs that need strict-atomic semantics across
+    /// filesystem boundaries handle that themselves.</summary>
+    public static Result<Unit, IoError> move(string from, string to)
+    {
+        try
+        {
+            global::System.IO.File.Move(from, to);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Copy the file. Existing destination is overwritten —
+    /// matches the conventional "cp -f" default. Programs that want a
+    /// "fail if exists" check guard with <see cref="exists"/> first.</summary>
+    public static Result<Unit, IoError> copy(string from, string to)
+    {
+        try
+        {
+            global::System.IO.File.Copy(from, to, overwrite: true);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+}
+
+/// <summary>
+/// Filesystem directory operations. All carry !{io}. Directory listing,
+/// creation (with parents-as-needed), and removal (with optional
+/// recursive flag).
+/// </summary>
+public static class Directory
+{
+    public static bool exists(string path) => global::System.IO.Directory.Exists(path);
+
+    /// <summary>Create the directory, including any missing parents.
+    /// No-op if it already exists.</summary>
+    public static Result<Unit, IoError> create(string path)
+    {
+        try
+        {
+            global::System.IO.Directory.CreateDirectory(path);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>List the entry names in the directory (file and
+    /// subdirectory names; not full paths). Programs that want full
+    /// paths join with <see cref="Path.join"/> per entry. The list
+    /// order is filesystem-dependent and not promised stable across
+    /// hosts.</summary>
+    public static Result<List<string>, IoError> list(string path)
+    {
+        try
+        {
+            var entries = global::System.IO.Directory.GetFileSystemEntries(path);
+            var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<string>(entries.Length);
+            foreach (var e in entries)
+            {
+                builder.Add(global::System.IO.Path.GetFileName(e) ?? e);
+            }
+            return new ResultOk<List<string>, IoError>(new List<string>(builder.MoveToImmutable()));
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<List<string>, IoError>(new IoError(ex.Message));
+        }
+    }
+
+    /// <summary>Delete the directory. With <paramref name="recursive"/>
+    /// = true, removes all contents; with false, requires the directory
+    /// to be empty (matches POSIX rmdir / rm -r split).</summary>
+    public static Result<Unit, IoError> delete(string path, bool recursive)
+    {
+        try
+        {
+            global::System.IO.Directory.Delete(path, recursive);
+            return new ResultOk<Unit, IoError>(Unit.Value);
+        }
+        catch (Exception ex)
+        {
+            return new ResultErr<Unit, IoError>(new IoError(ex.Message));
+        }
+    }
 }
 
 /// <summary>

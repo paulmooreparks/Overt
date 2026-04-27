@@ -549,12 +549,12 @@ verbose for the common cases.
 | ✅ | `File.read_to_string(path: String) !{io} -> Result<String, IoError>` |
 | ✅ | `File.write_all_text(path: String, contents: String) !{io} -> Result<Unit, IoError>` |
 | ✅ | `File.exists(path: String) !{io} -> Bool` |
-| ⏳ | `File.read_lines(path: String) !{io} -> Result<List<String>, IoError>` |
-| ⏳ | `File.append_text(path: String, contents: String) !{io} -> Result<Unit, IoError>` |
-| ⏳ | `File.delete(path: String) !{io} -> Result<Unit, IoError>` (= C `remove`) |
-| ⏳ | `File.size(path: String) !{io} -> Result<Int, IoError>` |
-| ⏳ | `File.move(from: String, to: String) !{io} -> Result<Unit, IoError>` (= C `rename`; atomic where the host supports it) |
-| ⏳ | `File.copy(from: String, to: String) !{io} -> Result<Unit, IoError>` |
+| ✅ | `File.read_lines(path: String) !{io} -> Result<List<String>, IoError>` |
+| ✅ | `File.append_text(path: String, contents: String) !{io} -> Result<Unit, IoError>` |
+| ✅ | `File.delete(path: String) !{io} -> Result<Unit, IoError>` (= C `remove`; no-op on missing) |
+| ✅ | `File.size(path: String) !{io} -> Result<Int, IoError>` |
+| ✅ | `File.move(from: String, to: String) !{io} -> Result<Unit, IoError>` (= C `rename`; atomic where the host supports it) |
+| ✅ | `File.copy(from: String, to: String) !{io} -> Result<Unit, IoError>` (overwrites destination) |
 | ⏳ | `File.read_bytes(path: String) !{io} -> Result<Bytes, IoError>` |
 | ⏳ | `File.write_bytes(path: String, data: Bytes) !{io} -> Result<Unit, IoError>` |
 
@@ -580,10 +580,10 @@ Filesystem directory operations. All carry `!{io}`.
 
 | Status | Item |
 | --- | --- |
-| ⏳ | `Directory.exists(path: String) !{io} -> Bool` |
-| ⏳ | `Directory.create(path: String) !{io} -> Result<Unit, IoError>` (creates parents as needed) |
-| ⏳ | `Directory.list(path: String) !{io} -> Result<List<String>, IoError>` (entry names, not full paths) |
-| ⏳ | `Directory.delete(path: String, recursive: Bool) !{io} -> Result<Unit, IoError>` |
+| ✅ | `Directory.exists(path: String) !{io} -> Bool` |
+| ✅ | `Directory.create(path: String) !{io} -> Result<Unit, IoError>` (creates parents as needed) |
+| ✅ | `Directory.list(path: String) !{io} -> Result<List<String>, IoError>` (entry names, not full paths) |
+| ✅ | `Directory.delete(path: String, recursive: Bool) !{io} -> Result<Unit, IoError>` |
 
 The recursive-flag form of `delete` is a deliberate single-method choice
 over Rust's `remove_dir` / `remove_dir_all` split; one fn with the

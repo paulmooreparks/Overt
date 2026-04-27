@@ -74,6 +74,16 @@ public static class Stdlib
         b["File.read_to_string"] = ImmutableArray.Create("path");
         b["File.write_all_text"] = ImmutableArray.Create("path", "contents");
         b["File.exists"] = ImmutableArray.Create("path");
+        b["File.read_lines"] = ImmutableArray.Create("path");
+        b["File.append_text"] = ImmutableArray.Create("path", "contents");
+        b["File.delete"] = ImmutableArray.Create("path");
+        b["File.size"] = ImmutableArray.Create("path");
+        b["File.move"] = ImmutableArray.Create("from", "to");
+        b["File.copy"] = ImmutableArray.Create("from", "to");
+        b["Directory.exists"] = ImmutableArray.Create("path");
+        b["Directory.create"] = ImmutableArray.Create("path");
+        b["Directory.list"] = ImmutableArray.Create("path");
+        b["Directory.delete"] = ImmutableArray.Create("path", "recursive");
         b["Path.join"] = ImmutableArray.Create("parent", "child");
         b["Path.parent"] = ImmutableArray.Create("path");
         b["Path.file_name"] = ImmutableArray.Create("path");
@@ -175,6 +185,7 @@ public static class Stdlib
         e.Add(Type("String")); // namespace shape for String.split / String.join / etc.
         e.Add(Type("Int"));    // namespace shape for Int.range / etc.
         e.Add(Type("File"));   // namespace shape for File.read_to_string / etc.
+        e.Add(Type("Directory")); // namespace shape for Directory.list / etc.
         e.Add(Type("Path"));   // namespace shape for Path.join / etc.
         e.Add(Type("Process")); // namespace shape for Process.run
         e.Add(Type("ProcessOutput")); // record returned by Process.run
@@ -684,6 +695,86 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: PrimitiveType.Bool,
+            effects: new[] { "io" }));
+
+        // File.read_lines(path: String) !{io} -> Result<List<String>, IoError>
+        e.Add(Fn("File.read_lines",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", Generic("List", PrimitiveType.String), Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.append_text(path: String, contents: String) !{io} -> Result<(), IoError>
+        e.Add(Fn("File.append_text",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.delete(path: String) !{io} -> Result<(), IoError>
+        // No-op on missing files (matches .NET / `rm -f` semantics).
+        e.Add(Fn("File.delete",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.size(path: String) !{io} -> Result<Int, IoError>
+        // Files larger than ~2 GB return Err; programs needing them FFI.
+        e.Add(Fn("File.size",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Int, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.move(from: String, to: String) !{io} -> Result<(), IoError>
+        // Atomic-where-supported rename.
+        e.Add(Fn("File.move",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.copy(from: String, to: String) !{io} -> Result<(), IoError>
+        // Overwrites existing destination.
+        e.Add(Fn("File.copy",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // ---- Directory operations ----------------------------------------------
+
+        // Directory.exists(path: String) !{io} -> Bool
+        // Distinct from File.exists; this returns true only for directories.
+        e.Add(Fn("Directory.exists",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Bool,
+            effects: new[] { "io" }));
+
+        // Directory.create(path: String) !{io} -> Result<(), IoError>
+        // Creates intermediate parents. No-op if directory already exists.
+        e.Add(Fn("Directory.create",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // Directory.list(path: String) !{io} -> Result<List<String>, IoError>
+        // Returns entry names (not full paths). Order is filesystem-defined.
+        e.Add(Fn("Directory.list",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", Generic("List", PrimitiveType.String), Named("IoError")),
+            effects: new[] { "io" }));
+
+        // Directory.delete(path: String, recursive: Bool) !{io} -> Result<(), IoError>
+        // recursive=true removes all contents (rm -r); false requires empty dir.
+        e.Add(Fn("Directory.delete",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.Bool },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
             effects: new[] { "io" }));
 
         // ---- Pure path-string helpers (no effect row) --------------------------
