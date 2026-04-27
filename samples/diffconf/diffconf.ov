@@ -111,25 +111,20 @@ fn push(list: List<DiffEntry>, entry: DiffEntry) -> List<DiffEntry> {
 
 // ---------------------------------------------------------------- render
 
-// Each match arm is a single fn call so the emitter doesn't have to
-// wrap the arm body in an IIFE. Avoids interactions between
-// `?`-propagation and the closure boundary the IIFE introduces.
 fn render_entry(entry: DiffEntry) !{io} -> Result<(), IoError> {
     match entry {
         DiffEntry.Changed { field = f, before = b, after = a } => println("${f}: ${b} → ${a}"),
-        DiffEntry.ListChanged { field = f, added = ad, removed = rm } => render_list_changed(field = f, added = ad, removed = rm),
+        DiffEntry.ListChanged { field = f, added = ad, removed = rm } => {
+            println("${f}:")?
+            for each url in ad {
+                println("  + ${url}")?
+            }
+            for each url in rm {
+                println("  - ${url}")?
+            }
+            Ok(())
+        },
     }
-}
-
-fn render_list_changed(field: String, added: List<String>, removed: List<String>) !{io} -> Result<(), IoError> {
-    println("${field}:")?
-    for each url in added {
-        println("  + ${url}")?
-    }
-    for each url in removed {
-        println("  - ${url}")?
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------- I/O
