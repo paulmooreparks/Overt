@@ -582,8 +582,43 @@ public sealed class TypeChecker
         UnsafeExpr ux => AnnotateExpression(ux.Body),
         TraceExpr tx => AnnotateExpression(tx.Body),
 
+        AnonymousFunctionExpr af => InferAnonymousFunction(af),
+
         _ => UnknownType.Instance,
     };
+
+    /// <summary>
+    /// A closure value's type is a <see cref="FunctionTypeRef"/> built
+    /// from its declared parameter types, declared effect row, and
+    /// declared return type. The body is annotated against the
+    /// closure's signature so type errors inside the body surface.
+    /// Capture analysis (which outer-scope symbols the body references)
+    /// is left to the emitter pass — the resolver already records every
+    /// identifier reference, so the captured set is derivable on
+    /// demand without a separate type-checker walk. Effect-row
+    /// validation against body contents is OV0321 (TODO; runs once
+    /// the effect-row collector hooks up to the closure body).
+    /// </summary>
+    private TypeRef InferAnonymousFunction(AnonymousFunctionExpr af)
+    {
+        // Register parameter symbols' types so identifier references in
+        // the body resolve to the right types. Symbol identities match
+        // those the resolver created (Kind=Parameter, Name+Span match).
+        foreach (var param in af.Parameters)
+        {
+            var symbol = new Symbol(SymbolKind.Parameter, param.Name, param.Span, param);
+            _symbolTypes[symbol] = LowerType(param.Type);
+        }
+
+        AnnotateExpression(af.Body);
+
+        var paramTypes = af.Parameters.Select(p => LowerType(p.Type)).ToImmutableArray();
+        var returnType = LowerType(af.ReturnType);
+        var effects = af.Effects is { } eff
+            ? eff.Effects.ToImmutableArray()
+            : ImmutableArray<string>.Empty;
+        return new FunctionTypeRef(paramTypes, returnType, effects);
+    }
 
     private TypeRef InferInterpolatedString(InterpolatedStringExpr isx)
     {

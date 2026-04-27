@@ -638,6 +638,40 @@ public sealed class Parser
             new SourceSpan(startPos, body.Span.End));
     }
 
+    /// <summary>
+    /// Parse an anonymous fn expression: `fn(x: T) !{io} -> U { body }`.
+    /// Same shape as <see cref="ParseFunctionDecl"/> minus the name and
+    /// the optional return type — closures require an explicit return
+    /// type so the type checker doesn't have to infer one. Parameter
+    /// types are also required (same rule named fns enforce).
+    /// </summary>
+    private AnonymousFunctionExpr ParseAnonymousFunctionExpr()
+    {
+        var startPos = Current.Span.Start;
+        Expect(TokenKind.KeywordFn, "anonymous fn expression");
+        Expect(TokenKind.LeftParen, "anonymous fn parameter list");
+
+        var parameters = ParseParameterList();
+        Expect(TokenKind.RightParen, "anonymous fn parameter list");
+
+        EffectRow? effects = null;
+        if (Check(TokenKind.Bang))
+        {
+            effects = ParseEffectRow();
+        }
+
+        Expect(TokenKind.Arrow, "anonymous fn return type");
+        var returnType = ParseTypeExpr();
+
+        var body = ParseBlock();
+        return new AnonymousFunctionExpr(
+            parameters,
+            effects,
+            returnType,
+            body,
+            new SourceSpan(startPos, body.Span.End));
+    }
+
     private TypeAliasDecl ParseTypeAliasDecl()
     {
         var startPos = Current.Span.Start;
@@ -1643,6 +1677,9 @@ public sealed class Parser
 
             case TokenKind.KeywordTrace:
                 return ParseTraceExpr();
+
+            case TokenKind.KeywordFn:
+                return ParseAnonymousFunctionExpr();
 
                 // TODO: list literals.
         }

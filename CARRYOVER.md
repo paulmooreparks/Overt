@@ -100,6 +100,16 @@ Ordered by "how directly this unblocks someone writing real Overt code":
 
 2. **`Set.values<T>(set: Set<T>) -> List<T>`** (½ session). Set has full create / contains / insert / remove / set-algebra ops but no way to iterate the result. `samples/diffconf/` dropped the natural `Set.difference` path because of this. Symmetric to the existing `Map.values`; trivial on both back ends. See [`docs/osl.md`](docs/osl.md) Candidates.
 
+   **Named multi-return** (1 session). Cribbed from Sutter's Cpp2 (see [hsutter.github.io/cppfront](https://hsutter.github.io/cppfront/cpp2/functions/)). Let a fn declare multiple named return values without inventing a record type:
+   ```
+   fn list_diff(left: List<String>, right: List<String>)
+       -> (added: List<String>, removed: List<String>) { ... }
+
+   let result = list_diff(left = a, right = b)
+   // result.added, result.removed
+   ```
+   Solves the diffconf-style "I want to return a (added, removed) pair" friction without a tuple-type concept or a top-level record decl per ad-hoc shape. The return type IS an anonymous record-with-named-fields; reads naturally given Overt's "every field spelled" rule. Should land after closures.
+
 3. **Emitter quirks surfaced by `samples/diffconf/`** (1 session). Two related issues, each with a one-line source-level workaround in place:
    - An if-statement inside a for-each loop body with only a side-effect branch (no else) gets ternary-encoded as an expression-statement, hitting C# CS0201. Workaround: pull the conditional into a helper fn so it sits in expression position naturally. Fix: emit a real if-statement when the construct is in statement position with no value being consumed.
    - `?`-propagation inside a for-each inside a match-arm body that gets IIFE-wrapped degrades to `.Unwrap()` instead of a proper early-return. Workaround: each match arm body is a single fn call so no IIFE wrapping happens. Fix: the `?`-lowering should walk into IIFE-wrapped contexts and either lift the `?` out via the same pre-lift pass conditionals already use, or emit per-IIFE early-return.

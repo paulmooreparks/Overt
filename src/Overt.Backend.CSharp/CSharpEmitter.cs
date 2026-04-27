@@ -2569,10 +2569,71 @@ public sealed class CSharpEmitter
                 EmitBlockAsExpression(tx.Body);
                 break;
 
+            case AnonymousFunctionExpr af:
+                EmitAnonymousFunction(af);
+                break;
+
             default:
                 _w.Write($"/* TODO: {expr.GetType().Name} */ default!");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Emit an anonymous fn (closure) as a typed C# lambda. Wrapped in
+    /// a cast to the corresponding Func/Action so the lambda's type is
+    /// inferable from any context — including being assigned to a
+    /// concretely-typed local or passed to a polymorphic stdlib fn.
+    /// Capture follows C#'s default (by reference); for the Overt
+    /// closures the samples use, captured names are immutable lets so
+    /// the difference doesn't surface. A future capture-snapshot pass
+    /// (per docs/closures.md) will close the gap for `let mut`
+    /// captures.
+    /// </summary>
+    private void EmitAnonymousFunction(AnonymousFunctionExpr af)
+    {
+        // Always emit as Func<..., R>. Overt's `-> ()` return is the
+        // value type Unit (not C# void), so even a "void"-returning
+        // closure carries Unit.Value through Func<..., Unit>. Action
+        // wouldn't fit because it discards the value.
+        _w.Write("((Func<");
+        foreach (var p in af.Parameters)
+        {
+            EmitType(p.Type);
+            _w.Write(", ");
+        }
+        EmitType(af.ReturnType);
+        _w.Write(">)((");
+        for (var i = 0; i < af.Parameters.Length; i++)
+        {
+            if (i > 0) _w.Write(", ");
+            EmitType(af.Parameters[i].Type);
+            _w.Write(" ");
+            _w.Write(EscapeId(af.Parameters[i].Name));
+        }
+        _w.Write(") => { ");
+        // Lower the body the same way EmitBlockAsExpression does for
+        // IIFE-wrapped blocks, but without the trailing invocation.
+        var declaredReturn = LowerType(af.ReturnType);
+        foreach (var stmt in af.Body.Statements)
+        {
+            EmitStatement(stmt);
+        }
+        if (af.Body.TrailingExpression is { } tail)
+        {
+            if (declaredReturn is NamedTypeRef { Name: "Result" })
+            {
+                EmitHoistsForExpression(tail);
+            }
+            _w.Write("return ");
+            WithExpected(declaredReturn, () => EmitExpression(tail));
+            _w.Write(";");
+        }
+        else if (IsUnit(af.ReturnType))
+        {
+            _w.Write("return Unit.Value;");
+        }
+        _w.Write(" }))");
     }
 
     private void EmitCall(CallExpr c)

@@ -590,6 +590,21 @@ public sealed record LiteralPattern(
     Expression Value,
     SourceSpan Span) : Pattern(Span);
 
+/// <summary>
+/// An anonymous function (closure) used as an expression. Same shape
+/// as <see cref="FunctionDecl"/> minus the name — parameters with
+/// required type annotations, optional effect row, required return
+/// type, body block. Per <c>docs/closures.md</c>: capture-by-value at
+/// construction; the closure's effect row is part of its type and
+/// must cover whatever the body actually performs.
+/// </summary>
+public sealed record AnonymousFunctionExpr(
+    ImmutableArray<Parameter> Parameters,
+    EffectRow? Effects,
+    TypeExpr ReturnType,
+    BlockExpr Body,
+    SourceSpan Span) : Expression(Span);
+
 public sealed record CallExpr(
     Expression Callee,
     ImmutableArray<Argument> Arguments,

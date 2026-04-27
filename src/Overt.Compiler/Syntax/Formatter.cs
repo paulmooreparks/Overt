@@ -605,6 +605,21 @@ public static class Formatter
                 ctx.WriteIndent();
                 ctx.Write("}");
                 break;
+            case AnonymousFunctionExpr af:
+                ctx.Write("fn(");
+                for (var i = 0; i < af.Parameters.Length; i++)
+                {
+                    if (i > 0) ctx.Write(", ");
+                    ctx.Write($"{af.Parameters[i].Name}: ");
+                    FormatType(af.Parameters[i].Type, ctx);
+                }
+                ctx.Write(")");
+                if (af.Effects is { } afEff) FormatEffectRow(afEff, ctx);
+                ctx.Write(" -> ");
+                FormatType(af.ReturnType, ctx);
+                ctx.Write(" ");
+                FormatBlock(af.Body, ctx);
+                break;
             case RaceExpr re:
                 ctx.Write("race {");
                 ctx.Newline();

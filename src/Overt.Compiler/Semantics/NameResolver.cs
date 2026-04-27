@@ -517,6 +517,27 @@ public sealed class NameResolver
                 ResolveExpression(tx.Body, scope);
                 break;
 
+            case AnonymousFunctionExpr af:
+                {
+                    // Closure body resolves in a new scope nested inside
+                    // the surrounding scope. Free-variable references in the
+                    // body resolve against the enclosing scope normally;
+                    // the type checker walks the resolutions later to
+                    // collect the capture set. Parameters define new
+                    // names that shadow any outer binding by the same
+                    // name (per Overt's normal scoping).
+                    var closureScope = new Scope(scope);
+                    foreach (var param in af.Parameters)
+                    {
+                        ResolveType(param.Type, closureScope);
+                        DefineOrReport(closureScope, new Symbol(
+                            SymbolKind.Parameter, param.Name, param.Span, param));
+                    }
+                    ResolveType(af.ReturnType, closureScope);
+                    ResolveExpression(af.Body, closureScope);
+                }
+                break;
+
             case WithExpr w:
                 ResolveExpression(w.Target, scope);
                 foreach (var upd in w.Updates)

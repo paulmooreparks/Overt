@@ -2745,10 +2745,56 @@ public static class GoEmitter
                     }
                     break;
 
+                case AnonymousFunctionExpr af:
+                    EmitAnonymousFunction(af);
+                    break;
+
                 default:
                     throw new NotSupportedException(
                         $"Go back end does not yet handle expression {expr.GetType().Name}.");
             }
+        }
+
+        /// <summary>
+        /// Emit an anonymous fn (closure) as a Go func literal. Go
+        /// closures capture by reference (same as C# lambdas); the
+        /// design memo's capture-by-value rule isn't enforced at the
+        /// emitter level yet — practical for closures that reference
+        /// immutable lets, gap for `let mut` references. See
+        /// docs/closures.md.
+        /// </summary>
+        private void EmitAnonymousFunction(AnonymousFunctionExpr af)
+        {
+            _sb.Append("func(");
+            for (var i = 0; i < af.Parameters.Length; i++)
+            {
+                if (i > 0) _sb.Append(", ");
+                _sb.Append(af.Parameters[i].Name);
+                _sb.Append(' ');
+                _sb.Append(LowerType(af.Parameters[i].Type));
+            }
+            _sb.Append(") ");
+            _sb.Append(LowerType(af.ReturnType));
+            _sb.AppendLine(" {");
+
+            // Body: emit each statement at indent 1, then the trailing
+            // expression (or Unit return for unit-typed closures with no
+            // trailing).
+            foreach (var stmt in af.Body.Statements)
+            {
+                EmitStatement(stmt, indent: 1);
+            }
+            if (af.Body.TrailingExpression is { } tail)
+            {
+                _sb.Append("\treturn ");
+                EmitExpression(tail);
+                _sb.AppendLine();
+            }
+            else if (af.ReturnType is UnitType)
+            {
+                _sb.AppendLine("\treturn overt.UnitValue");
+            }
+            _sb.Append("}");
         }
 
         /// <summary>Walk an expression tree and add every let-bound and

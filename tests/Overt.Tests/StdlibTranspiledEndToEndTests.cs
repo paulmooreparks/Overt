@@ -442,6 +442,89 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_AnonymousFn_FilterClosureWithoutCapture()
+    {
+        // Most basic closure: anonymous fn passed to filter, no captured
+        // variables. Verifies the lambda-emission path through the C#
+        // back end and that filter accepts the anonymous fn as its
+        // predicate parameter.
+        const string src = """
+            module closure_basic
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let xs: List<Int> = List.concat_three(
+                    first = List.singleton(value = 1),
+                    middle = List.singleton(value = 7),
+                    last = List.singleton(value = 12),
+                )
+                let kept: List<Int> = filter(
+                    list = xs,
+                    predicate = fn(x: Int) -> Bool { x > 5 },
+                )
+                Ok(size(kept))
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "closure_basic");
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_AnonymousFn_CapturesOuterValue()
+    {
+        // Closure body references a let-bound name in the enclosing
+        // scope. Verifies the capture path works through C#'s default
+        // by-reference semantics — for an immutable let, by-reference
+        // and by-value are observationally identical, which is the
+        // case the design memo guarantees today.
+        const string src = """
+            module closure_capture
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let threshold: Int = 5
+                let xs: List<Int> = List.concat_three(
+                    first = List.singleton(value = 3),
+                    middle = List.singleton(value = 7),
+                    last = List.singleton(value = 10),
+                )
+                let kept: List<Int> = filter(
+                    list = xs,
+                    predicate = fn(x: Int) -> Bool { x > threshold },
+                )
+                Ok(size(kept))
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "closure_capture");
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_AnonymousFn_AssignedToTypedLet()
+    {
+        // Anonymous fn assigned to a let with an explicit fn-type
+        // annotation, then the let value passed through. Same shape as
+        // an inline argument but exercises the round-trip through a
+        // local binding.
+        const string src = """
+            module closure_let
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let pred: fn(Int) -> Bool = fn(x: Int) -> Bool { x > 0 }
+                let xs: List<Int> = List.concat_three(
+                    first = List.singleton(value = -1),
+                    middle = List.singleton(value = 0),
+                    last = List.singleton(value = 1),
+                )
+                Ok(size(filter(list = xs, predicate = pred)))
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "closure_let");
+        Assert.NotNull(result);
+        Assert.Equal(1, result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
     public void Transpiled_QuestionInIfArm_PropagatesErrAsValue()
     {
         // `?` inside an if-expression arm that's the value of a let binding —
