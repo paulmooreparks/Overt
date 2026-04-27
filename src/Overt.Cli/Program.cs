@@ -1094,6 +1094,7 @@ static class Cli
         ["OV0315"] = "AGENTS.md §12 (FFI — `extern instance fn` requires `self` first)",
         ["OV0316"] = "AGENTS.md §12 (FFI — `extern ctor fn` requires a return type)",
         ["OV0317"] = "AGENTS.md §9 (async — `.await` requires a Task value)",
+        ["OV0318"] = "osl.md (\"Generic-namespaced calls use Form 3\")",
     };
 
     static int WriteDiagnostics(string path, ImmutableArray<Diagnostic> diagnostics)

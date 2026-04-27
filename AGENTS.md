@@ -1303,6 +1303,7 @@ reference. Codes are stable.
 | OV0315 | resolve | `extern instance fn` without `self` first parameter | add `self: <Type>` as the first parameter |
 | OV0316 | resolve | `extern ctor fn` without return type | add `-> <Type>`, the constructed type |
 | OV0317 | type | `.await` on a non-`Task<T>` value | await a Task-returning expression |
+| OV0318 | type | generic-namespaced call uses bare identifier (`List.empty()`) | use Form 3: `List<Int>.empty()` |
 
 ---
 

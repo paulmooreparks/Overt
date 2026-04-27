@@ -778,6 +778,15 @@ public sealed class TypeChecker
             // backends can't render as a concrete C#/Go type.
             var returnType = UnifyAndSubstituteReturn(ft, c);
 
+            // Form-3 enforcement (OV0318): a generic stdlib namespace
+            // called via bare identifier (`List.empty()` rather than
+            // `List<Int>.empty()`) parses fine but only types when value
+            // args fully infer every type parameter. When they don't,
+            // we'd emit C# / Go that the host compiler also can't infer,
+            // surfacing as a confusing host-language error. Catch it
+            // here with a clean Overt-level diagnostic.
+            CheckForm3Violation(c, ft, returnType);
+
             // Call-site async wrap: a user-declared fn that uses `.await` in
             // its body emits as `async Task<ReturnType>`, so the value callers
             // see is `Task<ReturnType>`. `.await` at the call site unwraps
@@ -1757,6 +1766,57 @@ public sealed class TypeChecker
         FunctionTypeRef ft => ft.Parameters.Any(ContainsTypeVar) || ContainsTypeVar(ft.Return),
         _ => false,
     };
+
+    // Stdlib namespace identifiers whose underlying type is generic. A
+    // bare-identifier call on one of these (`List.empty()`) is the
+    // shape OV0318 catches; non-generic namespaces (String, File,
+    // Path, etc.) don't take type arguments at all and route through
+    // a different path.
+    private static readonly HashSet<string> _genericStdlibNamespaces =
+        new(StringComparer.Ordinal) { "List", "Map", "Set", "Result", "Option" };
+
+    /// <summary>
+    /// Emit OV0318 when a call's callee is a bare-identifier field access
+    /// against a generic stdlib namespace (`List.empty()`,
+    /// `Map.empty()`, etc.) and value-arg unification didn't bind every
+    /// type parameter — i.e., the call would otherwise propagate
+    /// unbound type variables into the emitter and fall over at host-
+    /// compile time.
+    /// </summary>
+    private void CheckForm3Violation(CallExpr c, FunctionTypeRef ft, TypeRef returnType)
+    {
+        if (c.Callee is not FieldAccessExpr fa) return;
+        if (fa.Target is not IdentifierExpr id) return;
+        if (!_genericStdlibNamespaces.Contains(id.Name)) return;
+        if (ft.TypeParameters.IsEmpty) return;
+
+        // If the substituted return type still carries free type vars,
+        // value args weren't enough to bind every type parameter and
+        // the user needs to supply them via Form 3.
+        if (!ContainsTypeVar(returnType)) return;
+
+        // Don't fire when any argument's type is Unknown — we can't tell
+        // whether full inference would have succeeded, and false-positive
+        // OV0318s on legitimate inferable calls (e.g., args bound from
+        // record-pattern destructuring, where the binding type currently
+        // erases to Unknown) would be more confusing than the original
+        // host-language inference error.
+        foreach (var arg in c.Arguments)
+        {
+            if (!_expressionTypes.TryGetValue(arg.Value.Span, out var t)
+                || t is UnknownType)
+            {
+                return;
+            }
+        }
+
+        var typeArgs = string.Join(", ", ft.TypeParameters);
+        ReportErrorWithHelp(
+            "OV0318",
+            $"generic-namespaced call `{id.Name}.{fa.FieldName}` requires Form 3 syntax",
+            fa.Span,
+            $"write `{id.Name}<{typeArgs}>.{fa.FieldName}(...)` so the type arguments are explicit");
+    }
 
     // ------------------------------------------------ effect-row check
 

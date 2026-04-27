@@ -120,6 +120,55 @@ public class DiagnosticQualityTests
         Assert.Contains("Task", help.Text);
     }
 
+    [Fact]
+    public void OV0318_OldFormGenericNamespaceCall_Fires()
+    {
+        // `List.empty()` (bare identifier) on a generic stdlib namespace
+        // can't bind T from any value arg; user must write Form 3.
+        var d = TypeCheckAndFindFirst(
+            "module m\n"
+            + "fn main() !{io} -> Result<(), IoError> {\n"
+            + "    let xs: List<Int> = List.empty()\n"
+            + "    Ok(())\n"
+            + "}\n",
+            "OV0318");
+        var help = Assert.Single(d.Notes, n => n.Kind == DiagnosticNoteKind.Help);
+        Assert.Contains("List<T>.empty", help.Text);
+    }
+
+    [Fact]
+    public void OV0318_OldFormMapNamespace_FiresWithBothTypeArgs()
+    {
+        // Map has two type params (K, V); the help text should suggest
+        // both in the Form 3 rewrite.
+        var d = TypeCheckAndFindFirst(
+            "module m\n"
+            + "fn main() !{io} -> Result<(), IoError> {\n"
+            + "    let m: Map<String, Int> = Map.empty()\n"
+            + "    Ok(())\n"
+            + "}\n",
+            "OV0318");
+        var help = Assert.Single(d.Notes, n => n.Kind == DiagnosticNoteKind.Help);
+        Assert.Contains("Map<K, V>.empty", help.Text);
+    }
+
+    [Fact]
+    public void OV0318_InferableSingletonCall_DoesNotFire()
+    {
+        // `List.singleton(42)` — T inferable from the value arg, so the
+        // old form is allowed per the OSL design principle.
+        var lex = Lexer.Lex(
+            "module m\n"
+            + "fn main() !{io} -> Result<(), IoError> {\n"
+            + "    let xs: List<Int> = List.singleton(42)\n"
+            + "    Ok(())\n"
+            + "}\n");
+        var parse = Parser.Parse(lex.Tokens);
+        var resolve = NameResolver.Resolve(parse.Module);
+        var typed = TypeChecker.Check(parse.Module, resolve);
+        Assert.DoesNotContain(typed.Diagnostics, d => d.Code == "OV0318");
+    }
+
     private static Diagnostic TypeCheckAndFindFirst(string source, string code)
     {
         var lex = Lexer.Lex(source);
