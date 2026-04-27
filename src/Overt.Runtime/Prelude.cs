@@ -44,13 +44,40 @@ public static class Prelude
         }
     }
 
+    // Override channel for the process command-line args. The `overt run`
+    // CLI sets this to the user's program-side argv slice before
+    // invoking `main`, because the in-process Roslyn-eval'd program
+    // shares its host's argv with the runner — `Environment.GetCommandLineArgs()`
+    // would return `["overt", "run", "<file.ov>", ...]` rather than just
+    // the program's args. When null (the standalone-exe path), `args()`
+    // falls back to the OS argv.
+    private static System.Collections.Immutable.ImmutableArray<string>? _programArgsOverride;
+
+    /// <summary>
+    /// Set the program-args override before invoking <c>main</c>. The
+    /// override survives only the current process; clear by passing
+    /// <c>null</c>.
+    /// </summary>
+    public static void _setProgramArgs(System.Collections.Immutable.ImmutableArray<string>? args)
+    {
+        _programArgsOverride = args;
+    }
+
     // The process command-line arguments, minus the executable path that
     // .NET puts at index 0. Mirrors the contract of `static int Main(
     // string[] args)`. Returned as an Overt List<String>; callers use
-    // size(), List.at(), etc. The list is computed once per process by
-    // the runtime; repeated calls are cheap.
+    // size(), List.at(), etc.
+    //
+    // When the program runs under `overt run`, the runner stashes the
+    // program-args slice via _setProgramArgs and `args()` returns that.
+    // For a standalone-exe deployment (no override set), it falls back
+    // to the OS argv.
     public static List<string> args()
     {
+        if (_programArgsOverride is { } overridden)
+        {
+            return new List<string>(overridden);
+        }
         var raw = Environment.GetCommandLineArgs();
         if (raw.Length <= 1)
         {

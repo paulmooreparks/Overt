@@ -20,11 +20,13 @@ boundary; this one demonstrates that a real CLI doesn't need one.
 
 Three patterns worth lifting:
 
-1. **`main(args: List<String>)` is the CLI shape.** The `overt run`
-   runner passes the user's program-side argv directly into `args`.
-   The bare `args()` prelude reads the host process's argv, which is
-   the runner itself when invoked under `overt run` — declaring
-   `args` as a parameter sidesteps that.
+1. **`main(args: List<String>)` puts the argv dependency in the
+   signature.** The runner passes the program-side argv slice in
+   directly. The bare `args()` prelude returns the same slice (the
+   runner stashes it on the runtime before invoking `main`), so
+   parameter-less `main()` plus `args()` reads as well — both forms
+   are valid; the parameter form makes the dependency visible at the
+   signature.
 
 2. **`Map<String, Int>` aggregation via `fold`.** The histogram is
    the running accumulator. Each `step` call returns a new `Tally`

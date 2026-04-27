@@ -150,11 +150,12 @@ fn print_report(t: Tally) !{io} -> Result<(), IoError> {
     Ok(())
 }
 
-// `main(args: List<String>)` is the CLI shape the `overt run` runner
-// recognizes — the runner passes the user's program-side argv into
-// `args` directly. The bare `args()` prelude fn reads the host
-// process's argv, which is the runner itself when invoked under
-// `overt run`, not the trailing program args.
+// `main(args: List<String>)` is the recommended CLI shape: the
+// dependency on argv is visible in the signature, and the runner
+// passes the program-side argv slice in directly. The bare `args()`
+// prelude fn returns the same slice (the runner stashes it on the
+// runtime before invoking `main`), so a parameter-less `main()` plus
+// `args()` reads as well — pick whichever you prefer.
 fn main(args: List<String>) !{io} -> Result<(), IoError> {
     let lines: List<String> = read_input(argv = args)?
     let final_tally: Tally = fold(list = lines, seed = empty_tally(), step = step)

@@ -1184,6 +1184,62 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_BareArgsCall_ReturnsRunnerOverrideWhenSet()
+    {
+        // The `overt run` runner stashes the user's program-args slice
+        // on the runtime via Prelude._setProgramArgs before invoking
+        // main, so the bare `args()` prelude returns those args rather
+        // than the host process's argv (which under in-process Roslyn
+        // eval still includes the runner's own CLI args). This test
+        // mirrors that handoff and asserts args() reads the override.
+        const string src = """
+            module bare_args
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let argv: List<String> = args()
+                Ok(size(list = argv))
+            }
+            """;
+        var override_ = ImmutableArray.Create("alpha", "beta", "gamma");
+        global::Overt.Runtime.Prelude._setProgramArgs(override_);
+        try
+        {
+            var (result, _) = CompileAndRun(src, "BareArgsOverride");
+            Assert.NotNull(result);
+            var ok = result!.GetType().Name;
+            Assert.StartsWith("ResultOk", ok);
+            var value = (int)result.GetType().GetProperty("Value")!.GetValue(result)!;
+            Assert.Equal(3, value);
+        }
+        finally
+        {
+            global::Overt.Runtime.Prelude._setProgramArgs(null);
+        }
+    }
+
+    [Fact]
+    public void Transpiled_BareArgsCall_FallsBackToEnvironmentWhenNoOverride()
+    {
+        // No override set — args() reads Environment.GetCommandLineArgs(),
+        // which under the test runner is the dotnet test host's argv.
+        // That'll have at least one element (the host exe path); the
+        // exact contents are environment-dependent, so we just assert
+        // the call doesn't blow up and returns *some* list.
+        const string src = """
+            module bare_args_fallback
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let argv: List<String> = args()
+                Ok(size(list = argv))
+            }
+            """;
+        global::Overt.Runtime.Prelude._setProgramArgs(null);
+        var (result, _) = CompileAndRun(src, "BareArgsFallback");
+        Assert.NotNull(result);
+        Assert.StartsWith("ResultOk", result!.GetType().Name);
+    }
+
+    [Fact]
     public void Transpiled_ProcessRun_CapturesStdoutAndExitCode()
     {
         // Run `dotnet --version` (a tool that's reliably installed in the

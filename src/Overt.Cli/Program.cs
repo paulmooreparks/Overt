@@ -357,6 +357,16 @@ static class Cli
                 + "        to make it runnable, add `fn main() !{io} -> Result<(), IoError> { ... }`.");
             return 1;
         }
+        // Stash the program's argv slice on the runtime before invoking
+        // `main`. The bare prelude `args()` consults this override
+        // first; without it, `args()` would fall through to
+        // `Environment.GetCommandLineArgs()` and pick up the runner's
+        // own argv (`overt`, `run`, `<file.ov>`, ...) since the
+        // program runs in-process under Roslyn-eval. The override is
+        // a no-op in standalone-exe deployments where the program owns
+        // the host process's argv anyway.
+        global::Overt.Runtime.Prelude._setProgramArgs(programArgs.ToImmutableArray());
+
         // `main` accepts either no parameters or a single
         // `args: List<String>` (lowered to `Overt.Runtime.List<string>`).
         // Anything else is unsupported — refinement-typed args and

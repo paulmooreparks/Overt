@@ -99,7 +99,7 @@ The Overt Standard Library is documented in [`docs/osl.md`](docs/osl.md): founda
 
 Two design rules govern OSL growth:
 
-- **Vocabulary is English; grammar is Latin.** Borrow names and shapes from wherever they read well; reshape every entry to fit Overt's discipline (`Result`-wrapped fallibility, lowercase fields, declared effect rows, immutability, named args).
+- **Vocabulary is English; grammar is Latin.** (Figuratively, not literally!) Borrow names and shapes from wherever they read well; reshape every entry to fit Overt's discipline (`Result`-wrapped fallibility, lowercase fields, declared effect rows, immutability, named args).
 - **Foundational vs. rule of three.** Operations on basic data types that any program eventually needs ship without waiting. Anything domain-specific (timing, randomness, network, regex) waits until three independent programs cite it.
 
 To propose a new operation, append a candidate block to `docs/osl.md`'s `## Candidates` section, or open an issue. The motivating-programs list is the audit trail; promotion happens when the count hits three and the shape rules pass.
