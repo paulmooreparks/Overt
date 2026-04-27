@@ -672,7 +672,7 @@ package and flows into the compile reference set automatically.
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Overt.Build" Version="0.1.0" />
+    <PackageReference Include="Overt.Build" Version="0.2.0" />
   </ItemGroup>
 </Project>
 ```

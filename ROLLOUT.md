@@ -177,16 +177,17 @@ strongest signal we make.
 What this means in practice — examples we've already accumulated or
 will accumulate:
 
-- **`0.1` → `0.2`** triggers when the foundational OSL set (per
-  [`docs/osl.md`](docs/osl.md)) is complete and the queued breaking
-  cleanups land:
-  - All ⏳ foundational items shipped (List ops, String ops, Bytes,
+- **`0.1` → `0.2`** ✅ **shipped 2026-04-27.** Foundational OSL set
+  complete; queued breaking cleanups landed:
+  - All foundational items shipped (List ops, String ops, Bytes,
     Console expansions, File / Directory / Path expansions, Log via
     Trace).
   - TraceEvent reshape from `{ description }` to `{ level, message }`.
   - `len` synonym removed in favor of `size`.
-  - Form-3 polish: clean OV-coded diagnostic for old-form
-    `Type.method()` calls.
+  - Form-3 polish: OV0318 fires on old-form `List.empty()`-style calls
+    that can't infer their type parameters.
+  - Runtime files (`Prelude.cs`, `overt.go`) split per namespace for
+    navigation.
   - OSL spec stamped `osl-1.0` (foundational complete).
 - **`0.2` → `0.3`** would trigger on a major feature arc:
   real-concurrency through the Go emitter (chat-relay Phase 2+),

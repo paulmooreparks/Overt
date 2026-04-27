@@ -39,7 +39,10 @@ public class OvertCliToolTests
                 + $"--output \"{feedDir}\" --version-suffix {versionSuffix}",
                 repoRoot);
 
-            var packageVersion = $"0.1.0-{versionSuffix}";
+            // Match the major.minor.0 prefix Directory.Build.props derives
+            // from the repo-root VERSION file so the test moves with bumps.
+            var versionBase = File.ReadAllText(Path.Combine(repoRoot, "VERSION")).Trim();
+            var packageVersion = $"{versionBase}.0-{versionSuffix}";
 
             // Scoped NuGet.config that whitelists the scratch feed. Written
             // next to the tool path; `dotnet tool install` picks up the

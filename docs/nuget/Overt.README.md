@@ -12,7 +12,7 @@ This package is the Overt CLI as a .NET global tool. After install, the `overt` 
 dotnet tool install --global Overt --prerelease
 ```
 
-The `--prerelease` flag is required while Overt is in the `0.x.y` dev channel. Install a specific version with `--version 0.1.0-dev.3`.
+The `--prerelease` flag is required while Overt is in the `0.x.y` dev channel. Install a specific version with `--version 0.2.0-dev.3`.
 
 ## Try it
 

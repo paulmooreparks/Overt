@@ -1,5 +1,9 @@
 # Overt Standard Library (OSL)
 
+**Version: `osl-1.0`** — foundational set complete (shipped in Overt
+0.2). Future additions land via the candidate queue per the
+*Versioning* rules below.
+
 > *"Library design is language design."* — Bjarne Stroustrup
 >
 > *"Within C++, there is a much smaller and cleaner language struggling to get out."* — Bjarne Stroustrup

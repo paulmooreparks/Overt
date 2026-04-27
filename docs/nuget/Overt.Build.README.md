@@ -10,7 +10,7 @@ Overt is an agent-first programming language: every effect, error, dispatch, mut
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Overt.Build" Version="0.1.0-dev.*" />
+  <PackageReference Include="Overt.Build" Version="0.2.0-dev.*" />
 </ItemGroup>
 ```
 

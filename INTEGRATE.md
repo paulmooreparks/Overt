@@ -32,12 +32,12 @@ Most real projects want `Overt.Build`. The global tool is secondary.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Overt.Build" Version="0.1.0-*" />
+  <PackageReference Include="Overt.Build" Version="0.2.0-*" />
 </ItemGroup>
 ```
 
 Pre-release versions require either a floating version range (as above) or
-an explicit version pin (`Version="0.1.0-dev.N"`) while Overt is in the
+an explicit version pin (`Version="0.2.0-dev.N"`) while Overt is in the
 `0.x.y` dev channel. There is no stable release yet.
 
 Your `.csproj` needs no other changes. The package contributes a targets

@@ -35,16 +35,19 @@ public class OvertBuildNuGetTests
         {
             // Pack Overt.Build (and transitively the projects it depends
             // on) into the scratch feed. Use a per-test version suffix so
-            // NuGet's global cache doesn't serve a stale 0.1.0 from
+            // NuGet's global cache doesn't serve a stale build from
             // another run; `--version-suffix` composes with the <Version>
-            // into `0.1.0-<suffix>`.
+            // into `<MAJOR.MINOR>.0-<suffix>`.
             var versionSuffix = "test" + Guid.NewGuid().ToString("N").Substring(0, 8);
             RunOrThrow("dotnet",
                 $"pack {Path.Combine(repoRoot, "src", "Overt.Build", "Overt.Build.csproj")} "
                 + $"--output \"{feedDir}\" --version-suffix {versionSuffix}",
                 repoRoot);
 
-            var packageVersion = $"0.1.0-{versionSuffix}";
+            // Match the major.minor.0 prefix Directory.Build.props derives
+            // from the repo-root VERSION file so the test moves with bumps.
+            var versionBase = File.ReadAllText(Path.Combine(repoRoot, "VERSION")).Trim();
+            var packageVersion = $"{versionBase}.0-{versionSuffix}";
 
             // Write the consumer project: minimal csproj with a local
             // NuGet.config pointing at the scratch feed, one .ov file,

@@ -35,7 +35,7 @@ Overt.Build MSBuild task. Until `Overt.Build` publishes to nuget.org,
 this sample imports the task directly from the in-repo build output
 of `src/Overt.Build`. Real consumers will replace the `<Import>` in
 [ConfigValidate.csproj](ConfigValidate.csproj) with a one-line
-`<PackageReference Include="Overt.Build" Version="0.1.0-dev.*" />`.
+`<PackageReference Include="Overt.Build" Version="0.2.0-dev.*" />`.
 
 ```sh
 dotnet build
