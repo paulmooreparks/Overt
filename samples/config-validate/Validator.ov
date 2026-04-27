@@ -32,7 +32,11 @@ type NonEmpty<T> = List<T> where size(self) > 0
 
 // ---------------------------------------------------------------- types
 
-enum LogLevel {
+// Named with the App- prefix to avoid shadowing the stdlib's
+// `LogLevel` (Debug / Info / Warn / Error), which any module that
+// imports the prelude already has in scope. The app's level enum
+// extends with `Trace` for verbose-mode debugging the upstreams.
+enum AppLogLevel {
     Trace,
     Debug,
     Info,
@@ -56,7 +60,7 @@ record Config {
     host:          NonEmptyString,
     port:          Port,
     worker_count:  WorkerCount,
-    log_level:     LogLevel,
+    log_level:     AppLogLevel,
     upstream_urls: NonEmpty<String>,
 }
 
@@ -95,17 +99,17 @@ fn check_worker_count(raw: Int) -> Result<WorkerCount, ValidationError> {
     }
 }
 
-fn check_log_level(raw: String) -> Result<LogLevel, ValidationError> {
+fn check_log_level(raw: String) -> Result<AppLogLevel, ValidationError> {
     if raw == "trace" {
-        Ok(LogLevel.Trace)
+        Ok(AppLogLevel.Trace)
     } else if raw == "debug" {
-        Ok(LogLevel.Debug)
+        Ok(AppLogLevel.Debug)
     } else if raw == "info" {
-        Ok(LogLevel.Info)
+        Ok(AppLogLevel.Info)
     } else if raw == "warn" {
-        Ok(LogLevel.Warn)
+        Ok(AppLogLevel.Warn)
     } else if raw == "error" {
-        Ok(LogLevel.Error)
+        Ok(AppLogLevel.Error)
     } else {
         Err(ValidationError.UnknownLogLevel { got = raw })
     }
@@ -127,7 +131,7 @@ fn validate(raw: ConfigJson) -> Result<Config, ValidationError> {
     let host:    NonEmptyString  = check_host(raw.host)?
     let port:    Port            = check_port(raw.port)?
     let workers: WorkerCount     = check_worker_count(raw.worker_count)?
-    let level:   LogLevel        = check_log_level(raw.log_level)?
+    let level:   AppLogLevel     = check_log_level(raw.log_level)?
     let urls:    NonEmpty<String> = check_upstream_urls(raw.upstream_urls)?
 
     Ok(Config {
