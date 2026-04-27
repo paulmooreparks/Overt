@@ -1625,9 +1625,21 @@ public sealed class TypeChecker
                 break;
 
             case ConstructorPattern cp:
-                foreach (var arg in cp.Arguments)
                 {
-                    BindPatternSymbols(arg, UnknownType.Instance, kind);
+                    // Extract inner types for stdlib variants from the
+                    // scrutinee type. `Some(x)` against `Option<T>` binds
+                    // x to T; `Ok(x)` against `Result<T, E>` binds x to
+                    // T; `Err(x)` against `Result<T, E>` binds x to E.
+                    // Without this, downstream emitter passes see x
+                    // typed as `?` and the C# emit's pattern-rewrite
+                    // pass falls back to bare `Ok` / `Err` constructor
+                    // names that C# can't resolve.
+                    var argTypes = StdlibVariantArgTypes(cp.Path, source, cp.Arguments.Length);
+                    for (var i = 0; i < cp.Arguments.Length; i++)
+                    {
+                        var argType = i < argTypes.Length ? argTypes[i] : UnknownType.Instance;
+                        BindPatternSymbols(cp.Arguments[i], argType, kind);
+                    }
                 }
                 break;
 
@@ -1640,6 +1652,31 @@ public sealed class TypeChecker
 
                 // WildcardPattern and PathPattern bind nothing.
         }
+    }
+
+    /// <summary>
+    /// Map a constructor-pattern path against a known scrutinee type to
+    /// the inner types its arguments bind. Returns an empty array when
+    /// the path / scrutinee combo isn't a recognized stdlib variant —
+    /// callers fall back to UnknownType.Instance per arg in that case.
+    /// </summary>
+    private static ImmutableArray<TypeRef> StdlibVariantArgTypes(
+        ImmutableArray<string> path, TypeRef source, int argCount)
+    {
+        if (path.Length != 1 || source is not NamedTypeRef nt)
+        {
+            return ImmutableArray<TypeRef>.Empty;
+        }
+        return (path[0], nt.Name, argCount) switch
+        {
+            ("Some", "Option", 1) when nt.TypeArguments.Length == 1
+                => ImmutableArray.Create(nt.TypeArguments[0]),
+            ("Ok", "Result", 1) when nt.TypeArguments.Length == 2
+                => ImmutableArray.Create(nt.TypeArguments[0]),
+            ("Err", "Result", 1) when nt.TypeArguments.Length == 2
+                => ImmutableArray.Create(nt.TypeArguments[1]),
+            _ => ImmutableArray<TypeRef>.Empty,
+        };
     }
 
     private TypeRef InferTuple(TupleExpr te)

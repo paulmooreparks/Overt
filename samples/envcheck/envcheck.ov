@@ -148,14 +148,11 @@ fn read_env(path: String) !{io} -> Result<Map<String, String>, IoError> {
     let lines: List<String> = File.read_lines(path = path)?
     let mut env: Map<String, String> = Map<String, String>.empty()
     for each line in lines {
-        // Match-as-expression returns the new env value; the
-        // assignment happens at the loop level. Match-with-only-
-        // side-effect-arms inside a for-each loop hits the same
-        // expression-as-statement quirk diffconf documented; this
-        // workaround sidesteps it.
-        env = match parse_line(line = line) {
-            None => env,
-            Some(parsed) => Map<String, String>.insert(map = env, key = parsed.key, value = parsed.value),
+        match parse_line(line = line) {
+            None => (),
+            Some(parsed) => {
+                env = Map<String, String>.insert(map = env, key = parsed.key, value = parsed.value)
+            },
         }
     }
     Ok(env)
@@ -175,23 +172,12 @@ fn check_env_keys(env: Map<String, String>, schema: Map<String, SchemaEntry>) ->
     failures
 }
 
-// Per-entry check pulled out of the loop so the nested matches sit in
-// expression position (return value flows out through fn return type)
-// rather than statement position (where the side-effect-only arms hit
-// the expression-as-statement emitter quirk).
 fn check_one_key(failures: List<Failure>, entry: MapEntry<String, String>, schema: Map<String, SchemaEntry>) -> List<Failure> {
     match Map<String, SchemaEntry>.get(map = schema, key = entry.key) {
         None => push(list = failures, failure = Failure.Unknown { key = entry.key }),
-        Some(schema_entry) => {
-            // Bind the validator-call result to a typed let before
-            // matching; the IIFE-wrapped match-arm context loses
-            // the scrutinee type otherwise, and Ok / Err patterns
-            // emit without their ResultOk / ResultErr rewrite.
-            let outcome: Result<(), String> = schema_entry.validator(entry.value)
-            match outcome {
-                Ok(_) => failures,
-                Err(reason) => push(list = failures, failure = Failure.Invalid { key = entry.key, value = entry.value, reason = reason }),
-            }
+        Some(schema_entry) => match schema_entry.validator(entry.value) {
+            Ok(_) => failures,
+            Err(reason) => push(list = failures, failure = Failure.Invalid { key = entry.key, value = entry.value, reason = reason }),
         },
     }
 }
@@ -203,12 +189,8 @@ fn check_one_key(failures: List<Failure>, entry: MapEntry<String, String>, schem
 fn check_required_keys(env: Map<String, String>, schema: Map<String, SchemaEntry>) -> List<Failure> {
     let mut failures: List<Failure> = List<Failure>.empty()
     for each entry in Map<String, SchemaEntry>.entries(map = schema) {
-        // If-as-expression returns the new failures value, sidestepping
-        // the if-with-side-effect-only-then-arm emitter quirk.
-        failures = if entry.value.required && !Map<String, String>.contains_key(map = env, key = entry.key) {
-            push(list = failures, failure = Failure.MissingRequired { key = entry.key })
-        } else {
-            failures
+        if entry.value.required && !Map<String, String>.contains_key(map = env, key = entry.key) {
+            failures = push(list = failures, failure = Failure.MissingRequired { key = entry.key })
         }
     }
     failures

@@ -101,30 +101,19 @@ The `low` and `high` parameters are captured by the inner closure;
 each `int_in_range(low = 1, high = 256)` call returns a fresh
 validator with that specific range baked in.
 
-## Things the sample reveals
+## Earlier friction, now resolved
 
-Several emitter quirks in the IIFE-wrapping path that all share one
-root cause — a `match` or `if` whose body the emitter wraps in an
-`((Func<...>)(() => { ... }))()` IIFE loses some of the type / pattern
-context the surrounding code provides. Three concrete instances
-worked around in this sample, all pre-existing and noted in the
-queue:
+The first version of this sample carried three workaround comments
+for emitter quirks (side-effect-only `if`/`match` inside for-each
+emitting as expression-statement, `Result` patterns inside
+IIFE-wrapped match arms missing their `ResultOk`/`ResultErr` rewrite,
+and generic record-literal type args lost in IIFE contexts). The
+underlying issues — block-trailing-expression-as-statement routing
+and pattern-binding type inference for `Some`/`Ok`/`Err` against
+`Option<T>`/`Result<T, E>` — have been fixed. The workarounds are
+gone and the sample reads naturally.
 
-- A side-effect-only `if` or `match` inside a for-each loop body
-  emits as a ternary expression-statement, hitting C# CS0201.
-  Workaround: lift the conditional into expression position
-  (`failures = if cond { ... } else { failures }`) so the value
-  flows out instead of the assignment happening inside.
-- `Result` patterns (`Ok(_)`, `Err(reason)`) inside an IIFE-wrapped
-  match arm body emit without their `ResultOk` / `ResultErr`
-  rewrite, breaking the C# pattern syntax. Workaround: bind the
-  scrutinee to a typed `let` first so the type is unambiguous.
-- Generic record literals (`Pair { left = ..., right = ... }`) in
-  some IIFE contexts emit `new Pair(...)` without the type-arg
-  list. Workaround in this sample: define a non-generic record
-  (`EnvLine`) for the parsed-line shape; the generic Pair record
-  goes unused.
-
-All three workarounds are local and don't compromise the lesson —
-but they're the same underlying emitter pass, and a focused fix
-would clear them in one shot.
+The `EnvLine` record stayed (rather than reverting to `Pair<String,
+String>`) because a named field per piece reads better at the use
+site than `pair.left` / `pair.right` — independent design choice,
+not a workaround.

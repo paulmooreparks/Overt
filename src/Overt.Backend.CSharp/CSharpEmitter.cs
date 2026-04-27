@@ -2245,6 +2245,15 @@ public sealed class CSharpEmitter
                 EmitBlockAsStatement(tx.Body);
                 break;
 
+            case UnitExpr:
+                // Unit literal in statement position is a no-op. Emit
+                // an empty statement so the surrounding shape (switch
+                // case body, etc.) still has *something* to terminate
+                // its block, but without `Unit.Value;` (CS0201) on the
+                // line.
+                _w.WriteLine(";");
+                break;
+
             // Everything else: just write the expression plus a trailing `;`. C# will
             // reject anything that isn't a valid statement-expression (calls, assignments,
             // increments, etc.) — that's the type checker's job later.
@@ -3142,8 +3151,15 @@ public sealed class CSharpEmitter
                 }
                 else
                 {
-                    EmitExpression(tail);
-                    _w.WriteLine(";");
+                    // Route the trailing expression through the
+                    // statement-position emit path. For an `if` or
+                    // `match` whose value is consumed by the surrounding
+                    // block-as-statement context (e.g., a for-each body
+                    // whose only expression is `match {...}`), this
+                    // emits a real C# if/switch statement instead of
+                    // an IIFE-wrapped expression-statement that would
+                    // trigger CS0201.
+                    EmitExpressionAsStatement(tail);
                 }
             }
         }
