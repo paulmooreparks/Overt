@@ -317,11 +317,12 @@ collections.
 | ✅ | `List.flat_map<T, U>(list: List<T>, f: fn(T) -> List<U>) -> List<U>` |
 | ✅ | `List.partition<T>(list: List<T>, predicate: fn(T) -> Bool) -> ListPartition<T>` |
 | ✅ | `record ListPartition<T> { matched: List<T>, unmatched: List<T> }` (returned by `List.partition`) |
-| ⏳ | `List.zip<T, U>(left: List<T>, right: List<U>) -> List<(T, U)>` (waits for tuple-type annotations or a `Pair` record) |
-| ⏳ | `List.unzip<T, U>(pairs: List<(T, U)>) -> (List<T>, List<U>)` (same gate) |
-| ⏳ | `List.flatten<T>(lists: List<List<T>>) -> List<T>` |
-| ⏳ | `List.sort_by<T>(list: List<T>, cmp: fn(T, T) -> Int) -> List<T>` |
-| ⏳ | `List.sort<T>(list: List<T>) -> List<T>` (requires generic ordering) |
+| ✅ | `record Pair<T, U> { left: T, right: U }` (universal 2-tuple container) |
+| ✅ | `List.zip<T, U>(left: List<T>, right: List<U>) -> List<Pair<T, U>>` (truncates to shorter) |
+| ✅ | `List.unzip<T, U>(pairs: List<Pair<T, U>>) -> Pair<List<T>, List<U>>` |
+| ✅ | `List.flatten<T>(lists: List<List<T>>) -> List<T>` |
+| ✅ | `List.sort_by<T>(list: List<T>, cmp: fn(T, T) -> Int) -> List<T>` (stable; libc cmp convention) |
+| ⏳ | `List.sort<T>(list: List<T>) -> List<T>` (requires generic ordering primitive) |
 
 ### Cleanup
 

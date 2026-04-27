@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -376,6 +377,84 @@ func ListFlatMap[T, U any](list List[T], f func(T) List[U]) List[U] {
 type ListPartitionResult[T any] struct {
 	Matched   List[T]
 	Unmatched List[T]
+}
+
+// Pair is the universal two-things container — the working form of a
+// 2-tuple in Overt source until tuple-type annotations land. Used as
+// the element type for ListZip and as the return shape for ListUnzip.
+type Pair[T, U any] struct {
+	Left  T
+	Right U
+}
+
+// ListZip pairs corresponding elements from left and right; truncates
+// to the shorter when lengths disagree.
+func ListZip[T, U any](left List[T], right List[U]) List[Pair[T, U]] {
+	n := len(left.Items)
+	if len(right.Items) < n {
+		n = len(right.Items)
+	}
+	if n == 0 {
+		return List[Pair[T, U]]{Items: []Pair[T, U]{}}
+	}
+	out := make([]Pair[T, U], n)
+	for i := 0; i < n; i++ {
+		out[i] = Pair[T, U]{Left: left.Items[i], Right: right.Items[i]}
+	}
+	return List[Pair[T, U]]{Items: out}
+}
+
+// ListUnzip splits a list of pairs into parallel left and right lists
+// returned as a Pair<List<T>, List<U>>.
+func ListUnzip[T, U any](pairs List[Pair[T, U]]) Pair[List[T], List[U]] {
+	n := len(pairs.Items)
+	if n == 0 {
+		return Pair[List[T], List[U]]{
+			Left:  List[T]{Items: []T{}},
+			Right: List[U]{Items: []U{}},
+		}
+	}
+	lefts := make([]T, n)
+	rights := make([]U, n)
+	for i, p := range pairs.Items {
+		lefts[i] = p.Left
+		rights[i] = p.Right
+	}
+	return Pair[List[T], List[U]]{
+		Left:  List[T]{Items: lefts},
+		Right: List[U]{Items: rights},
+	}
+}
+
+// ListFlatten concatenates a list of lists into one list. Inner-list
+// order preserved.
+func ListFlatten[T any](lists List[List[T]]) List[T] {
+	total := 0
+	for _, inner := range lists.Items {
+		total += len(inner.Items)
+	}
+	if total == 0 {
+		return List[T]{Items: []T{}}
+	}
+	out := make([]T, 0, total)
+	for _, inner := range lists.Items {
+		out = append(out, inner.Items...)
+	}
+	return List[T]{Items: out}
+}
+
+// ListSortBy stable-sorts list by cmp. cmp returns negative / zero /
+// positive (libc convention). Stable: ties retain input order.
+func ListSortBy[T any](list List[T], cmp func(T, T) int) List[T] {
+	if len(list.Items) <= 1 {
+		return list
+	}
+	out := make([]T, len(list.Items))
+	copy(out, list.Items)
+	sort.SliceStable(out, func(i, j int) bool {
+		return cmp(out[i], out[j]) < 0
+	})
+	return List[T]{Items: out}
 }
 
 // ListPartition splits list into (matched, unmatched) by predicate,

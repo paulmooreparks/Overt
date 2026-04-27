@@ -1191,6 +1191,8 @@ public static class GoEmitter
                 => $"overt.MapEntry[{LowerType(met.TypeArguments[0])}, {LowerType(met.TypeArguments[1])}]",
             NamedType { Name: "ListPartition" } lpt when lpt.TypeArguments.Length == 1
                 => $"overt.{StdlibGoRuntimeTypeName("ListPartition")}[{LowerType(lpt.TypeArguments[0])}]",
+            NamedType { Name: "Pair" } pt when pt.TypeArguments.Length == 2
+                => $"overt.Pair[{LowerType(pt.TypeArguments[0])}, {LowerType(pt.TypeArguments[1])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
             NamedType { Name: "RefinementError" } => "overt.RefinementError",
@@ -3029,6 +3031,7 @@ public static class GoEmitter
             "ProcessOutput" => true,
             "MapEntry" => true,
             "ListPartition" => true,
+            "Pair" => true,
             _ => false,
         };
 

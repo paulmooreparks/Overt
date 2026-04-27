@@ -132,6 +132,10 @@ public static class Stdlib
         b["List.contains"] = ImmutableArray.Create("list", "value");
         b["List.flat_map"] = ImmutableArray.Create("list", "f");
         b["List.partition"] = ImmutableArray.Create("list", "predicate");
+        b["List.zip"] = ImmutableArray.Create("left", "right");
+        b["List.unzip"] = ImmutableArray.Create("pairs");
+        b["List.flatten"] = ImmutableArray.Create("lists");
+        b["List.sort_by"] = ImmutableArray.Create("list", "cmp");
         b["all"] = ImmutableArray.Create("list", "predicate");
         b["any"] = ImmutableArray.Create("list", "predicate");
         return b.ToImmutable();
@@ -191,6 +195,7 @@ public static class Stdlib
         e.Add(Type("ProcessOutput")); // record returned by Process.run
         e.Add(Type("MapEntry"));  // record returned by Map.entries
         e.Add(Type("ListPartition")); // record returned by List.partition
+        e.Add(Type("Pair")); // universal 2-tuple container; used by List.zip / List.unzip
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -533,6 +538,51 @@ public static class Stdlib
                 FnType(new TypeRef[] { TV("T") }, PrimitiveType.Bool),
             },
             ret: Generic("ListPartition", TV("T"))));
+
+        // List.zip<T, U>(left: List<T>, right: List<U>) -> List<Pair<T, U>>
+        // Truncates to the shorter list — Haskell / Rust convention.
+        e.Add(Fn("List.zip",
+            typeParams: new[] { "T", "U" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                Generic("List", TV("U")),
+            },
+            ret: Generic("List", Generic("Pair", TV("T"), TV("U")))));
+
+        // List.unzip<T, U>(pairs: List<Pair<T, U>>) -> Pair<List<T>, List<U>>
+        // Inverse of zip; returns parallel lefts and rights as a Pair.
+        e.Add(Fn("List.unzip",
+            typeParams: new[] { "T", "U" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", Generic("Pair", TV("T"), TV("U"))),
+            },
+            ret: Generic("Pair", Generic("List", TV("T")), Generic("List", TV("U")))));
+
+        // List.flatten<T>(lists: List<List<T>>) -> List<T>
+        // Concatenates inner lists in order.
+        e.Add(Fn("List.flatten",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", Generic("List", TV("T"))),
+            },
+            ret: Generic("List", TV("T"))));
+
+        // List.sort_by<T>(list: List<T>, cmp: fn(T, T) -> Int) -> List<T>
+        // Stable sort by comparator. cmp returns negative / zero / positive
+        // (libc qsort convention); ties retain input order. The plain
+        // sort()-without-comparator is gated on a generic-ordering primitive
+        // the language doesn't have yet.
+        e.Add(Fn("List.sort_by",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                FnType(new TypeRef[] { TV("T"), TV("T") }, PrimitiveType.Int),
+            },
+            ret: Generic("List", TV("T"))));
 
         // String.split(s: String, sep: String) -> List<String>
         // Empty separator throws; adjacent separators yield empty segments

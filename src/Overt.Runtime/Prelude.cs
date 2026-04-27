@@ -398,6 +398,76 @@ public static class List
         return new List<U>(builder.ToImmutable());
     }
 
+    // Pair corresponding elements from two lists; truncate to the shorter
+    // when lengths disagree (Haskell / Rust convention; no error). Returns
+    // List<Pair<T, U>>.
+    public static List<Pair<T, U>> zip<T, U>(List<T> left, List<U> right)
+    {
+        var n = System.Math.Min(left.Items.Length, right.Items.Length);
+        if (n == 0) return new List<Pair<T, U>>(System.Collections.Immutable.ImmutableArray<Pair<T, U>>.Empty);
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<Pair<T, U>>(n);
+        for (var i = 0; i < n; i++)
+        {
+            builder.Add(new Pair<T, U>(left.Items[i], right.Items[i]));
+        }
+        return new List<Pair<T, U>>(builder.MoveToImmutable());
+    }
+
+    // Inverse of zip: takes a list of pairs and returns parallel lefts /
+    // rights as a Pair<List<T>, List<U>>.
+    public static Pair<List<T>, List<U>> unzip<T, U>(List<Pair<T, U>> pairs)
+    {
+        var n = pairs.Items.Length;
+        if (n == 0)
+        {
+            return new Pair<List<T>, List<U>>(
+                new List<T>(System.Collections.Immutable.ImmutableArray<T>.Empty),
+                new List<U>(System.Collections.Immutable.ImmutableArray<U>.Empty));
+        }
+        var lefts = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>(n);
+        var rights = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(n);
+        foreach (var p in pairs.Items)
+        {
+            lefts.Add(p.left);
+            rights.Add(p.right);
+        }
+        return new Pair<List<T>, List<U>>(
+            new List<T>(lefts.MoveToImmutable()),
+            new List<U>(rights.MoveToImmutable()));
+    }
+
+    // Flatten a list of lists into a single list, preserving inner-list
+    // order. Equivalent to fold-with-concat but with a tighter loop.
+    public static List<T> flatten<T>(List<List<T>> lists)
+    {
+        var total = 0;
+        foreach (var inner in lists.Items) total += inner.Items.Length;
+        if (total == 0) return new List<T>(System.Collections.Immutable.ImmutableArray<T>.Empty);
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>(total);
+        foreach (var inner in lists.Items) builder.AddRange(inner.Items);
+        return new List<T>(builder.MoveToImmutable());
+    }
+
+    // Stable sort by a comparator. cmp returns negative / zero / positive
+    // (libc qsort convention); ties retain input order. The underlying
+    // .NET sort is OrderBy, which is stable.
+    public static List<T> sort_by<T>(List<T> list, Func<T, T, int> cmp)
+    {
+        if (list.Items.Length <= 1) return list;
+        var arr = list.Items.ToArray();
+        // Stable sort: use a tagged-with-index OrderBy.
+        var tagged = arr
+            .Select((v, i) => (v, i))
+            .OrderBy(t => t, System.Collections.Generic.Comparer<(T v, int i)>.Create((a, b) =>
+            {
+                var c = cmp(a.v, b.v);
+                return c != 0 ? c : a.i.CompareTo(b.i);
+            }))
+            .Select(t => t.v)
+            .ToArray();
+        return new List<T>(System.Collections.Immutable.ImmutableArray.Create(tagged));
+    }
+
     // Split into (matching, non-matching) — preserves order within each
     // partition. Returns a Pair record; tuple-shaped return waits on
     // tuple-type annotations.
@@ -423,6 +493,15 @@ public static class List
 /// (same shape as <see cref="MapEntry{K, V}"/>).
 /// </summary>
 public sealed record ListPartition<T>(List<T> matched, List<T> unmatched);
+
+/// <summary>
+/// Universal "two things" container — the working form of a 2-tuple
+/// until tuple-type annotations land in Overt source. Used as the
+/// element type for <see cref="List.zip{T, U}"/> and as the return
+/// shape for <see cref="List.unzip{T, U}"/>. Field names use the
+/// Overt-canonical lowercase.
+/// </summary>
+public sealed record Pair<T, U>(T left, U right);
 
 /// <summary>
 /// Non-generic namespace companion for <c>String.X</c> module-qualified
