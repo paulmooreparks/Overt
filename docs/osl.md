@@ -145,14 +145,22 @@ Foundational types and the modules they live in:
 - [`List<T>`](#list) — immutable sequence
 - [`Map<K, V>`](#map) — immutable key→value map
 - [`Set<T>`](#set) — immutable membership
+- [`Bytes`](#bytes) — immutable byte sequence
 - [`String`](#string) — text helpers
 - [`Int`](#int) / [`Float`](#float) — numeric companions
-- [`File`](#file) / [`Path`](#path) — filesystem
+- [`Console`](#console) — stdin / stdout / stderr
+- [`File`](#file) / [`Directory`](#directory) / [`Path`](#path) — filesystem
 - [`Process`](#process) — subprocess execution
-- [`Trace`](#trace) — causal tracing
+- [`Trace`](#trace) / [`Log`](#log) — causal tracing and leveled logging
 
 Out-of-scope categories: HTTP, JSON, regex, crypto, sockets, db drivers.
-See *What stays out, by design* above.
+See *What stays out, by design* above. Date / Time also stays out for
+v1 — see [`Time`](#time-deferred) below.
+
+The shape of foundational File and Console I/O was sanity-checked against
+C's `stdio.h` / `unistd.h` / `sys/stat.h`. C's compactness (~30 fns covers
+nearly everything outside formatted-I/O variants) is a useful upper bound:
+where C ships a primitive we don't, that's a flag to look at the gap.
 
 ---
 
@@ -403,18 +411,121 @@ programs don't.
 
 ---
 
+## `Console`
+
+Process-level stdin / stdout / stderr. The unqualified prelude forms
+(`println`, `eprintln`, `args`) are kept for ergonomics, not folded into
+this namespace; programs reach for them constantly enough that the
+qualification feels like noise.
+
+| Status | Item |
+| --- | --- |
+| ✅ | `println(line: String) !{io} -> Result<Unit, IoError>` (writes line + `\n` to stdout) |
+| ✅ | `eprintln(line: String) !{io} -> Result<Unit, IoError>` (writes line + `\n` to stderr) |
+| ✅ | `args() !{io} -> List<String>` |
+| ⏳ | `print(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
+| ⏳ | `eprint(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
+| ⏳ | `read_line() !{io} -> Result<Option<String>, IoError>` (None at EOF) |
+| ⏳ | `read_to_end() !{io} -> Result<String, IoError>` (consume all of stdin) |
+
+What stays out of foundational: ANSI color codes, terminal-size detection,
+raw-mode keyboard input, cursor positioning. These are domain-specific
+(interactive TUIs, fancy CLIs) and the platform conventions diverge.
+Programs that want color emit raw escape strings, which work on modern
+Win/macOS/Linux terminals.
+
+---
+
+## `Bytes`
+
+Immutable sequence of octets. Foundational because programs that read
+binary files, hash data, or interoperate with byte-shaped protocols can't
+operate at the text-only ceiling.
+
+| Status | Item |
+| --- | --- |
+| ⏳ | `Bytes` type (opaque sequence of u8) |
+| ⏳ | `Bytes.empty() -> Bytes` |
+| ⏳ | `Bytes.from_list(list: List<Int>) -> Bytes` (each Int must be 0..255) |
+| ⏳ | `Bytes.size(b: Bytes) -> Int` |
+| ⏳ | `Bytes.at(b: Bytes, index: Int) -> Int` (panics out-of-range) |
+| ⏳ | `Bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` |
+| ⏳ | `Bytes.concat(left: Bytes, right: Bytes) -> Bytes` |
+| ⏳ | `Bytes.from_utf8(s: String) -> Bytes` |
+| ⏳ | `Bytes.to_utf8(b: Bytes) -> Result<String, IoError>` (Err on invalid UTF-8) |
+
+`Bytes.at` returns `Int` rather than a separate `Byte` primitive — every
+operation that wants a single byte uses Int 0..255, and programs that
+care can spell that as a refinement type:
+
+```overt
+type Byte = Int where 0 <= self && self <= 255
+```
+
+Lowers to `byte[]` / `ImmutableArray<byte>` on .NET and `[]byte` on Go.
+The "intermediate Byte primitive" alternative was rejected because it
+duplicates a refinement type the language already supports.
+
+---
+
 ## `File`
 
 Filesystem operations. All operations carry `!{io}`.
+
+The shape borrows from C's `stdio.h` (compact verb set, path-based) plus
+the universally-shipped extensions (read_lines, append, copy, move) that
+every modern stdlib has because the C-style "open / loop / close" is too
+verbose for the common cases.
 
 | Status | Item |
 | --- | --- |
 | ✅ | `File.read_to_string(path: String) !{io} -> Result<String, IoError>` |
 | ✅ | `File.write_all_text(path: String, contents: String) !{io} -> Result<Unit, IoError>` |
 | ✅ | `File.exists(path: String) !{io} -> Bool` |
+| ⏳ | `File.read_lines(path: String) !{io} -> Result<List<String>, IoError>` |
+| ⏳ | `File.append_text(path: String, contents: String) !{io} -> Result<Unit, IoError>` |
+| ⏳ | `File.delete(path: String) !{io} -> Result<Unit, IoError>` (= C `remove`) |
+| ⏳ | `File.size(path: String) !{io} -> Result<Int, IoError>` |
+| ⏳ | `File.move(from: String, to: String) !{io} -> Result<Unit, IoError>` (= C `rename`; atomic where the host supports it) |
+| ⏳ | `File.copy(from: String, to: String) !{io} -> Result<Unit, IoError>` |
+| ⏳ | `File.read_bytes(path: String) !{io} -> Result<Bytes, IoError>` |
+| ⏳ | `File.write_bytes(path: String, data: Bytes) !{io} -> Result<Unit, IoError>` |
 
-UTF-8 throughout. Default file mode for writes is 0644 (matching .NET
-WriteAllText default).
+UTF-8 throughout for text operations. Default file mode for writes is
+0644 (matching .NET WriteAllText default).
+
+What stays out of foundational, with C-stdlib parallels for context:
+- **Streams** (`fopen`/`fread`/`fclose`-style opaque handles). Everything
+  in the table above is path-based one-shot. Streaming I/O is queued in
+  `## Candidates` because real programs will need it (see *Streams*
+  there) and we want the design pass settled before the implementation.
+- **`stat`-shape `FileInfo`** (size + mtime + permissions + is_dir as one
+  record). Useful, but pulls Time in. Foundational `File.size` covers the
+  common case; the rest waits for Time.
+- **File watching, atomic-write helpers, file locks, symlinks, mmap.**
+  Real domains in their own right.
+
+---
+
+## `Directory`
+
+Filesystem directory operations. All carry `!{io}`.
+
+| Status | Item |
+| --- | --- |
+| ⏳ | `Directory.exists(path: String) !{io} -> Bool` |
+| ⏳ | `Directory.create(path: String) !{io} -> Result<Unit, IoError>` (creates parents as needed) |
+| ⏳ | `Directory.list(path: String) !{io} -> Result<List<String>, IoError>` (entry names, not full paths) |
+| ⏳ | `Directory.delete(path: String, recursive: Bool) !{io} -> Result<Unit, IoError>` |
+
+The recursive-flag form of `delete` is a deliberate single-method choice
+over Rust's `remove_dir` / `remove_dir_all` split; one fn with the
+predicate is more Overt-shaped (one canonical name, predicate as a
+named arg).
+
+`list` returns entry *names*, not full paths. Callers that want full
+paths use `Path.join(parent = dir, child = name)` per entry. This avoids
+a second variant fn (`list_paths` etc.) at the cost of a one-line loop.
 
 ---
 
@@ -429,6 +540,8 @@ effect row.
 | ✅ | `Path.parent(path: String) -> Option<String>` |
 | ✅ | `Path.file_name(path: String) -> Option<String>` |
 | ✅ | `Path.extension(path: String) -> Option<String>` |
+| ⏳ | `Path.with_extension(path: String, ext: String) -> String` (replace extension; `.cs` ↔ `.ov`) |
+| ⏳ | `Path.is_absolute(path: String) -> Bool` |
 
 Platform-aware separator (`/` on Unix, `\` on Windows) per the host's
 native conventions.
@@ -453,15 +566,86 @@ land via rule of three when programs need them.
 
 ## `Trace`
 
+The trace block (`trace { ... }`) is language-level; the runtime is
+minimal. `Trace.subscribe` registers a consumer for events emitted by
+trace blocks *and* by [`Log`](#log) calls — they share the channel.
+
 | Status | Item |
 | --- | --- |
-| ✅ | `record TraceEvent { description: String }` |
+| 🚧 | `enum LogLevel { Debug, Info, Warn, Error }` (planned, replaces description-only TraceEvent) |
+| 🚧 | `record TraceEvent { level: LogLevel, message: String }` (currently `{ description: String }`; planned reshape) |
 | ✅ | `Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ())` |
 
-The trace block (`trace { ... }`) is language-level. The runtime is
-minimal today — events aren't actually emitted by the GoEmitter, and the
-C# emitter stubs them. Real instrumentation lands when a sample app needs
-it.
+**No timestamp field.** Time deliberately stays out of foundational (see
+[Time (deferred)](#time-deferred) below). Consumers that need timestamps
+either capture them at receive-time or wait until `Time` graduates.
+
+When the program-default consumer runs (no `Trace.subscribe` called),
+output is `[LEVEL] message` to stderr — no timestamps. Programs that
+want richer formatting register a consumer.
+
+---
+
+## `Log`
+
+Leveled logging. Folds into the Trace channel: `Log.info(msg)` emits a
+`TraceEvent { level: LogLevel.Info, message: msg }`. Subscribers see
+both `trace { ... }` block events and explicit log calls through one
+mechanism.
+
+| Status | Item |
+| --- | --- |
+| ⏳ | `Log.debug(message: String) !{io} -> ()` |
+| ⏳ | `Log.info(message: String) !{io} -> ()` |
+| ⏳ | `Log.warn(message: String) !{io} -> ()` |
+| ⏳ | `Log.error(message: String) !{io} -> ()` |
+
+Why folded into Trace rather than independent: programs gain one
+consumer registry, one filtering model, one way to silence output.
+Causal tracing is a real Overt distinctive (see README); making logging
+its consumer-friendly view is what makes the distinctive earn its keep.
+
+What stays out of foundational:
+- **Structured key-value attributes** (Serilog's LogContext, OpenTelemetry
+  attributes). May happen via `attrs: Map<String, String>` on TraceEvent
+  once Map operations are foundational; speculative.
+- **Sinks for syslog, journald, OTLP, Stackdriver.** Domain. FFI per host.
+- **Filtering / routing rules.** The subscriber implements whatever it
+  wants; we don't ship filtering machinery.
+
+Failure mode to watch: a buggy subscriber that throws / panics drops
+events. The default-fallback consumer should write to stderr with a
+warning when a subscriber fails, so logs don't silently disappear.
+
+---
+
+## Time (deferred)
+
+Time and Date are *intentionally* not in v1's foundational set.
+
+The pragmatic version of getting Time right is to refuse to do Date.
+Calendars, timezones, DST transitions, leap seconds, calendar arithmetic
+— every one is a tar pit, and the languages that try to solve them
+produce surfaces with 30+ types and decades of regret (Java pre-
+`java.time`, Python's `datetime` + `pytz` + `zoneinfo`, JavaScript's
+`Date`). Until a sample app convinces us we need it, programs that want
+date / time semantics use FFI (`extern "csharp" use "System.DateTime..."`
+or `extern "go" use "time"`). The host ecosystems handle it well.
+
+When (if) Time graduates via rule of three, the constrained surface I'd
+propose:
+
+- **Monotonic Instant only.** Opaque type. No serialization, no parsing,
+  no calendar interpretation. Suitable for timing, ordering, durations.
+- **Duration.** Diff of two Instants. Plus / minus / as-millis / as-seconds
+  / as-micros readouts.
+- **One escape hatch for human-readable timestamps.** `Clock.now_utc() ->
+  String` returns ISO 8601 UTC. No locale, no timezone conversion, no
+  format customization. That's the entire wall-clock surface.
+
+Anything beyond that — local time, calendar arithmetic, parsing user-
+entered dates, scheduling — stays FFI per host. We don't try to be a
+calendar library. Ever.
 
 ---
 
@@ -498,8 +682,78 @@ motivating programs. When citation count hits **3** and the four shape
 rules pass, status flips to ⏳ Planned and the next implementation
 session picks it up.
 
-*(No candidates currently logged. Future agents and contributors append
-blocks here as patterns emerge.)*
+### Streams (`Reader` / `Writer` opaque handles)
+
+**Status:** 🔮 deferred-but-anticipated (no program citations yet; design
+sketched here so the implementation can start from a refined draft when a
+program demands it)
+
+**Why this is an anticipated candidate, not just speculative:** the
+foundational `File.read_to_string` / `File.write_all_text` shape is
+fine for files that fit in memory. It breaks for the workloads Overt is
+actually intended to enable: log filters on multi-GB files, network
+servers handling unbounded input, build tools streaming through large
+artifacts. *"Read all into memory" is the teaching idiom; "stream from
+source to sink" is the working idiom.* When chat-relay Phase 2+
+or any pipeline-shaped sample app lands, this candidate gets cited.
+
+**Sketch:**
+
+```overt
+type FileReader  // opaque, stateful host handle
+type FileWriter  // opaque, stateful host handle
+
+// Open / close — callback form auto-closes on body return / error.
+File.with_open_read<R>(path: String, body: fn(FileReader) -> R) !{io} -> Result<R, IoError>
+File.with_open_write<R>(path: String, body: fn(FileWriter) -> R) !{io} -> Result<R, IoError>
+File.with_open_append<R>(path: String, body: fn(FileWriter) -> R) !{io} -> Result<R, IoError>
+
+// Read primitives.
+Reader.read_line(reader: FileReader) !{io} -> Result<Option<String>, IoError>  // None at EOF
+Reader.read_block(reader: FileReader, max_bytes: Int) !{io} -> Result<Bytes, IoError>  // empty Bytes at EOF
+
+// Write primitives.
+Writer.write(writer: FileWriter, data: Bytes) !{io} -> Result<Int, IoError>  // bytes actually written
+Writer.write_string(writer: FileWriter, s: String) !{io} -> Result<Unit, IoError>
+Writer.flush(writer: FileWriter) !{io} -> Result<Unit, IoError>
+```
+
+**Open design questions:**
+
+1. **State without mutation.** `FileReader` is stateful by nature
+   (position, error state, possibly a buffer). Overt's "no shared
+   mutable state" rule needs a principled exception. The pragmatic
+   answer is (a) make the stream an opaque host-managed type that the
+   language doesn't promise immutability for. We already do this for
+   `ProcessOutput`'s underlying buffer.
+2. **Close without RAII.** Overt has no destructors. The `with_open_*`
+   callback form auto-closes on body return *or* error. Considered
+   alternative: explicit `Reader.close` users must remember to call.
+   Rejected: error-prone, leaks on early return.
+3. **Iteration shape.** `for line in reader { ... }` reads naturally
+   but requires Reader to participate in whatever iteration protocol
+   Overt eventually has. Without that protocol, callers loop manually:
+   `loop { match Reader.read_line(reader) { Some(line) => ..., None
+   => break } }`. Acceptable v1; iteration polish lands later.
+4. **Bytes-buffer vs. fill-caller-buffer.** C's `read(buf, n)` mutates
+   a caller-owned buffer. Overt-shape says read returns a *new* `Bytes`.
+   Less efficient for huge transfers; matches the language's semantics.
+   Most users won't notice; perf-sensitive users use FFI. Ship return-
+   new and revisit if benchmarks demand otherwise.
+5. **`Network.with_open_*` parallel.** Server / client sockets eventually
+   need the same shape. The design here should generalize so a future
+   `Network` module reuses `Reader` / `Writer` rather than introducing
+   its own.
+6. **Async streams.** `Reader.read_line_async(reader) !{io, async} ->
+   Task<Result<...>>` for non-blocking I/O. Out of scope for the v1
+   sketch; revisit when chat-relay Phase 2 demands it.
+
+**Notes:**
+- Three-citation threshold still applies. This block exists so when
+  citations come, we don't start from a blank page.
+- The candidate pre-resolves the open questions enough that an
+  implementation could start; the citation list documents which
+  programs justified each design decision when the time comes.
 
 ### Template
 
@@ -557,6 +811,7 @@ disposition; the queue exists so we don't ship the regrets.
 | --- | --- | --- |
 | `len<T>(list)` | Remove | Duplicate of `size`. Formatter rewrites at fix time. |
 | Effect row on `File.exists` | Keep `!{io}` | The filesystem state can change between calls; `!{io}` declares the dependency. Confirmed correct after review. |
+| `TraceEvent { description }` shape | Reshape to `{ level, message }` | Folds Log into the same channel; ships with `LogLevel` enum and the `Log` namespace. |
 
 ---
 
