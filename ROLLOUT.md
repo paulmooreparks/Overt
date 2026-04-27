@@ -44,13 +44,10 @@ Dependencies flow top-down: each phase's exit criteria gate the next.
 ### Phase 1: Foundation (repo-only, no external surface)
 
 Deliverables:
-- [ ] **Refresh `README.md`.** Not a greenfield write; a tightening pass
-  on the existing 230-line file. Concrete edits: trim the leading status
-  blockquote, fix stale test count (file says 354; currently 389), drop
-  the unfinished Compiler Explorer sentence, lead with the thesis instead
-  of status, add a "Quick try" section near the top once the global-tool
-  install path works. Target: a visitor in under a minute knows whether
-  to click deeper.
+- [x] **`README.md` shape.** Leads with the thesis, has a Quick try, no
+  filler sections. Avoid stale-prone fillers (test counts, OV-code
+  catalogs, status snapshots) — badges and per-section docs carry
+  that.
 - [ ] `docs/why-overt.md`: the thesis. "Languages were designed for
   humans; AI agents are now primary authors, so what changes?" Names
   the tradeoffs (redundant annotations, effect rows, no shadowing,
@@ -60,12 +57,14 @@ Deliverables:
 - [ ] One real sample application under `samples/`. Not an isolated
   feature demo (examples/ already plays that role), but a small
   end-to-end CLI tool written in Overt. Candidates: `json-flatten`,
-  `config-validate`, `log-summarize`. Pick the one most agent-friendly
-  to write.
+  `config-validate`, `log-summarize`. `samples/config-validate/` is
+  partly built; finish or rewrite in light of the 0.2 stdlib (Bytes,
+  File, Directory, Path, Process, Log, expanded List / String / Map).
 - [ ] `overt` CLI installable via `dotnet tool install --global`.
   Prerequisite for anyone wanting to "try it" without cloning the repo.
-  Requires packing `Overt.Cli` as a tool package and wiring the
-  `dotnet-tool` manifest.
+  Packaging is in place (the `OvertCliTool` test pack/installs locally
+  and runs end-to-end); remaining work is the nuget.org publish, which
+  is gated behind Phase 2.
 
 Exit criteria: someone can land on the repo, read the README, skim
 the thesis, install `overt` globally, build the sample app, and form
