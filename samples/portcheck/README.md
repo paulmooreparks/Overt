@@ -34,6 +34,12 @@ write a real CLI around.
    Bool)` — anonymous record at the result site; no top-level
    decl per ad-hoc shape.
 
+5. **`par_map_async` for parallel fan-out.** The callback declares
+   `-> Task<Result<U, E>>`; the body calls an async fn without
+   `.await`, so the Task value flows through to `Task.WhenAll` in
+   the runtime. Total wall time is roughly the slowest probe, not
+   the sum.
+
 ## Running
 
 ```sh
@@ -65,15 +71,6 @@ overt run portcheck.ov localhost 8080,8443,5432 || exit 1
 ```
 
 ## What this sample doesn't do
-
-**Parallel scanning.** The probes run sequentially, awaiting each
-in turn. par_map's runtime expects a sync callback (`Func<T,
-Result<U, E>>`); an async closure compiles to `Func<T,
-Task<Result<U, E>>>`, which the sync signature can't accept.
-Adding a `par_map_async` variant would fan out the awaits via
-`Task.WhenAll` — separate stdlib op, queued. For small port sets
-the total time is dominated by the slowest probe anyway, so the
-sequential cost is bearable.
 
 **Per-connection timeout.** `ConnectAsync` against a firewalled
 host that drops SYN packets will hang for the OS default (~21s on

@@ -221,6 +221,42 @@ public static class Prelude
         return Ok(new List<U>(okBuilder.MoveToImmutable()));
     }
 
+    // par_map_async: fan-out with Task.WhenAll. The callback already produces
+    // a Task<Result<U, E>> (an Overt async fn called without `.await` evaluates
+    // to its host-side Task). We start every Task by invoking f(item), collect
+    // them, await all, then assemble the Result-of-list. Order is preserved by
+    // index, not by completion. First Err (by original index) short-circuits
+    // the assembled output. Empty list returns Ok(empty) without scheduling.
+    //
+    // Distinct from par_map in two ways: (1) f returns Task, so async work
+    // composes naturally via .await chains in the closure body; (2) we don't
+    // block the calling thread — the returned Task lets the caller's
+    // dispatcher reuse the thread for other work while connects/IO are in
+    // flight. par_map's Task.Run-then-WaitAll variant exists for sync
+    // callbacks where there's no Task to surface anyway.
+    public static async System.Threading.Tasks.Task<Result<List<U>, E>>
+        par_map_async<T, U, E>(List<T> list, Func<T, System.Threading.Tasks.Task<Result<U, E>>> f)
+    {
+        var items = list.Items;
+        if (items.Length == 0)
+            return Ok(new List<U>(System.Collections.Immutable.ImmutableArray<U>.Empty));
+
+        var tasks = new System.Threading.Tasks.Task<Result<U, E>>[items.Length];
+        for (int i = 0; i < items.Length; i++)
+        {
+            tasks[i] = f(items[i]);
+        }
+        var results = await System.Threading.Tasks.Task.WhenAll(tasks).ConfigureAwait(false);
+
+        var okBuilder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>(items.Length);
+        for (int i = 0; i < results.Length; i++)
+        {
+            if (results[i] is ResultErr<U, E> err) return Err<E>(err.Error);
+            okBuilder.Add(((ResultOk<U, E>)results[i]).Value);
+        }
+        return Ok(new List<U>(okBuilder.MoveToImmutable()));
+    }
+
     public static U fold<T, U>(List<T> list, U seed, Func<U, T, U> step)
     {
         var acc = seed;

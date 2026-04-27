@@ -186,6 +186,36 @@ public class EffectRowTests
         Assert.Contains("`inference`", d.Message);
     }
 
+    [Fact]
+    public void OV0310_InferenceEffectPropagatesThroughParMapAsync()
+    {
+        // par_map_async's `!{io, async, E}` callback row must propagate the
+        // effect variable the same way par_map does. classify carries
+        // `inference`; the caller declares all three; .await unwraps the
+        // returned Task. No diagnostic.
+        var r = Check(
+            "module t\n"
+            + "fn classify(s: String) !{io, async, inference} -> Result<Int, IoError> { Ok(0) }\n"
+            + "fn batch(xs: List<String>) !{io, async, inference} -> Result<List<Int>, IoError> "
+            + "{ par_map_async(list = xs, f = fn(s: String) !{io, async, inference} -> Task<Result<Int, IoError>> { classify(s = s) }).await }");
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == "OV0310");
+    }
+
+    [Fact]
+    public void OV0310_InferenceEffectHiddenThroughParMapAsync_FiresIfUndeclared()
+    {
+        // Same setup, caller drops `inference`. The closure carries it;
+        // par_map_async propagates through the callback's effect-row variable;
+        // caller's row must declare it.
+        var r = Check(
+            "module t\n"
+            + "fn classify(s: String) !{io, async, inference} -> Result<Int, IoError> { Ok(0) }\n"
+            + "fn batch(xs: List<String>) !{io, async} -> Result<List<Int>, IoError> "
+            + "{ par_map_async(list = xs, f = fn(s: String) !{io, async, inference} -> Task<Result<Int, IoError>> { classify(s = s) }).await }");
+        var d = Assert.Single(r.Diagnostics, x => x.Code == "OV0310");
+        Assert.Contains("`inference`", d.Message);
+    }
+
     // --------------------------------------------- smoke: examples stay clean
 
     [Theory]

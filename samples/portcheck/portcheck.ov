@@ -36,15 +36,14 @@ module portcheck
 //   - **Named multi-return for per-port results.**
 //     `(port: Port, open: Bool)` — anonymous record at the result
 //     site; no top-level decl per ad-hoc shape.
+//   - **`par_map_async` for parallel fan-out.** The callback declares
+//     `-> Task<Result<U, E>>` and the body calls an async fn without
+//     `.await`, so the Task surfaces as a value the runtime hands to
+//     `Task.WhenAll`. Total wall time is the slowest probe, not the
+//     sum.
 //
 // Limitations:
 //
-//   - **Sequential, not parallel.** par_map's runtime expects a sync
-//     callback (`Func<T, Result<U, E>>`); an async closure compiles
-//     to `Func<T, Task<Result<U, E>>>`, which the sync signature
-//     can't accept. Adding a `par_map_async` variant would fan out
-//     the awaits via `Task.WhenAll` — separate stdlib op, queued
-//     after this sample lands.
 //   - **No per-connection timeout.** ConnectAsync against a
 //     firewalled host that drops SYN packets will hang for the OS
 //     default (~21s on Windows). Best for localhost or cooperative
@@ -129,13 +128,14 @@ fn parse_spec(spec: String) -> Result<List<Port>, IoError> {
 // connection-launch failures (which the async-Result wrap surfaces
 // as IoError on the awaited Result) would propagate, but ConnectAsync
 // for a well-formed (host, port) doesn't really have a launch-failure
-// path — every error is a connect failure. So `probe` returns the
-// named tuple directly without a Result wrap.
-fn probe(host: String, port: Port) !{io, async} -> (port: Port, open: Bool) {
+// path — every error is a connect failure. The Result wrap is here so
+// the call composes with `par_map_async`, whose callback shape is
+// `fn(T) -> Task<Result<U, E>>`.
+fn probe(host: String, port: Port) !{io, async} -> Result<(port: Port, open: Bool), IoError> {
     let c: TcpClient = new_tcp_client()
     match try_connect_async(self = c, host = host, port = port).await {
-        Ok(_) => (port = port, open = true),
-        Err(_) => (port = port, open = false),
+        Ok(_) => Ok((port = port, open = true)),
+        Err(_) => Ok((port = port, open = false)),
     }
 }
 
@@ -166,16 +166,16 @@ fn main(args: List<String>) !{io, async} -> Result<(), IoError> {
     let host: String = List.at(list = args, index = 0)
     let spec: String = List.at(list = args, index = 1)
     let ports: List<Port> = parse_spec(spec = spec)?
-    // Sequential probe: walk the port list, await each probe in turn,
-    // accumulate. par_map can't host an async closure today (its
-    // callback shape is sync); the parallel variant is queued. For
-    // a small port set the total time is dominated by the slowest
-    // probe anyway — ~one connect-RTT per port.
-    let mut results: List<(port: Port, open: Bool)> = List<(port: Port, open: Bool)>.empty()
-    for each p in ports {
-        let r: (port: Port, open: Bool) = probe(host = host, port = p).await
-        results = List.concat(left = results, right = List.singleton(value = r))
-    }
+    // Parallel probe via par_map_async: the callback returns a Task by
+    // calling probe() without `.await`, the runtime fans out via
+    // Task.WhenAll, and we get back a Result<List<...>, IoError>. Total
+    // wall time is roughly the slowest connect-RTT instead of the sum.
+    let results: List<(port: Port, open: Bool)> = par_map_async(
+        list = ports,
+        f = fn(p: Port) !{io, async} -> Task<Result<(port: Port, open: Bool), IoError>> {
+            probe(host = host, port = p)
+        }
+    ).await?
     for each r in results {
         render(result = r)?
     }

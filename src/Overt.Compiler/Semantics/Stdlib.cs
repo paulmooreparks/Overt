@@ -352,6 +352,27 @@ public static class Stdlib
             ret: Generic("Result", Generic("List", TV("U")), TV("E")),
             effects: new[] { "io", "async" }));
 
+        // par_map_async<T, U, E>(list: List<T>, f: fn(T) !{io, async, E} -> Task<Result<U, E>>)
+        //     !{io, async} -> Task<Result<List<U>, E>>
+        // Async cousin of par_map: the callback returns a Task<Result<...>> (the
+        // shape an Overt async fn produces when called without `.await`), and the
+        // runtime fans out via Task.WhenAll instead of Task.Run + WaitAll. The
+        // declared return is explicitly `Task<...>` so callers compose with
+        // `.await` (par_map_async itself is a stdlib reg, not a user fn — there's
+        // no implicit async-wrap pass for it). Empty list returns Ok of empty.
+        e.Add(Fn("par_map_async",
+            typeParams: new[] { "T", "U", "E" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                new FunctionTypeRef(
+                    ImmutableArray.Create<TypeRef>(TV("T")),
+                    Generic("Task", Generic("Result", TV("U"), TV("E"))),
+                    ImmutableArray.Create("io", "async", "E")),
+            },
+            ret: Generic("Task", Generic("Result", Generic("List", TV("U")), TV("E"))),
+            effects: new[] { "io", "async" }));
+
         // try_map<T, U, E>(list: List<T>, f: fn(T) !{E} -> Result<U, E>) !{E} -> Result<List<U>, E>
         // Sequential, pure cousin of par_map — same shape, no io/async in the
         // effect row. Short-circuits on the first Err in iteration order.

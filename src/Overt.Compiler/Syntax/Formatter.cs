@@ -428,7 +428,9 @@ public static class Formatter
                 }
                 ctx.Write(")");
                 break;
-            default: ctx.Write("/* ? type */"); break;
+            default:
+                throw new InvalidOperationException(
+                    $"Formatter: unhandled TypeExpr variant `{t.GetType().Name}` — every variant needs a case here, otherwise round-trip silently emits a comment placeholder.");
         }
     }
 
@@ -660,8 +662,8 @@ public static class Formatter
                 ctx.Write("}");
                 break;
             default:
-                ctx.Write($"/* ? {e.GetType().Name} */");
-                break;
+                throw new InvalidOperationException(
+                    $"Formatter: unhandled Expression variant `{e.GetType().Name}` — every variant needs a case here, otherwise round-trip silently emits a comment placeholder.");
         }
     }
 

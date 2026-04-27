@@ -144,6 +144,71 @@ public class StdlibRuntimeTests
             $"expected parallel execution on a {System.Environment.ProcessorCount}-CPU host, saw only {threadIds.Count} thread(s)");
     }
 
+    // ------------------------------------------------------------ par_map_async
+
+    [Fact]
+    public async System.Threading.Tasks.Task ParMapAsync_SuccessPreservesOrder()
+    {
+        var input = L(1, 2, 3, 4, 5);
+        var result = await par_map_async<int, int, string>(
+            input,
+            async x => { await System.Threading.Tasks.Task.Yield(); return Ok(x * 10); });
+        var ok = Assert.IsType<ResultOk<Overt.Runtime.List<int>, string>>(result);
+        Assert.Equal(new[] { 10, 20, 30, 40, 50 }, ok.Value.Items);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task ParMapAsync_FirstErrByIndexWins()
+    {
+        var input = L(1, 2, 3, 4, 5);
+        var result = await par_map_async<int, int, string>(input, async x =>
+        {
+            await System.Threading.Tasks.Task.Yield();
+            if (x == 3) return Err<string>("three");
+            if (x == 4) return Err<string>("four");
+            return Ok(x);
+        });
+        var err = Assert.IsType<ResultErr<Overt.Runtime.List<int>, string>>(result);
+        Assert.Equal("three", err.Error);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task ParMapAsync_EmptyReturnsOkEmpty()
+    {
+        var result = await par_map_async<int, int, string>(
+            L<int>(),
+            async x => { await System.Threading.Tasks.Task.Yield(); return Ok(x); });
+        var ok = Assert.IsType<ResultOk<Overt.Runtime.List<int>, string>>(result);
+        Assert.Empty(ok.Value.Items);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task ParMapAsync_OverlapsCallbackTasks()
+    {
+        // The callback awaits a real delay; with WhenAll fan-out, total wall
+        // time should be close to one delay rather than the sum. We use a
+        // generous bound — cold thread-pool startup costs and CI noise can
+        // push the wall measurement up, but it should never reach
+        // count*delay if fan-out is working.
+        const int count = 8;
+        var delayMs = 100;
+        var input = L(Enumerable.Range(1, count).ToArray());
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await par_map_async<int, int, string>(input, async x =>
+        {
+            await System.Threading.Tasks.Task.Delay(delayMs);
+            return Ok(x);
+        });
+        sw.Stop();
+
+        var ok = Assert.IsType<ResultOk<Overt.Runtime.List<int>, string>>(result);
+        Assert.Equal(count, ok.Value.Items.Length);
+        var sequentialBudget = (count * delayMs) / 2;
+        Assert.True(sw.ElapsedMilliseconds < sequentialBudget,
+            $"par_map_async wall time was {sw.ElapsedMilliseconds}ms; sequential would be ~{count * delayMs}ms; expected fan-out under {sequentialBudget}ms");
+    }
+
     // -------------------------------------------------------------- Trace
 
     [Fact]
