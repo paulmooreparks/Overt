@@ -26,11 +26,10 @@ this one leaning on JSON FFI rather than line-oriented parsing:
    `MapChanged` variant, the compiler would refuse to build until
    render handled it.
 
-3. **Set-style list diff in pure Overt.** Without closures, `filter`
-   with a captured-context predicate isn't an option, so the diff
-   builds with `let mut` + a for-each loop + `List.contains` lookups
-   on the other side. Verbose, but the pattern is direct and the
-   call site reads as intent.
+3. **Set-style list diff with captured-state closures.** `list_added`
+   and `list_removed` use `filter` with an anonymous fn that captures
+   the other-side list to test membership. Two functions, four lines
+   each — the natural shape for "elements of A not in B."
 
 ## Running
 
@@ -59,19 +58,7 @@ Exit codes follow Unix `diff` / `cmp`:
 
 ## Things the sample reveals
 
-Two pieces of present-day friction worth flagging — both are
-workarounds in source today, and both are candidates for a future
-language pass:
-
-**No closures means filter can't capture context.** The natural way
-to compute "elements of `right` not in `left`" is
-`filter(list = right, predicate = (item) => !contains(left, item))`.
-Overt has no anonymous fns, so the predicate would have to be a
-top-level fn, which can't reference `left`. The workaround is
-explicit iteration with a free helper fn (`append_if_missing`); see
-`list_added` / `list_removed`. Same shape applies to `Set<T>`
-operations — the missing `Set.to_list` op has prevented using the
-nicer set-difference path.
+One piece of present-day friction worth flagging:
 
 **Non-numeric exit codes from `overt run`.** The runner exits 0 on
 `Ok`, 1 on `Err`, and prints `overt run: main returned Err: <err>`
@@ -79,3 +66,8 @@ on stderr. For a CLI that *uses* the differ-vs-match split as its
 contract (`diffconf` does, like `cmp`), the trailing stderr line is
 noise. A standalone-exe build via `Overt.Build` skips the runner
 and gets clean exit codes natively.
+
+The earlier version of this sample (before closures landed) had a
+"no closures means `filter` can't capture context" friction note
+here too. With closures shipped, that's gone — `list_added` and
+`list_removed` write naturally now.

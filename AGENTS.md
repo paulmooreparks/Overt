@@ -377,6 +377,48 @@ let v = {
 The last expression is the value. Statements before it must end with the
 previous newline or `;` (both accepted).
 
+### Anonymous fn (closure)
+
+Anonymous functions in expression position. Same syntax as a named fn
+declaration minus the name. Parameter types and return type are
+required; the body is a block.
+
+```overt
+let pred: fn(Int) -> Bool = fn(x: Int) -> Bool { x > 0 }
+
+let kept: List<Int> = filter(
+    list = xs,
+    predicate = fn(x: Int) -> Bool { x > 0 },
+)
+
+// Captures: free variables in the body resolve against the enclosing
+// scope. A captured value is whatever the binding refers to at the
+// point the closure is constructed.
+let threshold: Int = 5
+let big: List<Int> = filter(
+    list = xs,
+    predicate = fn(x: Int) -> Bool { x > threshold },
+)
+```
+
+Closures with effects declare them on the closure type:
+
+```overt
+let log_each: fn(String) !{io} -> () =
+    fn(s: String) !{io} -> () {
+        let _: Result<(), IoError> = println(s)
+        ()
+    }
+```
+
+Receiving fn parameters declare the row they accept; calling a closure
+adds its row to the caller's, same as any fn call. Today closures
+capture by reference at the host level (matches C# / Go defaults),
+which observationally equals capture-by-value for the immutable lets
+that account for nearly every closure use. A `let mut` reference
+flowing into a closure body would observe later mutations — known
+gap; see `docs/closures.md`.
+
 ---
 
 ## 7. Statements

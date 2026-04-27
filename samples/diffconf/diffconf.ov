@@ -21,9 +21,10 @@ module diffconf
 //     examples/csharp/json.ov.
 //   - A sum-typed diff result (`DiffEntry`) collected as a List, then
 //     rendered with exhaustive matching.
-//   - List-of-string diffing via `let mut` + `List.contains` + a
-//     for-each loop. Pure-Overt set-difference using only the 0.2
-//     stdlib surface.
+//   - Captured-state closures: `list_added` / `list_removed` use
+//     `filter` with an anonymous fn that closes over the other-side
+//     list. Two functions, four lines each — the natural shape for
+//     "elements of A not in B."
 
 // ---------------------------------------------------------------- types
 
@@ -59,36 +60,19 @@ extern "csharp" fn parse_config(text: String) -> Config
 // ---------------------------------------------------------------- list diff
 
 // Elements present in `right` but not in `left` — the "added" set in
-// before-vs-after vocabulary. Linear search (List.contains is O(n));
-// fine for the dozens-of-entries scale a config file lives at.
+// before-vs-after vocabulary. The closure captures `left` so filter
+// can apply the per-item membership test inline.
 fn list_added(left: List<String>, right: List<String>) -> List<String> {
-    let mut out: List<String> = List<String>.empty()
-    for each item in right {
-        out = append_if_missing(target = out, item = item, exclude = left)
-    }
-    out
+    filter(list = right, predicate = fn(item: String) -> Bool {
+        !List.contains(list = left, value = item)
+    })
 }
 
 // Elements present in `left` but not in `right`. Symmetric to list_added.
 fn list_removed(left: List<String>, right: List<String>) -> List<String> {
-    let mut out: List<String> = List<String>.empty()
-    for each item in left {
-        out = append_if_missing(target = out, item = item, exclude = right)
-    }
-    out
-}
-
-// Append `item` to `target` unless `exclude` already contains it. Pulled
-// out of the loops above so the `if` lives in expression position (the
-// fn's return type), which the emitter renders as a clean conditional
-// — an `if` with only a side-effect branch in the loop body itself
-// hits an expression-as-statement quirk under the C# emitter.
-fn append_if_missing(target: List<String>, item: String, exclude: List<String>) -> List<String> {
-    if List.contains(list = exclude, value = item) {
-        target
-    } else {
-        List.concat(left = target, right = List.singleton(value = item))
-    }
+    filter(list = left, predicate = fn(item: String) -> Bool {
+        !List.contains(list = right, value = item)
+    })
 }
 
 // ---------------------------------------------------------------- diff
