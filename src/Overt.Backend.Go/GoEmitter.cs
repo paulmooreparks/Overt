@@ -3534,7 +3534,7 @@ public static class GoEmitter
             // Allowlist gate: only known stdlib namespaces route here.
             // Unknown namespaces are most likely the user's own enum
             // (variant access) and shouldn't be camelized.
-            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Directory" or "Path" or "Process" or "Map" or "Set" or "Bytes"))
+            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Directory" or "Path" or "Process" or "Map" or "Set" or "Bytes" or "Log"))
             {
                 return null;
             }

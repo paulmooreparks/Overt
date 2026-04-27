@@ -642,8 +642,8 @@ trace blocks *and* by [`Log`](#log) calls — they share the channel.
 
 | Status | Item |
 | --- | --- |
-| 🚧 | `enum LogLevel { Debug, Info, Warn, Error }` (planned, replaces description-only TraceEvent) |
-| 🚧 | `record TraceEvent { level: LogLevel, message: String }` (currently `{ description: String }`; planned reshape) |
+| ✅ | `enum LogLevel { Debug, Info, Warn, Error }` |
+| ✅ | `record TraceEvent { level: LogLevel, message: String }` |
 | ✅ | `Trace.subscribe(consumer: fn(TraceEvent) !{io} -> ())` |
 
 **No timestamp field.** Time deliberately stays out of foundational (see
@@ -665,10 +665,10 @@ mechanism.
 
 | Status | Item |
 | --- | --- |
-| ⏳ | `Log.debug(message: String) !{io} -> ()` |
-| ⏳ | `Log.info(message: String) !{io} -> ()` |
-| ⏳ | `Log.warn(message: String) !{io} -> ()` |
-| ⏳ | `Log.error(message: String) !{io} -> ()` |
+| ✅ | `Log.debug(message: String) !{io} -> ()` |
+| ✅ | `Log.info(message: String) !{io} -> ()` |
+| ✅ | `Log.warn(message: String) !{io} -> ()` |
+| ✅ | `Log.error(message: String) !{io} -> ()` |
 
 Why folded into Trace rather than independent: programs gain one
 consumer registry, one filtering model, one way to silence output.
@@ -881,7 +881,6 @@ disposition; the queue exists so we don't ship the regrets.
 | --- | --- | --- |
 | `len<T>(list)` | Remove | Duplicate of `size`. Formatter rewrites at fix time. |
 | Effect row on `File.exists` | Keep `!{io}` | The filesystem state can change between calls; `!{io}` declares the dependency. Confirmed correct after review. |
-| `TraceEvent { description }` shape | Reshape to `{ level, message }` | Folds Log into the same channel; ships with `LogLevel` enum and the `Log` namespace. |
 
 ---
 

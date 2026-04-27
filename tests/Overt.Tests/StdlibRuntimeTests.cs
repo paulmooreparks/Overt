@@ -146,8 +146,6 @@ public class StdlibRuntimeTests
 
     // -------------------------------------------------------------- Trace
 
-    private sealed record TestEvent(string Tag) : TraceEvent;
-
     [Fact]
     public void Trace_SubscribeAndEmitDispatchesToSubscribers()
     {
@@ -155,12 +153,12 @@ public class StdlibRuntimeTests
         var seen = new System.Collections.Generic.List<string>();
         Prelude.Trace.subscribe(evt =>
         {
-            seen.Add(((TestEvent)evt).Tag);
+            seen.Add(evt.message);
             return Unit.Value;
         });
 
-        Prelude.Trace.emit(new TestEvent("one"));
-        Prelude.Trace.emit(new TestEvent("two"));
+        Prelude.Trace.emit(new TraceEvent(LogLevel.Info, "one"));
+        Prelude.Trace.emit(new TraceEvent(LogLevel.Info, "two"));
 
         Assert.Equal(new[] { "one", "two" }, seen);
     }
@@ -173,7 +171,7 @@ public class StdlibRuntimeTests
         Prelude.Trace.subscribe(evt => { order.Add("A"); return Unit.Value; });
         Prelude.Trace.subscribe(evt => { order.Add("B"); return Unit.Value; });
 
-        Prelude.Trace.emit(new TestEvent("x"));
+        Prelude.Trace.emit(new TraceEvent(LogLevel.Info, "x"));
 
         Assert.Equal(new[] { "A", "B" }, order);
     }
@@ -182,6 +180,15 @@ public class StdlibRuntimeTests
     public void Trace_EmitWithNoSubscribersIsNoop()
     {
         Prelude.Trace._reset();
-        Prelude.Trace.emit(new TestEvent("lonely"));
+        Prelude.Trace.emit(new TraceEvent(LogLevel.Info, "lonely"));
+    }
+
+    [Fact]
+    public void TraceEvent_LevelAndMessage_RoundTrip()
+    {
+        // Sanity check on the new shape: construction + field access.
+        var evt = new TraceEvent(LogLevel.Warn, "something fishy");
+        Assert.Equal(LogLevel.Warn, evt.level);
+        Assert.Equal("something fishy", evt.message);
     }
 }

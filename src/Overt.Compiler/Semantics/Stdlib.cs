@@ -90,6 +90,10 @@ public static class Stdlib
         b["Bytes.concat"] = ImmutableArray.Create("left", "right");
         b["Bytes.from_utf8"] = ImmutableArray.Create("s");
         b["Bytes.to_utf8"] = ImmutableArray.Create("b");
+        b["Log.debug"] = ImmutableArray.Create("message");
+        b["Log.info"] = ImmutableArray.Create("message");
+        b["Log.warn"] = ImmutableArray.Create("message");
+        b["Log.error"] = ImmutableArray.Create("message");
         b["Directory.exists"] = ImmutableArray.Create("path");
         b["Directory.create"] = ImmutableArray.Create("path");
         b["Directory.list"] = ImmutableArray.Create("path");
@@ -207,6 +211,8 @@ public static class Stdlib
         e.Add(Type("ListPartition")); // record returned by List.partition
         e.Add(Type("Pair")); // universal 2-tuple container; used by List.zip / List.unzip
         e.Add(Type("Bytes")); // immutable byte sequence; used by File.read_bytes / write_bytes
+        e.Add(Type("LogLevel")); // severity level on TraceEvent
+        e.Add(Type("Log")); // namespace shape for Log.debug / info / warn / error
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -1157,6 +1163,34 @@ public static class Stdlib
                     PrimitiveType.Unit,
                     ImmutableArray.Create("io")),
             },
+            ret: PrimitiveType.Unit,
+            effects: new[] { "io" }));
+
+        // ---- Log: leveled logging via the Trace channel ------------------------
+        // Log.{debug, info, warn, error}(message: String) !{io} -> ()
+        // emit a TraceEvent { level, message } into the Trace channel.
+        // Default consumer (installed lazily on first Log call) writes
+        // [LEVEL] message to stderr; user-registered subscribers run
+        // alongside it.
+
+        e.Add(Fn("Log.debug",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Unit,
+            effects: new[] { "io" }));
+        e.Add(Fn("Log.info",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Unit,
+            effects: new[] { "io" }));
+        e.Add(Fn("Log.warn",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Unit,
+            effects: new[] { "io" }));
+        e.Add(Fn("Log.error",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
             ret: PrimitiveType.Unit,
             effects: new[] { "io" }));
 
