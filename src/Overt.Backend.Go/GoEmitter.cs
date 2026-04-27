@@ -1183,6 +1183,12 @@ public static class GoEmitter
                 => $"overt.Option[{LowerType(nt.TypeArguments[0])}]",
             NamedType { Name: "List" } nt when nt.TypeArguments.Length == 1
                 => $"overt.List[{LowerType(nt.TypeArguments[0])}]",
+            NamedType { Name: "Map" } mt when mt.TypeArguments.Length == 2
+                => $"overt.Map[{LowerType(mt.TypeArguments[0])}, {LowerType(mt.TypeArguments[1])}]",
+            NamedType { Name: "Set" } st when st.TypeArguments.Length == 1
+                => $"overt.Set[{LowerType(st.TypeArguments[0])}]",
+            NamedType { Name: "MapEntry" } met when met.TypeArguments.Length == 2
+                => $"overt.MapEntry[{LowerType(met.TypeArguments[0])}, {LowerType(met.TypeArguments[1])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
             NamedType { Name: "RefinementError" } => "overt.RefinementError",
@@ -2636,6 +2642,71 @@ public static class GoEmitter
             _sb.Append("any");
         }
 
+        /// <summary>Emit `K, V` for `Map.empty()`. Mirrors
+        /// EmitListElementTypeOrFallback's sources in priority order:
+        /// the let-target hint (despite the name, _expectedListElementType
+        /// holds whatever container type the surrounding let-init was
+        /// declared as), the enclosing fn return type, and the
+        /// Result-of-Map peel for Ok-wraps. Falls through to
+        /// `any, any`.</summary>
+        private void EmitMapTypeArgsOrFallback()
+        {
+            if (_expectedListElementType is NamedType { Name: "Map" } expected
+                && expected.TypeArguments.Length == 2)
+            {
+                _sb.Append(LowerType(expected.TypeArguments[0]));
+                _sb.Append(", ");
+                _sb.Append(LowerType(expected.TypeArguments[1]));
+                return;
+            }
+            if (_currentFnReturnType is NamedType { Name: "Map" } nt
+                && nt.TypeArguments.Length == 2)
+            {
+                _sb.Append(LowerType(nt.TypeArguments[0]));
+                _sb.Append(", ");
+                _sb.Append(LowerType(nt.TypeArguments[1]));
+                return;
+            }
+            if (_currentFnReturnType is NamedType { Name: "Result" } rt
+                && rt.TypeArguments.Length == 2
+                && rt.TypeArguments[0] is NamedType { Name: "Map" } innerMap
+                && innerMap.TypeArguments.Length == 2)
+            {
+                _sb.Append(LowerType(innerMap.TypeArguments[0]));
+                _sb.Append(", ");
+                _sb.Append(LowerType(innerMap.TypeArguments[1]));
+                return;
+            }
+            _sb.Append("any, any");
+        }
+
+        /// <summary>Emit `T` for `Set.empty()`. Same priority order as
+        /// EmitMapTypeArgsOrFallback.</summary>
+        private void EmitSetElementTypeOrFallback()
+        {
+            if (_expectedListElementType is NamedType { Name: "Set" } expected
+                && expected.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(expected.TypeArguments[0]));
+                return;
+            }
+            if (_currentFnReturnType is NamedType { Name: "Set" } nt
+                && nt.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(nt.TypeArguments[0]));
+                return;
+            }
+            if (_currentFnReturnType is NamedType { Name: "Result" } rt
+                && rt.TypeArguments.Length == 2
+                && rt.TypeArguments[0] is NamedType { Name: "Set" } innerSet
+                && innerSet.TypeArguments.Length == 1)
+            {
+                _sb.Append(LowerType(innerSet.TypeArguments[0]));
+                return;
+            }
+            _sb.Append("any");
+        }
+
         /// <summary>
         /// Emit `T, E` for an `Ok(...)` / `Err(...)` constructor call
         /// targeting the current fn's return type. Falls back to the
@@ -3084,6 +3155,7 @@ public static class GoEmitter
             "TraceEvent" => true,
             "RefinementError" => true,
             "ProcessOutput" => true,
+            "MapEntry" => true,
             _ => false,
         };
 
@@ -3097,9 +3169,12 @@ public static class GoEmitter
         {
             if (_typeCheck?.ExpressionTypes is not { } expr) return false;
             if (!expr.TryGetValue(target.Span, out var type)) return false;
-            return type is NamedTypeRef nt
-                && nt.TypeArguments.Length == 0
-                && IsRuntimeStdlibType(nt.Name);
+            // Stdlib record types include both non-generic shapes
+            // (IoError, TraceEvent, ProcessOutput, RefinementError)
+            // and generic ones (MapEntry<K, V>). The arity isn't a
+            // distinguisher — IsRuntimeStdlibType decides on the
+            // name alone.
+            return type is NamedTypeRef nt && IsRuntimeStdlibType(nt.Name);
         }
 
         /// <summary>Convert Overt's snake_case field name to Go's
@@ -3218,6 +3293,27 @@ public static class GoEmitter
                 {
                     _sb.Append("overt.ListEmpty[");
                     EmitListElementTypeOrFallback();
+                    _sb.Append("]()");
+                    return;
+                }
+                // `Map.empty()` / `Set.empty()` — same target-typing
+                // shape as `List.empty()`. The let-target hint
+                // (_expectedListElementType, despite the historical
+                // name, holds whatever container type the surrounding
+                // let-init is declared as) carries the type args.
+                if (nsId.Name == "Map" && facCallee.FieldName == "empty"
+                    && call.Arguments.Length == 0)
+                {
+                    _sb.Append("overt.MapEmpty[");
+                    EmitMapTypeArgsOrFallback();
+                    _sb.Append("]()");
+                    return;
+                }
+                if (nsId.Name == "Set" && facCallee.FieldName == "empty"
+                    && call.Arguments.Length == 0)
+                {
+                    _sb.Append("overt.SetEmpty[");
+                    EmitSetElementTypeOrFallback();
                     _sb.Append("]()");
                     return;
                 }
@@ -3517,7 +3613,7 @@ public static class GoEmitter
             "println" => "overt.Println",
             "eprintln" => "overt.Eprintln",
             "args" => "overt.Args",
-            "map" => "overt.Map",
+            "map" => "overt.ListMap",
             "filter" => "overt.Filter",
             "fold" => "overt.Fold",
             "par_map" => "overt.ParMap",
@@ -3544,7 +3640,7 @@ public static class GoEmitter
             // Allowlist gate: only known stdlib namespaces route here.
             // Unknown namespaces are most likely the user's own enum
             // (variant access) and shouldn't be camelized.
-            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Path" or "Process"))
+            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Path" or "Process" or "Map" or "Set"))
             {
                 return null;
             }

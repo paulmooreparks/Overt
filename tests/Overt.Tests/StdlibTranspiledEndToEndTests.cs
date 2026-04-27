@@ -1223,6 +1223,182 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_Map_InsertGetSize_RoundTrips()
+    {
+        // Round-trip: insert two pairs, get one back, check size. Exercises
+        // Map.empty (with target-type inference filling K and V), insert,
+        // get returning Some, and size.
+        const string src = """
+            module map_basic
+
+            fn main() -> Result<Int, IoError> {
+                let m: Map<String, Int> = Map.empty()
+                let m1: Map<String, Int> = Map.insert(map = m, key = "a", value = 10)
+                let m2: Map<String, Int> = Map.insert(map = m1, key = "b", value = 20)
+                Ok(Map.size(map = m2))
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "map_basic");
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        Assert.Equal(2,
+            result.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Map_GetMissingKey_ReturnsNone()
+    {
+        const string src = """
+            module map_get_missing
+
+            fn main() -> Result<Bool, IoError> {
+                let m: Map<String, Int> = Map.empty()
+                let m1: Map<String, Int> = Map.insert(map = m, key = "alice", value = 30)
+                let opt: Option<Int> = Map.get(map = m1, key = "bob")
+                match opt {
+                    Some(_) => Ok(false),
+                    None    => Ok(true),
+                }
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "map_get_missing");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Map_RemoveAndContainsKey_UpdateMembership()
+    {
+        const string src = """
+            module map_remove
+
+            fn main() -> Result<Bool, IoError> {
+                let m: Map<String, Int> = Map.empty()
+                let m1: Map<String, Int> = Map.insert(map = m, key = "x", value = 1)
+                let m2: Map<String, Int> = Map.remove(map = m1, key = "x")
+                Ok(!Map.contains_key(map = m2, key = "x"))
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "map_remove");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Map_EntriesIteratesWithFieldAccess()
+    {
+        // Exercises Map.entries, the MapEntry record, and field access on
+        // a stdlib generic record (entry.key, entry.value).
+        const string src = """
+            module map_entries
+
+            fn main() -> Result<Int, IoError> {
+                let m: Map<String, Int> = Map.empty()
+                let m1: Map<String, Int> = Map.insert(map = m, key = "a", value = 1)
+                let m2: Map<String, Int> = Map.insert(map = m1, key = "b", value = 2)
+                let m3: Map<String, Int> = Map.insert(map = m2, key = "c", value = 4)
+                let mut total: Int = 0
+                for entry in Map.entries(map = m3) {
+                    total = total + entry.value
+                }
+                Ok(total)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "map_entries");
+        Assert.NotNull(result);
+        Assert.Equal(7,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Map_MergeRightWins()
+    {
+        // Last-writer-wins: when both sides have the same key, the right
+        // map's value survives. Verifies the documented semantics.
+        const string src = """
+            module map_merge
+
+            fn main() -> Result<Int, IoError> {
+                let empty_l: Map<String, Int> = Map.empty()
+                let empty_r: Map<String, Int> = Map.empty()
+                let left: Map<String, Int> = Map.insert(
+                    map = empty_l, key = "x", value = 1)
+                let right: Map<String, Int> = Map.insert(
+                    map = empty_r, key = "x", value = 99)
+                let merged: Map<String, Int> = Map.merge(left = left, right = right)
+                match Map.get(map = merged, key = "x") {
+                    Some(v) => Ok(v),
+                    None    => Err(IoError { narrative = "missing x" }),
+                }
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "map_merge");
+        Assert.NotNull(result);
+        Assert.Equal(99,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Set_InsertContainsRemove_RoundTrips()
+    {
+        const string src = """
+            module set_basic
+
+            fn main() -> Result<Bool, IoError> {
+                let s: Set<String> = Set.empty()
+                let s1: Set<String> = Set.insert(set = s, value = "alice")
+                let s2: Set<String> = Set.insert(set = s1, value = "bob")
+                let s3: Set<String> = Set.insert(set = s2, value = "alice")
+                let same_size: Bool = Set.size(set = s3) == 2
+                let has_alice: Bool = Set.contains(set = s3, value = "alice")
+                Ok(same_size && has_alice)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "set_basic");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_Set_UnionIntersectDifference()
+    {
+        const string src = """
+            module set_ops
+
+            fn main() -> Result<Bool, IoError> {
+                let empty_a: Set<String> = Set.empty()
+                let empty_b: Set<String> = Set.empty()
+                let a0: Set<String> = Set.insert(set = empty_a, value = "alice")
+                let a:  Set<String> = Set.insert(set = a0,      value = "bob")
+                let b0: Set<String> = Set.insert(set = empty_b, value = "bob")
+                let b:  Set<String> = Set.insert(set = b0,      value = "carol")
+                let u: Set<String>  = Set.union(left = a, right = b)
+                let i: Set<String>  = Set.intersect(left = a, right = b)
+                let d: Set<String>  = Set.difference(left = a, right = b)
+                let union_ok: Bool        = Set.size(set = u) == 3
+                let intersect_ok: Bool    = Set.size(set = i) == 1 && Set.contains(set = i, value = "bob")
+                let difference_ok: Bool   = Set.size(set = d) == 1 && Set.contains(set = d, value = "alice")
+                Ok(union_ok && intersect_ok && difference_ok)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "set_ops");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
     public void Transpiled_GenericRefinementTryFrom_OkPath_UnifiesElementType()
     {
         // Generic refinement try_from: T threads from the alias's

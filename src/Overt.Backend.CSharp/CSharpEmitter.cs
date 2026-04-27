@@ -2679,6 +2679,24 @@ public sealed class CSharpEmitter
             return true;
         }
 
+        // `Map.empty()` / `Set.empty()` — same target-typing trick.
+        if (c.Arguments.Length == 0
+            && c.Callee is FieldAccessExpr { FieldName: "empty" } faMap
+            && faMap.Target is IdentifierExpr { Name: "Map" }
+            && _expectedType is NamedTypeRef { Name: "Map", TypeArguments: { Length: 2 } mapArgs })
+        {
+            _w.Write($"Map.empty<{CSharpTypeDisplay(mapArgs[0])}, {CSharpTypeDisplay(mapArgs[1])}>()");
+            return true;
+        }
+        if (c.Arguments.Length == 0
+            && c.Callee is FieldAccessExpr { FieldName: "empty" } faSet
+            && faSet.Target is IdentifierExpr { Name: "Set" }
+            && _expectedType is NamedTypeRef { Name: "Set", TypeArguments: { Length: 1 } setArgs })
+        {
+            _w.Write($"Set.empty<{CSharpTypeDisplay(setArgs[0])}>()");
+            return true;
+        }
+
         // `None()` — bare identifier, used as a call. Expected is `Option<T>`.
         if (c.Arguments.Length == 0
             && c.Callee is IdentifierExpr { Name: "None" }

@@ -72,6 +72,26 @@ public static class Stdlib
         b["Path.file_name"] = ImmutableArray.Create("path");
         b["Path.extension"] = ImmutableArray.Create("path");
         b["Process.run"] = ImmutableArray.Create("cmd", "args");
+        b["Map.empty"] = ImmutableArray<string>.Empty;
+        b["Map.get"] = ImmutableArray.Create("map", "key");
+        b["Map.contains_key"] = ImmutableArray.Create("map", "key");
+        b["Map.insert"] = ImmutableArray.Create("map", "key", "value");
+        b["Map.remove"] = ImmutableArray.Create("map", "key");
+        b["Map.size"] = ImmutableArray.Create("map");
+        b["Map.keys"] = ImmutableArray.Create("map");
+        b["Map.values"] = ImmutableArray.Create("map");
+        b["Map.entries"] = ImmutableArray.Create("map");
+        b["Map.merge"] = ImmutableArray.Create("left", "right");
+        b["Map.map"] = ImmutableArray.Create("map", "f");
+        b["Map.filter"] = ImmutableArray.Create("map", "predicate");
+        b["Set.empty"] = ImmutableArray<string>.Empty;
+        b["Set.contains"] = ImmutableArray.Create("set", "value");
+        b["Set.insert"] = ImmutableArray.Create("set", "value");
+        b["Set.remove"] = ImmutableArray.Create("set", "value");
+        b["Set.size"] = ImmutableArray.Create("set");
+        b["Set.union"] = ImmutableArray.Create("left", "right");
+        b["Set.intersect"] = ImmutableArray.Create("left", "right");
+        b["Set.difference"] = ImmutableArray.Create("left", "right");
         b["Option.unwrap_or"] = ImmutableArray.Create("opt", "default_value");
         b["Option.unwrap_or_else"] = ImmutableArray.Create("opt", "default_fn");
         b["Result.unwrap_or"] = ImmutableArray.Create("result", "default_value");
@@ -134,6 +154,7 @@ public static class Stdlib
         e.Add(Type("Path"));   // namespace shape for Path.join / etc.
         e.Add(Type("Process")); // namespace shape for Process.run
         e.Add(Type("ProcessOutput")); // record returned by Process.run
+        e.Add(Type("MapEntry"));  // record returned by Map.entries
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -515,6 +536,130 @@ public static class Stdlib
             ret: Generic("Result", Named("ProcessOutput"), Named("IoError")),
             effects: new[] { "io" }));
 
+        // ---- Map<K, V> -----------------------------------------------------------
+        // Immutable key-value map. Foundational. Mutating operations always
+        // allocate; the host's default equality is used on keys.
+
+        e.Add(Fn("Map.empty",
+            typeParams: new[] { "K", "V" },
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("Map", TV("K"), TV("V"))));
+
+        e.Add(Fn("Map.get",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")), TV("K") },
+            ret: Generic("Option", TV("V"))));
+
+        e.Add(Fn("Map.contains_key",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")), TV("K") },
+            ret: PrimitiveType.Bool));
+
+        e.Add(Fn("Map.insert",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")), TV("K"), TV("V") },
+            ret: Generic("Map", TV("K"), TV("V"))));
+
+        e.Add(Fn("Map.remove",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")), TV("K") },
+            ret: Generic("Map", TV("K"), TV("V"))));
+
+        e.Add(Fn("Map.size",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")) },
+            ret: PrimitiveType.Int));
+
+        e.Add(Fn("Map.keys",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")) },
+            ret: Generic("List", TV("K"))));
+
+        e.Add(Fn("Map.values",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")) },
+            ret: Generic("List", TV("V"))));
+
+        // Map.entries returns List<MapEntry<K, V>>. Tuple-shaped type
+        // annotations aren't yet expressible in Overt source (no
+        // TupleType AST node); a named-field record sidesteps the gap
+        // and reads more naturally as `entry.key` / `entry.value`.
+        e.Add(Fn("Map.entries",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[] { Generic("Map", TV("K"), TV("V")) },
+            ret: Generic("List", Generic("MapEntry", TV("K"), TV("V")))));
+
+        // Map.merge: right wins on key collision (last-writer-wins).
+        e.Add(Fn("Map.merge",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[]
+            {
+                Generic("Map", TV("K"), TV("V")),
+                Generic("Map", TV("K"), TV("V")),
+            },
+            ret: Generic("Map", TV("K"), TV("V"))));
+
+        e.Add(Fn("Map.map",
+            typeParams: new[] { "K", "V", "W" },
+            parameters: new TypeRef[]
+            {
+                Generic("Map", TV("K"), TV("V")),
+                FnType(new TypeRef[] { TV("V") }, TV("W")),
+            },
+            ret: Generic("Map", TV("K"), TV("W"))));
+
+        e.Add(Fn("Map.filter",
+            typeParams: new[] { "K", "V" },
+            parameters: new TypeRef[]
+            {
+                Generic("Map", TV("K"), TV("V")),
+                FnType(new TypeRef[] { TV("K"), TV("V") }, PrimitiveType.Bool),
+            },
+            ret: Generic("Map", TV("K"), TV("V"))));
+
+        // ---- Set<T> --------------------------------------------------------------
+        // Immutable membership. Same shape philosophy as Map.
+
+        e.Add(Fn("Set.empty",
+            typeParams: new[] { "T" },
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("Set", TV("T"))));
+
+        e.Add(Fn("Set.contains",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), TV("T") },
+            ret: PrimitiveType.Bool));
+
+        e.Add(Fn("Set.insert",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), TV("T") },
+            ret: Generic("Set", TV("T"))));
+
+        e.Add(Fn("Set.remove",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), TV("T") },
+            ret: Generic("Set", TV("T"))));
+
+        e.Add(Fn("Set.size",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")) },
+            ret: PrimitiveType.Int));
+
+        e.Add(Fn("Set.union",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), Generic("Set", TV("T")) },
+            ret: Generic("Set", TV("T"))));
+
+        e.Add(Fn("Set.intersect",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), Generic("Set", TV("T")) },
+            ret: Generic("Set", TV("T"))));
+
+        e.Add(Fn("Set.difference",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("Set", TV("T")), Generic("Set", TV("T")) },
+            ret: Generic("Set", TV("T"))));
+
         // Option.unwrap_or<T>(opt: Option<T>, default_value: T) -> T
         // Returns the inner T on Some, otherwise the default. The
         // default is evaluated eagerly; for a lazily-computed default
@@ -634,4 +779,11 @@ public static class Stdlib
 
     private static NamedTypeRef Generic(string name, params TypeRef[] args)
         => new(name, args.ToImmutableArray());
+
+    /// <summary>Construct a FunctionTypeRef for a fn-typed parameter (no
+    /// effect row — the host-side runtime doesn't track effects of
+    /// callbacks; the user-side declares the row on the surrounding fn
+    /// and the type checker propagates).</summary>
+    private static FunctionTypeRef FnType(TypeRef[] parameters, TypeRef ret)
+        => new(parameters.ToImmutableArray(), ret, ImmutableArray<string>.Empty);
 }

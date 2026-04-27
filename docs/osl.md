@@ -303,47 +303,78 @@ operation; see [`String`](#string).
 
 ## `Map`
 
-Immutable key→value map. Hash-based; iteration order is insertion-defined.
+Immutable key→value map. Hash-based on .NET (ImmutableDictionary) and Go
+(map[K]V copy-on-write); iteration order is insertion-defined on .NET and
+unspecified on Go (consistent with the host's native semantics — programs
+that need deterministic order sort the keys explicitly).
 
 ### Foundational set
 
 | Status | Item |
 | --- | --- |
-| 🚧 | `Map<K, V>` type (declared, no operations) |
-| ⏳ | `Map.empty<K, V>() -> Map<K, V>` |
-| ⏳ | `Map.get<K, V>(m: Map<K, V>, key: K) -> Option<V>` |
-| ⏳ | `Map.contains_key<K, V>(m: Map<K, V>, key: K) -> Bool` |
-| ⏳ | `Map.insert<K, V>(m: Map<K, V>, key: K, value: V) -> Map<K, V>` |
-| ⏳ | `Map.remove<K, V>(m: Map<K, V>, key: K) -> Map<K, V>` |
-| ⏳ | `Map.size<K, V>(m: Map<K, V>) -> Int` |
-| ⏳ | `Map.keys<K, V>(m: Map<K, V>) -> List<K>` |
-| ⏳ | `Map.values<K, V>(m: Map<K, V>) -> List<V>` |
-| ⏳ | `Map.entries<K, V>(m: Map<K, V>) -> List<(K, V)>` |
-| ⏳ | `Map.merge<K, V>(left: Map<K, V>, right: Map<K, V>) -> Map<K, V>` |
-| ⏳ | `Map.map<K, V, W>(m: Map<K, V>, f: fn(V) -> W) -> Map<K, W>` |
-| ⏳ | `Map.filter<K, V>(m: Map<K, V>, pred: fn(K, V) -> Bool) -> Map<K, V>` |
+| ✅ | `Map<K, V>` type |
+| ✅ | `record MapEntry<K, V> { key: K, value: V }` (returned by `Map.entries`) |
+| ✅ | `Map.empty<K, V>() -> Map<K, V>` |
+| ✅ | `Map.get<K, V>(map: Map<K, V>, key: K) -> Option<V>` |
+| ✅ | `Map.contains_key<K, V>(map: Map<K, V>, key: K) -> Bool` |
+| ✅ | `Map.insert<K, V>(map: Map<K, V>, key: K, value: V) -> Map<K, V>` |
+| ✅ | `Map.remove<K, V>(map: Map<K, V>, key: K) -> Map<K, V>` |
+| ✅ | `Map.size<K, V>(map: Map<K, V>) -> Int` |
+| ✅ | `Map.keys<K, V>(map: Map<K, V>) -> List<K>` |
+| ✅ | `Map.values<K, V>(map: Map<K, V>) -> List<V>` |
+| ✅ | `Map.entries<K, V>(map: Map<K, V>) -> List<MapEntry<K, V>>` |
+| ✅ | `Map.merge<K, V>(left: Map<K, V>, right: Map<K, V>) -> Map<K, V>` (right wins) |
+| ✅ | `Map.map<K, V, W>(map: Map<K, V>, f: fn(V) -> W) -> Map<K, W>` |
+| ✅ | `Map.filter<K, V>(map: Map<K, V>, predicate: fn(K, V) -> Bool) -> Map<K, V>` |
 
-`Map` is the largest foundational gap today. Programs that need a
-key→value collection currently can't write idiomatic Overt; they reach for
-FFI or stack of let-bindings. Closing this is high priority.
+### Design notes
+
+**`Map.entries` returns `List<MapEntry<K, V>>` rather than `List<(K, V)>`.**
+Tuple-shaped type annotations aren't yet expressible in Overt source —
+the AST has no `TupleType` node. The `MapEntry` record sidesteps the gap
+and reads more naturally at the field-access site:
+
+```overt
+for entry in Map.entries(map = m) {
+    println("${entry.key} = ${entry.value}")?
+}
+```
+
+If tuple-type annotations land later, `Map.entries` could return
+`List<(K, V)>` instead, and `MapEntry` would be deprecated in favor of
+that. Until then, the named-field form is the canonical shape.
+
+**`Map.merge` is right-wins.** When both maps contain a key, the right
+side's value survives. Matches the convention of last-writer-wins
+merging that most programs expect (and what `dict.update()` /
+`Dictionary.SetItems` do).
+
+**Key constraint.** Both runtimes require `K` to be hashable / comparable
+(`notnull` on .NET, `comparable` on Go). The Overt-side type-checker
+doesn't yet enforce this — programs that pass a structurally-keyed type
+(e.g. a record) get a host-language error rather than a clean Overt
+diagnostic. A future pass would surface the constraint as a refinement
+or trait.
 
 ---
 
 ## `Set`
 
-Immutable membership.
+Immutable membership. ImmutableHashSet on .NET; `map[T]struct{}` (the
+idiomatic Go set pattern) on Go. Same hashable/comparable element-type
+constraint as `Map`.
 
 | Status | Item |
 | --- | --- |
-| 🚧 | `Set<T>` type (declared, no operations) |
-| ⏳ | `Set.empty<T>() -> Set<T>` |
-| ⏳ | `Set.contains<T>(s: Set<T>, value: T) -> Bool` |
-| ⏳ | `Set.insert<T>(s: Set<T>, value: T) -> Set<T>` |
-| ⏳ | `Set.remove<T>(s: Set<T>, value: T) -> Set<T>` |
-| ⏳ | `Set.size<T>(s: Set<T>) -> Int` |
-| ⏳ | `Set.union<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
-| ⏳ | `Set.intersect<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
-| ⏳ | `Set.difference<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
+| ✅ | `Set<T>` type |
+| ✅ | `Set.empty<T>() -> Set<T>` |
+| ✅ | `Set.contains<T>(set: Set<T>, value: T) -> Bool` |
+| ✅ | `Set.insert<T>(set: Set<T>, value: T) -> Set<T>` |
+| ✅ | `Set.remove<T>(set: Set<T>, value: T) -> Set<T>` |
+| ✅ | `Set.size<T>(set: Set<T>) -> Int` |
+| ✅ | `Set.union<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
+| ✅ | `Set.intersect<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
+| ✅ | `Set.difference<T>(left: Set<T>, right: Set<T>) -> Set<T>` |
 
 ---
 
