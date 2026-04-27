@@ -145,7 +145,8 @@ fn read_config(path: String) !{io} -> Result<Config, IoError> {
 // Two-arg CLI: baseline path, candidate path. Exit codes follow
 // Unix `diff` / `cmp` — 0 when configs match, 1 when they differ.
 // The runner converts main's Result.IsOk to the exit code; the
-// "configs differ" Err carries the distinguishing narrative.
+// program writes its own diagnostic to stderr before returning Err
+// when an explanatory line is appropriate.
 fn main(args: List<String>) !{io} -> Result<(), IoError> {
     if size(args) != 2 {
         eprintln("usage: diffconf <baseline.json> <candidate.json>")?
@@ -163,6 +164,10 @@ fn main(args: List<String>) !{io} -> Result<(), IoError> {
         for each entry in entries {
             render_entry(entry = entry)?
         }
+        // The diff hunks went to stdout; the differ-vs-match signal
+        // for CI pipelines is the exit code, so no extra eprintln
+        // is needed here. Returning Err is what flips the runner's
+        // exit code from 0 to 1.
         Err(IoError { narrative = "configs differ" })
     }
 }

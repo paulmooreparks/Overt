@@ -52,22 +52,24 @@ overt run diffconf.ov configs/baseline.json configs/baseline.json
 Exit codes follow Unix `diff` / `cmp`:
 
 - `0` — configs match
-- `1` — configs differ (hunks on stdout, diagnostic line on stderr)
+- `1` — configs differ (hunks on stdout)
 - `1` — I/O or JSON parse failure (error on stderr; same exit because
   `overt run` only distinguishes Ok / Err)
 
-## Things the sample reveals
+The diff output goes to stdout, the exit code carries the
+match-vs-differ signal, and stderr stays clean. A CI step can branch
+on `$?` directly without grepping anything.
 
-One piece of present-day friction worth flagging:
+## What this sample used to flag, but doesn't anymore
 
-**Non-numeric exit codes from `overt run`.** The runner exits 0 on
-`Ok`, 1 on `Err`, and prints `overt run: main returned Err: <err>`
-on stderr. For a CLI that *uses* the differ-vs-match split as its
-contract (`diffconf` does, like `cmp`), the trailing stderr line is
-noise. A standalone-exe build via `Overt.Build` skips the runner
-and gets clean exit codes natively.
+Two friction notes lived here before:
 
-The earlier version of this sample (before closures landed) had a
-"no closures means `filter` can't capture context" friction note
-here too. With closures shipped, that's gone — `list_added` and
-`list_removed` write naturally now.
+- *"No closures means `filter` can't capture context."* Closures
+  shipped; `list_added` and `list_removed` are now four-line
+  filter calls.
+- *"`overt run` prints a trailing stderr line on Err returns,
+  polluting diffconf's CI output."* Trailer removed; the runner now
+  forwards exit code without commentary, matching `dotnet run` /
+  `go run` behavior. Programs that want diagnostic output write it
+  themselves with `eprintln` before returning Err — see the usage
+  branch in `main` for the pattern.

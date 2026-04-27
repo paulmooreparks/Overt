@@ -448,19 +448,17 @@ static class Cli
             }
         }
 
-        // If main returns Result<_, _>, check IsOk. Ok → exit 0. Err → print + exit 1.
+        // If main returns Result<_, _>, check IsOk. Ok → exit 0. Err → exit 1.
+        // The runner used to print `overt run: main returned Err: <err>` on
+        // the Err path; that's now the program's responsibility (write an
+        // eprintln before returning Err if you want diagnostic output).
+        // Matches `dotnet run` / `go run` behavior — runner forwards exit
+        // code, program owns stderr.
         if (result is null) return 0;
         var isOkProp = result.GetType().GetProperty("IsOk");
         if (isOkProp is null) return 0;
 
-        if ((bool)isOkProp.GetValue(result)!)
-        {
-            return 0;
-        }
-        var errProp = result.GetType().GetProperty("Error");
-        var err = errProp?.GetValue(result);
-        Console.Error.WriteLine($"overt run: main returned Err: {err}");
-        return 1;
+        return (bool)isOkProp.GetValue(result)! ? 0 : 1;
     }
 
     // -------------------------------------------- compile-through-graph
