@@ -1,0 +1,184 @@
+module diffconf
+
+// `diffconf` reads two JSON config files, deserializes both into a
+// `Config` record, and prints the per-field differences. Pairs visually
+// with `samples/config-validate/`: validate verifies a single config;
+// diffconf compares two.
+//
+// Usage:
+//   overt run diffconf.ov configs/baseline.json configs/staging.json
+//   overt run diffconf.ov configs/baseline.json configs/baseline.json
+//
+// Exit code: 0 when configs match; 1 when they differ (the runner
+// surfaces the IoError narrative on stderr — "configs differ" — so a
+// CI step can branch on `$?` directly: `diffconf prod.json staging.json
+// || echo drift detected`).
+//
+// What this sample shows:
+//
+//   - JSON deserialization via `extern "csharp"` and the generic
+//     binds-target form (`Deserialize<Config>`). Same path as
+//     examples/csharp/json.ov.
+//   - A sum-typed diff result (`DiffEntry`) collected as a List, then
+//     rendered with exhaustive matching.
+//   - List-of-string diffing via `let mut` + `List.contains` + a
+//     for-each loop. Pure-Overt set-difference using only the 0.2
+//     stdlib surface.
+
+// ---------------------------------------------------------------- types
+
+@derive(Debug)
+record Config {
+    host: String,
+    port: Int,
+    worker_count: Int,
+    log_level: String,
+    upstream_urls: List<String>,
+}
+
+// One field's worth of diff. Scalar fields use Changed; the list
+// field uses ListChanged so added / removed render as a sub-block.
+// Same-valued fields produce no entry — the list of DiffEntry IS the
+// diff, and an empty list means the configs match.
+@derive(Debug)
+enum DiffEntry {
+    Changed { field: String, before: String, after: String },
+    ListChanged { field: String, added: List<String>, removed: List<String> },
+}
+
+// ---------------------------------------------------------------- FFI
+
+// Deserialize JSON text into a Config. Field names lower from Overt
+// snake_case to C# snake_case, which matches the snake_case JSON keys
+// in configs/*.json — no PropertyNameCaseInsensitive option needed.
+// Malformed JSON or shape mismatch surfaces as a host exception that
+// the runner reports as a non-zero exit.
+extern "csharp" fn parse_config(text: String) -> Config
+    binds "System.Text.Json.JsonSerializer.Deserialize<Config>"
+
+// ---------------------------------------------------------------- list diff
+
+// Elements present in `right` but not in `left` — the "added" set in
+// before-vs-after vocabulary. Linear search (List.contains is O(n));
+// fine for the dozens-of-entries scale a config file lives at.
+fn list_added(left: List<String>, right: List<String>) -> List<String> {
+    let mut out: List<String> = List<String>.empty()
+    for each item in right {
+        out = append_if_missing(target = out, item = item, exclude = left)
+    }
+    out
+}
+
+// Elements present in `left` but not in `right`. Symmetric to list_added.
+fn list_removed(left: List<String>, right: List<String>) -> List<String> {
+    let mut out: List<String> = List<String>.empty()
+    for each item in left {
+        out = append_if_missing(target = out, item = item, exclude = right)
+    }
+    out
+}
+
+// Append `item` to `target` unless `exclude` already contains it. Pulled
+// out of the loops above so the `if` lives in expression position (the
+// fn's return type), which the emitter renders as a clean conditional
+// — an `if` with only a side-effect branch in the loop body itself
+// hits an expression-as-statement quirk under the C# emitter.
+fn append_if_missing(target: List<String>, item: String, exclude: List<String>) -> List<String> {
+    if List.contains(list = exclude, value = item) {
+        target
+    } else {
+        List.concat(left = target, right = List.singleton(value = item))
+    }
+}
+
+// ---------------------------------------------------------------- diff
+
+// Walk every field; emit a DiffEntry only when the field changed. The
+// order of pushes here is the order entries render in the report —
+// keeping it stable matters for human reviewers comparing successive
+// diffs.
+fn diff(left: Config, right: Config) -> List<DiffEntry> {
+    let mut out: List<DiffEntry> = List<DiffEntry>.empty()
+    if left.host != right.host {
+        out = push(list = out, entry = DiffEntry.Changed { field = "host", before = "\"${left.host}\"", after = "\"${right.host}\"" })
+    }
+    if left.port != right.port {
+        out = push(list = out, entry = DiffEntry.Changed { field = "port", before = "${left.port}", after = "${right.port}" })
+    }
+    if left.worker_count != right.worker_count {
+        out = push(list = out, entry = DiffEntry.Changed { field = "worker_count", before = "${left.worker_count}", after = "${right.worker_count}" })
+    }
+    if left.log_level != right.log_level {
+        out = push(list = out, entry = DiffEntry.Changed { field = "log_level", before = "\"${left.log_level}\"", after = "\"${right.log_level}\"" })
+    }
+    let added: List<String> = list_added(left = left.upstream_urls, right = right.upstream_urls)
+    let removed: List<String> = list_removed(left = left.upstream_urls, right = right.upstream_urls)
+    if size(added) > 0 || size(removed) > 0 {
+        out = push(list = out, entry = DiffEntry.ListChanged { field = "upstream_urls", added = added, removed = removed })
+    }
+    out
+}
+
+// One-element append. Worth its own fn because the let-mut + concat +
+// singleton chain is ugly inline — and named, the call site reads as
+// the intent (push this onto the running list).
+fn push(list: List<DiffEntry>, entry: DiffEntry) -> List<DiffEntry> {
+    List.concat(left = list, right = List.singleton(value = entry))
+}
+
+// ---------------------------------------------------------------- render
+
+// Each match arm is a single fn call so the emitter doesn't have to
+// wrap the arm body in an IIFE. Avoids interactions between
+// `?`-propagation and the closure boundary the IIFE introduces.
+fn render_entry(entry: DiffEntry) !{io} -> Result<(), IoError> {
+    match entry {
+        DiffEntry.Changed { field = f, before = b, after = a } => println("${f}: ${b} → ${a}"),
+        DiffEntry.ListChanged { field = f, added = ad, removed = rm } => render_list_changed(field = f, added = ad, removed = rm),
+    }
+}
+
+fn render_list_changed(field: String, added: List<String>, removed: List<String>) !{io} -> Result<(), IoError> {
+    println("${field}:")?
+    for each url in added {
+        println("  + ${url}")?
+    }
+    for each url in removed {
+        println("  - ${url}")?
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- I/O
+
+fn read_config(path: String) !{io} -> Result<Config, IoError> {
+    let text: String = File.read_to_string(path = path)?
+    Ok(parse_config(text = text))
+}
+
+// ---------------------------------------------------------------- main
+
+// Two-arg CLI: baseline path, candidate path. Exit codes follow
+// Unix `diff` / `cmp` — 0 when configs match, 1 when they differ.
+// The runner converts main's Result.IsOk to the exit code; the
+// "configs differ" Err carries the distinguishing narrative.
+fn main(args: List<String>) !{io} -> Result<(), IoError> {
+    if size(args) != 2 {
+        eprintln("usage: diffconf <baseline.json> <candidate.json>")?
+        return Err(IoError { narrative = "expected two paths" })
+    }
+    let left_path: String = List.at(list = args, index = 0)
+    let right_path: String = List.at(list = args, index = 1)
+    let left: Config = read_config(path = left_path)?
+    let right: Config = read_config(path = right_path)?
+    let entries: List<DiffEntry> = diff(left = left, right = right)
+    if size(entries) == 0 {
+        println("configs match")?
+        Ok(())
+    } else {
+        for each entry in entries {
+            render_entry(entry = entry)?
+        }
+        Err(IoError { narrative = "configs differ" })
+    }
+}
