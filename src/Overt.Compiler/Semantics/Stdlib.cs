@@ -64,6 +64,13 @@ public static class Stdlib
         b["String.contains"] = ImmutableArray.Create("s", "needle");
         b["String.parse_int"] = ImmutableArray.Create("s");
         b["String.parse_float"] = ImmutableArray.Create("s");
+        b["String.trim"] = ImmutableArray.Create("s");
+        b["String.to_upper"] = ImmutableArray.Create("s");
+        b["String.to_lower"] = ImmutableArray.Create("s");
+        b["String.replace"] = ImmutableArray.Create("s", "from", "to");
+        b["String.substring"] = ImmutableArray.Create("s", "start", "end");
+        b["String.index_of"] = ImmutableArray.Create("s", "needle");
+        b["String.repeat"] = ImmutableArray.Create("s", "n");
         b["File.read_to_string"] = ImmutableArray.Create("path");
         b["File.write_all_text"] = ImmutableArray.Create("path", "contents");
         b["File.exists"] = ImmutableArray.Create("path");
@@ -71,6 +78,12 @@ public static class Stdlib
         b["Path.parent"] = ImmutableArray.Create("path");
         b["Path.file_name"] = ImmutableArray.Create("path");
         b["Path.extension"] = ImmutableArray.Create("path");
+        b["Path.with_extension"] = ImmutableArray.Create("path", "ext");
+        b["Path.is_absolute"] = ImmutableArray.Create("path");
+        b["print"] = ImmutableArray.Create("s");
+        b["eprint"] = ImmutableArray.Create("s");
+        b["read_line"] = ImmutableArray<string>.Empty;
+        b["read_to_end"] = ImmutableArray<string>.Empty;
         b["Process.run"] = ImmutableArray.Create("cmd", "args");
         b["Map.empty"] = ImmutableArray<string>.Empty;
         b["Map.get"] = ImmutableArray.Create("map", "key");
@@ -98,6 +111,17 @@ public static class Stdlib
         b["Result.unwrap_or_else"] = ImmutableArray.Create("result", "default_fn");
         b["Int.range"] = ImmutableArray.Create("start", "end");
         b["List.at"] = ImmutableArray.Create("list", "index");
+        b["List.concat"] = ImmutableArray.Create("left", "right");
+        b["List.head"] = ImmutableArray.Create("list");
+        b["List.tail"] = ImmutableArray.Create("list");
+        b["List.take"] = ImmutableArray.Create("list", "n");
+        b["List.drop"] = ImmutableArray.Create("list", "n");
+        b["List.reverse"] = ImmutableArray.Create("list");
+        b["List.find"] = ImmutableArray.Create("list", "predicate");
+        b["List.find_index"] = ImmutableArray.Create("list", "predicate");
+        b["List.contains"] = ImmutableArray.Create("list", "value");
+        b["List.flat_map"] = ImmutableArray.Create("list", "f");
+        b["List.partition"] = ImmutableArray.Create("list", "predicate");
         b["all"] = ImmutableArray.Create("list", "predicate");
         b["any"] = ImmutableArray.Create("list", "predicate");
         return b.ToImmutable();
@@ -155,6 +179,7 @@ public static class Stdlib
         e.Add(Type("Process")); // namespace shape for Process.run
         e.Add(Type("ProcessOutput")); // record returned by Process.run
         e.Add(Type("MapEntry"));  // record returned by Map.entries
+        e.Add(Type("ListPartition")); // record returned by List.partition
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -193,6 +218,37 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // print(s: String) !{io} -> Result<Unit, IoError>
+        // No-trailing-newline sibling of println.
+        e.Add(Fn("print",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // eprint(s: String) !{io} -> Result<Unit, IoError>
+        e.Add(Fn("eprint",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // read_line() !{io} -> Result<Option<String>, IoError>
+        // Some(line) for one line read, None at EOF; trailing newline stripped.
+        e.Add(Fn("read_line",
+            typeParams: Array.Empty<string>(),
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("Result", Generic("Option", PrimitiveType.String), Named("IoError")),
+            effects: new[] { "io" }));
+
+        // read_to_end() !{io} -> Result<String, IoError>
+        // Consume all of stdin as a single string. Pipe-consumer pattern.
+        e.Add(Fn("read_to_end",
+            typeParams: Array.Empty<string>(),
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("Result", PrimitiveType.String, Named("IoError")),
             effects: new[] { "io" }));
 
         // args() !{io} -> List<String>
@@ -373,6 +429,100 @@ public static class Stdlib
             },
             ret: TV("T")));
 
+        // ---- List foundational ops ---------------------------------------------
+
+        // List.concat<T>(left: List<T>, right: List<T>) -> List<T>
+        e.Add(Fn("List.concat",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                Generic("List", TV("T")),
+            },
+            ret: Generic("List", TV("T"))));
+
+        // List.head<T>(list: List<T>) -> Option<T>
+        // None for empty; Some of first element otherwise.
+        e.Add(Fn("List.head",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")) },
+            ret: Generic("Option", TV("T"))));
+
+        // List.tail<T>(list: List<T>) -> List<T>
+        // Empty input yields empty (no panic).
+        e.Add(Fn("List.tail",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")) },
+            ret: Generic("List", TV("T"))));
+
+        // List.take<T>(list: List<T>, n: Int) -> List<T>
+        // Negative n yields empty; n >= length yields the whole list.
+        e.Add(Fn("List.take",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")), PrimitiveType.Int },
+            ret: Generic("List", TV("T"))));
+
+        // List.drop<T>(list: List<T>, n: Int) -> List<T>
+        // Symmetric recovery: negative n yields the whole list, n >= length yields empty.
+        e.Add(Fn("List.drop",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")), PrimitiveType.Int },
+            ret: Generic("List", TV("T"))));
+
+        // List.reverse<T>(list: List<T>) -> List<T>
+        e.Add(Fn("List.reverse",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")) },
+            ret: Generic("List", TV("T"))));
+
+        // List.find<T>(list: List<T>, predicate: fn(T) -> Bool) -> Option<T>
+        e.Add(Fn("List.find",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                FnType(new TypeRef[] { TV("T") }, PrimitiveType.Bool),
+            },
+            ret: Generic("Option", TV("T"))));
+
+        // List.find_index<T>(list: List<T>, predicate: fn(T) -> Bool) -> Option<Int>
+        e.Add(Fn("List.find_index",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                FnType(new TypeRef[] { TV("T") }, PrimitiveType.Bool),
+            },
+            ret: Generic("Option", PrimitiveType.Int)));
+
+        // List.contains<T>(list: List<T>, value: T) -> Bool
+        // Host-default equality (Go: == ; .NET: EqualityComparer<T>.Default).
+        e.Add(Fn("List.contains",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("List", TV("T")), TV("T") },
+            ret: PrimitiveType.Bool));
+
+        // List.flat_map<T, U>(list: List<T>, f: fn(T) -> List<U>) -> List<U>
+        e.Add(Fn("List.flat_map",
+            typeParams: new[] { "T", "U" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                FnType(new TypeRef[] { TV("T") }, Generic("List", TV("U"))),
+            },
+            ret: Generic("List", TV("U"))));
+
+        // List.partition<T>(list: List<T>, predicate: fn(T) -> Bool) -> ListPartition<T>
+        // Two-bucket split — see ListPartition record.
+        e.Add(Fn("List.partition",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("List", TV("T")),
+                FnType(new TypeRef[] { TV("T") }, PrimitiveType.Bool),
+            },
+            ret: Generic("ListPartition", TV("T"))));
+
         // String.split(s: String, sep: String) -> List<String>
         // Empty separator throws; adjacent separators yield empty segments
         // (StringSplitOptions.None semantics).
@@ -458,6 +608,52 @@ public static class Stdlib
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Result", PrimitiveType.Float, Named("IoError"))));
 
+        // String.trim(s: String) -> String
+        // Removes leading and trailing whitespace per Unicode rules.
+        e.Add(Fn("String.trim",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.String));
+
+        // String.to_upper / to_lower (s: String) -> String
+        // Invariant-culture case conversion.
+        e.Add(Fn("String.to_upper",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.String));
+        e.Add(Fn("String.to_lower",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.String));
+
+        // String.replace(s: String, from: String, to: String) -> String
+        // Empty `from` is a programmer error and panics.
+        e.Add(Fn("String.replace",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.String));
+
+        // String.substring(s: String, start: Int, end: Int) -> String
+        // Half-open [start, end). Out-of-range or inverted indices panic.
+        e.Add(Fn("String.substring",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.Int, PrimitiveType.Int },
+            ret: PrimitiveType.String));
+
+        // String.index_of(s: String, needle: String) -> Option<Int>
+        // None when absent; empty needle is Some(0).
+        e.Add(Fn("String.index_of",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: Generic("Option", PrimitiveType.Int)));
+
+        // String.repeat(s: String, n: Int) -> String
+        // n=0 yields ""; negative n panics.
+        e.Add(Fn("String.repeat",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.Int },
+            ret: PrimitiveType.String));
+
         // ---- File I/O -----------------------------------------------------------
         // All operations that touch the filesystem carry !{io}; pure
         // path-string helpers on `Path` don't.
@@ -518,6 +714,20 @@ public static class Stdlib
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },
             ret: Generic("Option", PrimitiveType.String)));
+
+        // Path.with_extension(path: String, ext: String) -> String
+        // Replace (or add) the extension. `ext` may include or omit the
+        // leading dot; both forms produce the same result.
+        e.Add(Fn("Path.with_extension",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
+            ret: PrimitiveType.String));
+
+        // Path.is_absolute(path: String) -> Bool
+        e.Add(Fn("Path.is_absolute",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: PrimitiveType.Bool));
 
         // ---- Process orchestration ---------------------------------------------
 

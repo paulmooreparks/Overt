@@ -1189,6 +1189,8 @@ public static class GoEmitter
                 => $"overt.Set[{LowerType(st.TypeArguments[0])}]",
             NamedType { Name: "MapEntry" } met when met.TypeArguments.Length == 2
                 => $"overt.MapEntry[{LowerType(met.TypeArguments[0])}, {LowerType(met.TypeArguments[1])}]",
+            NamedType { Name: "ListPartition" } lpt when lpt.TypeArguments.Length == 1
+                => $"overt.{StdlibGoRuntimeTypeName("ListPartition")}[{LowerType(lpt.TypeArguments[0])}]",
             NamedType { Name: "IoError" } => "overt.IoError",
             NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
             NamedType { Name: "RefinementError" } => "overt.RefinementError",
@@ -2973,7 +2975,7 @@ public static class GoEmitter
             {
                 if (IsRuntimeStdlibType(typeId.Name))
                 {
-                    typeName = $"overt.{typeId.Name}";
+                    typeName = $"overt.{StdlibGoRuntimeTypeName(typeId.Name)}";
                     isRuntimeStdlibType = true;
                 }
                 else
@@ -3026,7 +3028,21 @@ public static class GoEmitter
             "RefinementError" => true,
             "ProcessOutput" => true,
             "MapEntry" => true,
+            "ListPartition" => true,
             _ => false,
+        };
+
+        /// <summary>Map an Overt-side stdlib type name to its Go-side
+        /// runtime type name. Mostly identity; the exception is when the
+        /// Overt name collides with a function name in the Go runtime
+        /// (e.g. <c>List.partition</c> camelizes to <c>ListPartition</c>,
+        /// which the Go runtime uses for the function — the type lives
+        /// under a non-colliding name like <c>ListPartitionResult</c>).
+        /// </summary>
+        private static string StdlibGoRuntimeTypeName(string overtName) => overtName switch
+        {
+            "ListPartition" => "ListPartitionResult",
+            _ => overtName,
         };
 
         /// <summary>True when the field-access target's expression-type
@@ -3482,6 +3498,10 @@ public static class GoEmitter
         {
             "println" => "overt.Println",
             "eprintln" => "overt.Eprintln",
+            "print" => "overt.Print",
+            "eprint" => "overt.Eprint",
+            "read_line" => "overt.ReadLine",
+            "read_to_end" => "overt.ReadToEnd",
             "args" => "overt.Args",
             "map" => "overt.ListMap",
             "filter" => "overt.Filter",

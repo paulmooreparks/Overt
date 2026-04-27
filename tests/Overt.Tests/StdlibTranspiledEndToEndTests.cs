@@ -907,6 +907,140 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_StringOps_Foundational_RoundTrips()
+    {
+        // Spot-check the foundational String ops in one program: trim,
+        // to_upper, to_lower, replace, substring, repeat, index_of.
+        // Each operation is verified by composing into a Bool result;
+        // a single failure flips the whole assertion.
+        const string src = """
+            module string_ops
+
+            fn main() -> Result<Bool, IoError> {
+                let trimmed: Bool = String.trim(s = "  hi  ") == "hi"
+                let upper:   Bool = String.to_upper(s = "hi") == "HI"
+                let lower:   Bool = String.to_lower(s = "HI") == "hi"
+                let repl:    Bool = String.replace(s = "ababa", from = "a", to = "x") == "xbxbx"
+                let sub:     Bool = String.substring(s = "hello world", start = 6, end = 11) == "world"
+                let rep:     Bool = String.repeat(s = "ab", n = 3) == "ababab"
+                let idx_some: Option<Int> = String.index_of(s = "abcabc", needle = "b")
+                let idx_none: Option<Int> = String.index_of(s = "abc", needle = "z")
+                let idx_ok: Bool = match idx_some {
+                    Some(i) => i == 1,
+                    None    => false,
+                } && match idx_none {
+                    Some(_) => false,
+                    None    => true,
+                }
+                Ok(trimmed && upper && lower && repl && sub && rep && idx_ok)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "string_ops");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_ListOps_Foundational_RoundTrips()
+    {
+        // Spot-check the foundational List ops: concat, head, tail, take,
+        // drop, reverse, contains, find_index. Helper fns for predicates
+        // because Overt doesn't have inline lambdas; callers pass fns by
+        // name.
+        const string src = """
+            module list_ops
+
+            fn is_two(x: Int) -> Bool { x == 2 }
+
+            fn main() -> Result<Bool, IoError> {
+                let a: List<Int> = List<Int>.singleton(value = 1)
+                let b: List<Int> = List<Int>.singleton(value = 2)
+                let c: List<Int> = List<Int>.singleton(value = 3)
+                let ab: List<Int> = List.concat(left = a, right = b)
+                let abc: List<Int> = List.concat(left = ab, right = c)
+                let rev: List<Int> = List.reverse(list = abc)
+
+                let head_ok: Bool = match List.head(list = abc) {
+                    Some(v) => v == 1,
+                    None    => false,
+                }
+                let tail_size_ok: Bool = size(List.tail(list = abc)) == 2
+                let take_ok: Bool = size(List.take(list = abc, n = 2)) == 2
+                let drop_ok: Bool = size(List.drop(list = abc, n = 1)) == 2
+                let rev_first_ok: Bool = List.at(list = rev, index = 0) == 3
+                let contains_ok: Bool = List.contains(list = abc, value = 2)
+                let no_contains: Bool = !List.contains(list = abc, value = 99)
+
+                let idx_match: Option<Int> = List.find_index(
+                    list = abc,
+                    predicate = is_two)
+                let idx_ok: Bool = match idx_match {
+                    Some(i) => i == 1,
+                    None    => false,
+                }
+
+                Ok(head_ok && tail_size_ok && take_ok && drop_ok
+                    && rev_first_ok && contains_ok && no_contains && idx_ok)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "list_ops");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_ListPartition_SplitsByPredicate()
+    {
+        const string src = """
+            module list_partition
+
+            fn greater_than_two(x: Int) -> Bool { x > 2 }
+
+            fn main() -> Result<Bool, IoError> {
+                let one:   List<Int> = List<Int>.singleton(value = 1)
+                let two:   List<Int> = List<Int>.singleton(value = 2)
+                let three: List<Int> = List<Int>.singleton(value = 3)
+                let four:  List<Int> = List<Int>.singleton(value = 4)
+                let pair12: List<Int> = List.concat(left = one,    right = two)
+                let pair34: List<Int> = List.concat(left = three,  right = four)
+                let xs:     List<Int> = List.concat(left = pair12, right = pair34)
+                let split: ListPartition<Int> = List.partition(
+                    list = xs,
+                    predicate = greater_than_two)
+                Ok(size(split.matched) == 2 && size(split.unmatched) == 2)
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "list_partition");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
+    public void Transpiled_PathExtensions_RoundTrip()
+    {
+        const string src = """
+            module path_ops
+
+            fn main() -> Result<Bool, IoError> {
+                let cs: String = Path.with_extension(path = "src/foo.ov", ext = "cs")
+                Ok(String.ends_with(s = cs, suffix = ".cs")
+                    && Path.is_absolute(path = "/abs/path"))
+            }
+            """;
+
+        var (result, _) = CompileAndRun(src, "path_ops");
+        Assert.NotNull(result);
+        Assert.Equal(true,
+            result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
     public void Transpiled_StringParseInt_ValidInput_ReturnsOkWithParsedInt()
     {
         const string src = """

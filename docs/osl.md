@@ -305,20 +305,21 @@ collections.
 | ✅ | `par_map<T, U, E>(list: List<T>, f: fn(T) -> Result<U, E>) -> Result<List<U>, E>` |
 | ✅ | `try_map<T, U, E>(list: List<T>, f: fn(T) -> Result<U, E>) -> Result<List<U>, E>` |
 | ✅ | `List.concat_three<T>(first: List<T>, middle: List<T>, last: List<T>) -> List<T>` |
-| ⏳ | `List.contains<T>(list: List<T>, value: T) -> Bool` (requires generic equality) |
-| ⏳ | `List.concat<T>(left: List<T>, right: List<T>) -> List<T>` |
-| ⏳ | `List.head<T>(list: List<T>) -> Option<T>` |
-| ⏳ | `List.tail<T>(list: List<T>) -> List<T>` |
-| ⏳ | `List.take<T>(list: List<T>, n: Int) -> List<T>` |
-| ⏳ | `List.drop<T>(list: List<T>, n: Int) -> List<T>` |
-| ⏳ | `List.reverse<T>(list: List<T>) -> List<T>` |
-| ⏳ | `List.find<T>(list: List<T>, pred: fn(T) -> Bool) -> Option<T>` |
-| ⏳ | `List.find_index<T>(list: List<T>, pred: fn(T) -> Bool) -> Option<Int>` |
-| ⏳ | `List.zip<T, U>(left: List<T>, right: List<U>) -> List<(T, U)>` |
-| ⏳ | `List.unzip<T, U>(pairs: List<(T, U)>) -> (List<T>, List<U>)` |
-| ⏳ | `List.flat_map<T, U>(list: List<T>, f: fn(T) -> List<U>) -> List<U>` |
+| ✅ | `List.contains<T>(list: List<T>, value: T) -> Bool` |
+| ✅ | `List.concat<T>(left: List<T>, right: List<T>) -> List<T>` |
+| ✅ | `List.head<T>(list: List<T>) -> Option<T>` |
+| ✅ | `List.tail<T>(list: List<T>) -> List<T>` |
+| ✅ | `List.take<T>(list: List<T>, n: Int) -> List<T>` |
+| ✅ | `List.drop<T>(list: List<T>, n: Int) -> List<T>` |
+| ✅ | `List.reverse<T>(list: List<T>) -> List<T>` |
+| ✅ | `List.find<T>(list: List<T>, predicate: fn(T) -> Bool) -> Option<T>` |
+| ✅ | `List.find_index<T>(list: List<T>, predicate: fn(T) -> Bool) -> Option<Int>` |
+| ✅ | `List.flat_map<T, U>(list: List<T>, f: fn(T) -> List<U>) -> List<U>` |
+| ✅ | `List.partition<T>(list: List<T>, predicate: fn(T) -> Bool) -> ListPartition<T>` |
+| ✅ | `record ListPartition<T> { matched: List<T>, unmatched: List<T> }` (returned by `List.partition`) |
+| ⏳ | `List.zip<T, U>(left: List<T>, right: List<U>) -> List<(T, U)>` (waits for tuple-type annotations or a `Pair` record) |
+| ⏳ | `List.unzip<T, U>(pairs: List<(T, U)>) -> (List<T>, List<U>)` (same gate) |
 | ⏳ | `List.flatten<T>(lists: List<List<T>>) -> List<T>` |
-| ⏳ | `List.partition<T>(list: List<T>, pred: fn(T) -> Bool) -> (List<T>, List<T>)` |
 | ⏳ | `List.sort_by<T>(list: List<T>, cmp: fn(T, T) -> Int) -> List<T>` |
 | ⏳ | `List.sort<T>(list: List<T>) -> List<T>` (requires generic ordering) |
 
@@ -433,13 +434,13 @@ operations.
 | ✅ | `String.code_at(s: String, index: Int) -> Int` |
 | ✅ | `String.chars(s: String) -> List<String>` |
 | ✅ | `String.code_points(s: String) -> List<Int>` |
-| ⏳ | `String.trim(s: String) -> String` |
-| ⏳ | `String.to_upper(s: String) -> String` |
-| ⏳ | `String.to_lower(s: String) -> String` |
-| ⏳ | `String.replace(s: String, from: String, to: String) -> String` |
-| ⏳ | `String.substring(s: String, start: Int, end: Int) -> String` |
-| ⏳ | `String.index_of(s: String, needle: String) -> Option<Int>` |
-| ⏳ | `String.repeat(s: String, n: Int) -> String` |
+| ✅ | `String.trim(s: String) -> String` |
+| ✅ | `String.to_upper(s: String) -> String` |
+| ✅ | `String.to_lower(s: String) -> String` |
+| ✅ | `String.replace(s: String, from: String, to: String) -> String` |
+| ✅ | `String.substring(s: String, start: Int, end: Int) -> String` |
+| ✅ | `String.index_of(s: String, needle: String) -> Option<Int>` |
+| ✅ | `String.repeat(s: String, n: Int) -> String` |
 
 `length(s)` is the only String operation that escapes its namespace
 (unqualified prelude form). Historical from when `size` and `length`
@@ -489,10 +490,10 @@ qualification feels like noise.
 | ✅ | `println(line: String) !{io} -> Result<Unit, IoError>` (writes line + `\n` to stdout) |
 | ✅ | `eprintln(line: String) !{io} -> Result<Unit, IoError>` (writes line + `\n` to stderr) |
 | ✅ | `args() !{io} -> List<String>` |
-| ⏳ | `print(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
-| ⏳ | `eprint(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
-| ⏳ | `read_line() !{io} -> Result<Option<String>, IoError>` (None at EOF) |
-| ⏳ | `read_to_end() !{io} -> Result<String, IoError>` (consume all of stdin) |
+| ✅ | `print(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
+| ✅ | `eprint(s: String) !{io} -> Result<Unit, IoError>` (no trailing newline) |
+| ✅ | `read_line() !{io} -> Result<Option<String>, IoError>` (None at EOF) |
+| ✅ | `read_to_end() !{io} -> Result<String, IoError>` (consume all of stdin) |
 
 What stays out of foundational: ANSI color codes, terminal-size detection,
 raw-mode keyboard input, cursor positioning. These are domain-specific
@@ -606,8 +607,8 @@ effect row.
 | ✅ | `Path.parent(path: String) -> Option<String>` |
 | ✅ | `Path.file_name(path: String) -> Option<String>` |
 | ✅ | `Path.extension(path: String) -> Option<String>` |
-| ⏳ | `Path.with_extension(path: String, ext: String) -> String` (replace extension; `.cs` ↔ `.ov`) |
-| ⏳ | `Path.is_absolute(path: String) -> Bool` |
+| ✅ | `Path.with_extension(path: String, ext: String) -> String` (replace extension; `.cs` ↔ `.ov`) |
+| ✅ | `Path.is_absolute(path: String) -> Bool` |
 
 Platform-aware separator (`/` on Unix, `\` on Windows) per the host's
 native conventions.

@@ -13,12 +13,15 @@
 package overt
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -98,6 +101,73 @@ func Eprintln(s string) Result[Unit, IoError] {
 		return Err[Unit, IoError](IoError{Narrative: err.Error()})
 	}
 	return Ok[Unit, IoError](UnitValue)
+}
+
+// Print is Println without the trailing newline. Common for progress
+// indicators, prompts, and "running test... done." patterns.
+func Print(s string) Result[Unit, IoError] {
+	if _, err := fmt.Fprint(os.Stdout, s); err != nil {
+		return Err[Unit, IoError](IoError{Narrative: err.Error()})
+	}
+	return Ok[Unit, IoError](UnitValue)
+}
+
+// Eprint is the stderr twin of Print.
+func Eprint(s string) Result[Unit, IoError] {
+	if _, err := fmt.Fprint(os.Stderr, s); err != nil {
+		return Err[Unit, IoError](IoError{Narrative: err.Error()})
+	}
+	return Ok[Unit, IoError](UnitValue)
+}
+
+// ReadLine reads one line from stdin. The trailing '\n' (and the '\r'
+// on Windows) is stripped; an empty line returns Some(""). EOF returns
+// None; I/O errors return Err.
+func ReadLine() Result[Option[string], IoError] {
+	reader := getStdinReader()
+	line, err := reader.ReadString('\n')
+	if len(line) > 0 {
+		// Trim trailing newline / CRLF.
+		if line[len(line)-1] == '\n' {
+			line = line[:len(line)-1]
+		}
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		return Ok[Option[string], IoError](Some(line))
+	}
+	if err != nil && err.Error() == "EOF" {
+		return Ok[Option[string], IoError](None[string]())
+	}
+	if err != nil {
+		return Err[Option[string], IoError](IoError{Narrative: err.Error()})
+	}
+	// Empty line at EOF without newline.
+	return Ok[Option[string], IoError](None[string]())
+}
+
+// ReadToEnd consumes all of stdin as a single string. Standard
+// `cat file | tool` pipe-consumer pattern.
+func ReadToEnd() Result[string, IoError] {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return Err[string, IoError](IoError{Narrative: err.Error()})
+	}
+	return Ok[string, IoError](string(data))
+}
+
+// Lazy buffered stdin reader, shared across ReadLine calls so the
+// buffered reader's leftover bytes survive between reads.
+var (
+	stdinReader     *bufio.Reader
+	stdinReaderOnce sync.Once
+)
+
+func getStdinReader() *bufio.Reader {
+	stdinReaderOnce.Do(func() {
+		stdinReader = bufio.NewReader(os.Stdin)
+	})
+	return stdinReader
 }
 
 // TraceEvent is the (placeholder) shape of an event emitted by a
@@ -181,6 +251,155 @@ func ListConcatThree[T any](first, middle, last List[T]) List[T] {
 func Size[T any](list List[T]) int   { return len(list.Items) }
 func Len[T any](list List[T]) int    { return len(list.Items) }
 func Length(s string) int            { return len(s) }
+
+// ListConcat appends two Lists end-to-end. Two-arity sibling of
+// ListConcatThree; useful for the common case of growing a list by
+// one batch.
+func ListConcat[T any](left List[T], right List[T]) List[T] {
+	out := make([]T, 0, len(left.Items)+len(right.Items))
+	out = append(out, left.Items...)
+	out = append(out, right.Items...)
+	return List[T]{Items: out}
+}
+
+// ListHead returns the first element wrapped in Some, or None for the
+// empty list. Pairs with ListTail for the standard pattern-matching
+// recursion idiom.
+func ListHead[T any](list List[T]) Option[T] {
+	if len(list.Items) == 0 {
+		return None[T]()
+	}
+	return Some(list.Items[0])
+}
+
+// ListTail returns everything but the first element. Tail of empty is
+// empty (Haskell-flavored, not panic-on-empty).
+func ListTail[T any](list List[T]) List[T] {
+	if len(list.Items) == 0 {
+		return list
+	}
+	out := make([]T, len(list.Items)-1)
+	copy(out, list.Items[1:])
+	return List[T]{Items: out}
+}
+
+// ListTake returns the first n elements. Negative n yields empty;
+// n >= length yields the whole list. Total recovery on programmer
+// input.
+func ListTake[T any](list List[T], n int) List[T] {
+	if n <= 0 {
+		return List[T]{Items: []T{}}
+	}
+	if n >= len(list.Items) {
+		return list
+	}
+	out := make([]T, n)
+	copy(out, list.Items[:n])
+	return List[T]{Items: out}
+}
+
+// ListDrop returns everything past the first n elements. Symmetric
+// recovery to ListTake.
+func ListDrop[T any](list List[T], n int) List[T] {
+	if n <= 0 {
+		return list
+	}
+	if n >= len(list.Items) {
+		return List[T]{Items: []T{}}
+	}
+	out := make([]T, len(list.Items)-n)
+	copy(out, list.Items[n:])
+	return List[T]{Items: out}
+}
+
+// ListReverse returns a new List with elements in reverse order.
+func ListReverse[T any](list List[T]) List[T] {
+	if len(list.Items) <= 1 {
+		return list
+	}
+	out := make([]T, len(list.Items))
+	for i, v := range list.Items {
+		out[len(list.Items)-1-i] = v
+	}
+	return List[T]{Items: out}
+}
+
+// ListFind returns Some of the first element matching predicate,
+// None when no element matches.
+func ListFind[T any](list List[T], predicate func(T) bool) Option[T] {
+	for _, v := range list.Items {
+		if predicate(v) {
+			return Some(v)
+		}
+	}
+	return None[T]()
+}
+
+// ListFindIndex returns Some of the first index whose element matches
+// predicate, None when no element matches.
+func ListFindIndex[T any](list List[T], predicate func(T) bool) Option[int] {
+	for i, v := range list.Items {
+		if predicate(v) {
+			return Some(i)
+		}
+	}
+	return None[int]()
+}
+
+// ListContains is membership via Go's `==` operator. Requires T to be
+// comparable; Overt's type checker doesn't enforce this yet, so a
+// caller passing a non-comparable T gets a Go-level error.
+func ListContains[T comparable](list List[T], value T) bool {
+	for _, v := range list.Items {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// ListFlatMap maps each element to a list, then concats the results.
+func ListFlatMap[T, U any](list List[T], f func(T) List[U]) List[U] {
+	var out []U
+	for _, v := range list.Items {
+		out = append(out, f(v).Items...)
+	}
+	if out == nil {
+		out = []U{}
+	}
+	return List[U]{Items: out}
+}
+
+// ListPartitionResult is the two-bucket result of ListPartition.
+// Mirrors the C# ListPartition<T> record. Field naming bridges
+// snake_case (Overt) ↔ TitleCase (Go) via the emitter.
+type ListPartitionResult[T any] struct {
+	Matched   List[T]
+	Unmatched List[T]
+}
+
+// ListPartition splits list into (matched, unmatched) by predicate,
+// preserving order within each bucket.
+func ListPartition[T any](list List[T], predicate func(T) bool) ListPartitionResult[T] {
+	var yes, no []T
+	for _, v := range list.Items {
+		if predicate(v) {
+			yes = append(yes, v)
+		} else {
+			no = append(no, v)
+		}
+	}
+	if yes == nil {
+		yes = []T{}
+	}
+	if no == nil {
+		no = []T{}
+	}
+	return ListPartitionResult[T]{
+		Matched:   List[T]{Items: yes},
+		Unmatched: List[T]{Items: no},
+	}
+}
 
 // ListMap applies f to each element of list, returning a new List with
 // the results in order. Pure: does not mutate either input. The runtime
@@ -493,6 +712,84 @@ func PathExtension(path string) Option[string] {
 		return None[string]()
 	}
 	return Some(ext)
+}
+
+// PathWithExtension replaces (or adds) the extension on path. The
+// supplied ext may include or omit the leading dot; both forms are
+// accepted. Empty ext strips any existing extension.
+func PathWithExtension(path string, ext string) string {
+	stripped := strings.TrimSuffix(path, filepath.Ext(path))
+	if ext == "" {
+		return stripped
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	return stripped + ext
+}
+
+// PathIsAbsolute is the absolute-path predicate.
+func PathIsAbsolute(path string) bool {
+	return filepath.IsAbs(path)
+}
+
+// StringTrim removes leading and trailing whitespace per Unicode rules.
+// Mirrors C# String.Trim() and Python str.strip(); same set of code
+// points considered whitespace.
+func StringTrim(s string) string {
+	return strings.TrimSpace(s)
+}
+
+// StringToUpper / StringToLower do invariant-culture case conversion,
+// avoiding the Turkish-locale "i" surprise that bit Java for years.
+// Programs that want locale-aware case use FFI to the host's locale
+// machinery.
+func StringToUpper(s string) string { return strings.ToUpper(s) }
+func StringToLower(s string) string { return strings.ToLower(s) }
+
+// StringReplace replaces every occurrence of `from` with `to`. Empty
+// `from` is a programmer error and panics, matching the C# runtime's
+// ArgumentException shape (cross-target consistency on the failure
+// mode).
+func StringReplace(s string, from string, to string) string {
+	if from == "" {
+		panic("String.replace: 'from' must be non-empty")
+	}
+	return strings.ReplaceAll(s, from, to)
+}
+
+// StringSubstring returns the half-open [start, end) substring. Both
+// indices are byte offsets (matching Length / Code_at conventions).
+// Out-of-range or inverted indices panic; callers guard with length()
+// checks.
+func StringSubstring(s string, start int, end int) string {
+	if start < 0 || end < 0 || start > len(s) || end > len(s) || start > end {
+		panic(fmt.Sprintf(
+			"String.substring: indices out of range or inverted "+
+				"(start=%d, end=%d, length=%d)",
+			start, end, len(s)))
+	}
+	return s[start:end]
+}
+
+// StringIndexOf returns Some(i) for the first byte-offset of needle
+// in s, None when absent. Empty needle is 0 (Go's strings.Index
+// convention; matches .NET String.IndexOf).
+func StringIndexOf(s string, needle string) Option[int] {
+	i := strings.Index(s, needle)
+	if i < 0 {
+		return None[int]()
+	}
+	return Some(i)
+}
+
+// StringRepeat returns s repeated n times. n=0 or empty s yields "".
+// Negative n is a programmer error and panics.
+func StringRepeat(s string, n int) string {
+	if n < 0 {
+		panic(fmt.Sprintf("String.repeat: count must be non-negative (got %d)", n))
+	}
+	return strings.Repeat(s, n)
 }
 
 // StringParseInt parses a decimal integer string into a Result. Mirrors

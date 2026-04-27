@@ -308,7 +308,121 @@ public static class List
         }
         return list.Items[index];
     }
+
+    // Two-list concat. Use concat_three for the three-arity form when an
+    // unrolled chain is convenient.
+    public static List<T> concat<T>(List<T> left, List<T> right)
+        => new(left.Items.AddRange(right.Items));
+
+    // Head / tail. Head returns Option to avoid the empty-list panic;
+    // tail returns the empty list when the input is empty (matches
+    // Haskell-flavored "tail of empty is empty" rather than panicking).
+    public static Option<T> head<T>(List<T> list)
+        => list.Items.IsEmpty ? new OptionNone<T>() : new OptionSome<T>(list.Items[0]);
+    public static List<T> tail<T>(List<T> list)
+        => list.Items.IsEmpty
+            ? list
+            : new(list.Items.RemoveAt(0));
+
+    // Take / drop. Out-of-range counts are clamped — `take` of more than
+    // the list has returns the whole list; negative counts return the
+    // empty list. Total programmer-input recovery. Symmetric on `drop`.
+    public static List<T> take<T>(List<T> list, int n)
+    {
+        if (n <= 0) return new(System.Collections.Immutable.ImmutableArray<T>.Empty);
+        if (n >= list.Items.Length) return list;
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>(n);
+        for (var i = 0; i < n; i++) builder.Add(list.Items[i]);
+        return new(builder.MoveToImmutable());
+    }
+    public static List<T> drop<T>(List<T> list, int n)
+    {
+        if (n <= 0) return list;
+        if (n >= list.Items.Length) return new(System.Collections.Immutable.ImmutableArray<T>.Empty);
+        var remaining = list.Items.Length - n;
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>(remaining);
+        for (var i = n; i < list.Items.Length; i++) builder.Add(list.Items[i]);
+        return new(builder.MoveToImmutable());
+    }
+
+    public static List<T> reverse<T>(List<T> list)
+    {
+        if (list.Items.Length <= 1) return list;
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>(list.Items.Length);
+        for (var i = list.Items.Length - 1; i >= 0; i--) builder.Add(list.Items[i]);
+        return new(builder.MoveToImmutable());
+    }
+
+    // First element matching pred, or None.
+    public static Option<T> find<T>(List<T> list, Func<T, bool> predicate)
+    {
+        foreach (var v in list.Items)
+        {
+            if (predicate(v)) return new OptionSome<T>(v);
+        }
+        return new OptionNone<T>();
+    }
+
+    // First index whose element matches pred, or None.
+    public static Option<int> find_index<T>(List<T> list, Func<T, bool> predicate)
+    {
+        for (var i = 0; i < list.Items.Length; i++)
+        {
+            if (predicate(list.Items[i])) return new OptionSome<int>(i);
+        }
+        return new OptionNone<int>();
+    }
+
+    // Membership via host equality. Uses default EqualityComparer<T>; for
+    // user records that means structural equality (record ==), for
+    // primitives the obvious thing.
+    public static bool contains<T>(List<T> list, T value)
+    {
+        var cmp = System.Collections.Generic.EqualityComparer<T>.Default;
+        foreach (var v in list.Items)
+        {
+            if (cmp.Equals(v, value)) return true;
+        }
+        return false;
+    }
+
+    // Map each element to a list, then concat the results. The functional
+    // bind operation; useful for "expand each element into N elements."
+    public static List<U> flat_map<T, U>(List<T> list, Func<T, List<U>> f)
+    {
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<U>();
+        foreach (var v in list.Items)
+        {
+            builder.AddRange(f(v).Items);
+        }
+        return new List<U>(builder.ToImmutable());
+    }
+
+    // Split into (matching, non-matching) — preserves order within each
+    // partition. Returns a Pair record; tuple-shaped return waits on
+    // tuple-type annotations.
+    public static ListPartition<T> partition<T>(List<T> list, Func<T, bool> predicate)
+    {
+        var yes = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>();
+        var no = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>();
+        foreach (var v in list.Items)
+        {
+            (predicate(v) ? yes : no).Add(v);
+        }
+        return new ListPartition<T>(
+            new List<T>(yes.ToImmutable()),
+            new List<T>(no.ToImmutable()));
+    }
 }
+
+/// <summary>
+/// Two-bucket result of <see cref="List.partition{T}"/>. Field names use
+/// Overt's lowercase convention; programs read as
+/// <c>let split = List.partition(list = xs, predicate = pred); split.matched</c>.
+/// Until tuple-type annotations land, named-field record sidesteps the gap
+/// (same shape as <see cref="MapEntry{K, V}"/>).
+/// </summary>
+public sealed record ListPartition<T>(List<T> matched, List<T> unmatched);
 
 /// <summary>
 /// Non-generic namespace companion for <c>String.X</c> module-qualified
@@ -400,6 +514,66 @@ public static class String
     public static bool starts_with(string s, string prefix) => s.StartsWith(prefix, StringComparison.Ordinal);
     public static bool ends_with(string s, string suffix) => s.EndsWith(suffix, StringComparison.Ordinal);
     public static bool contains(string s, string needle) => s.Contains(needle, StringComparison.Ordinal);
+
+    // Trim removes leading and trailing whitespace (Unicode-aware via .NET's
+    // Char.IsWhiteSpace). The narrative "trim" matches Rust / Python; .NET's
+    // String.Trim() does the same.
+    public static string trim(string s) => s.Trim();
+
+    // Case conversion. Invariant culture so locale doesn't affect the result;
+    // a Turkish-locale "i" → "I" surprise that bit Java for years isn't a
+    // shape Overt programs should inherit. Programs that want locale-aware
+    // case use FFI to System.Globalization.
+    public static string to_upper(string s) => s.ToUpperInvariant();
+    public static string to_lower(string s) => s.ToLowerInvariant();
+
+    // Replace every occurrence of `from` with `to`. Empty `from` is a
+    // programmer error and throws (matches .NET's String.Replace contract).
+    public static string replace(string s, string from, string to)
+    {
+        if (from.Length == 0)
+        {
+            throw new ArgumentException(
+                "String.replace: 'from' must be non-empty",
+                nameof(from));
+        }
+        return s.Replace(from, to, StringComparison.Ordinal);
+    }
+
+    // UTF-16 code-unit-indexed substring; half-open [start, end). Out-of-range
+    // indices throw (programmer error; callers guard with length() check).
+    public static string substring(string s, int start, int end)
+    {
+        if ((uint)start > (uint)s.Length || (uint)end > (uint)s.Length || start > end)
+        {
+            throw new ArgumentOutOfRangeException(
+                $"String.substring: indices out of range or inverted "
+                + $"(start={start}, end={end}, length={s.Length})");
+        }
+        return s.Substring(start, end - start);
+    }
+
+    // Find the index of `needle` in `s`, or None when absent. Empty needle is
+    // 0 (matches .NET / Python convention).
+    public static Option<int> index_of(string s, string needle)
+    {
+        var i = s.IndexOf(needle, StringComparison.Ordinal);
+        return i < 0 ? new OptionNone<int>() : new OptionSome<int>(i);
+    }
+
+    // Repeat the string n times. n=0 yields the empty string; negative n is
+    // a programmer error and throws.
+    public static string repeat(string s, int n)
+    {
+        if (n < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(n), n,
+                "String.repeat: count must be non-negative");
+        }
+        if (n == 0 || s.Length == 0) return string.Empty;
+        return string.Concat(System.Linq.Enumerable.Repeat(s, n));
+    }
 
     // Parse helpers. CLI arg parsing and config readers are the typical
     // callers; both paths want a Result to thread into refinement
@@ -546,6 +720,21 @@ public static class Path
         if (string.IsNullOrEmpty(ext)) return new OptionNone<string>();
         return new OptionSome<string>(ext);
     }
+
+    /// <summary>Replace (or add) the extension on <paramref name="path"/>.
+    /// <paramref name="ext"/> may include or omit the leading dot;
+    /// empty <paramref name="ext"/> strips any existing extension.</summary>
+    public static string with_extension(string path, string ext)
+    {
+        var stripped = global::System.IO.Path.ChangeExtension(path, null) ?? path;
+        if (string.IsNullOrEmpty(ext)) return stripped;
+        return ext.StartsWith('.') ? stripped + ext : stripped + "." + ext;
+    }
+
+    /// <summary>True iff <paramref name="path"/> is rooted (absolute) per
+    /// the host's path conventions.</summary>
+    public static bool is_absolute(string path)
+        => global::System.IO.Path.IsPathRooted(path);
 }
 
 /// <summary>
@@ -786,6 +975,67 @@ public static class Prelude
         {
             Console.Error.WriteLine(line);
             return Ok(Unit.Value);
+        }
+        catch (IOException ex)
+        {
+            return Err(new IoError(ex.Message));
+        }
+    }
+
+    // No-trailing-newline siblings of println / eprintln. Common shape for
+    // progress indicators, prompts, "running test... done." style output.
+    public static Result<Unit, IoError> print(string s)
+    {
+        try
+        {
+            Console.Out.Write(s);
+            return Ok(Unit.Value);
+        }
+        catch (IOException ex)
+        {
+            return Err(new IoError(ex.Message));
+        }
+    }
+
+    public static Result<Unit, IoError> eprint(string s)
+    {
+        try
+        {
+            Console.Error.Write(s);
+            return Ok(Unit.Value);
+        }
+        catch (IOException ex)
+        {
+            return Err(new IoError(ex.Message));
+        }
+    }
+
+    // Read one line from stdin. Returns Some(line) when a line was read,
+    // None at EOF. The trailing newline is stripped; an empty line returns
+    // Some(""). I/O errors surface as Err(IoError).
+    public static Result<Option<string>, IoError> read_line()
+    {
+        try
+        {
+            var line = Console.In.ReadLine();
+            return line is null
+                ? Ok((Option<string>)new OptionNone<string>())
+                : Ok((Option<string>)new OptionSome<string>(line));
+        }
+        catch (IOException ex)
+        {
+            return Err(new IoError(ex.Message));
+        }
+    }
+
+    // Consume all of stdin as a single string. Standard `cat file | tool`
+    // pipe-consumer pattern. Returns the empty string when stdin is at EOF
+    // immediately.
+    public static Result<string, IoError> read_to_end()
+    {
+        try
+        {
+            return Ok(Console.In.ReadToEnd());
         }
         catch (IOException ex)
         {
