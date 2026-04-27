@@ -875,12 +875,42 @@ public sealed class Parser
             return new UnitType(new SourceSpan(startPos, closing.Span.End));
         }
 
-        // For now, tuple types are not separately modeled — fall back to parsing a single
-        // type and emitting a diagnostic. The parser grammar for tuples lands with §9.
-        ReportError("OV0153", "tuple types are not yet supported; use a record", Current.Span);
+        // Named-tuple type: `(name: Type, name: Type, ...)`. Recognized
+        // by the lookahead `Identifier :` after the open paren.
+        if (Check(TokenKind.Identifier)
+            && _cursor + 1 < _tokens.Length
+            && _tokens[_cursor + 1].Kind == TokenKind.Colon)
+        {
+            var fields = ImmutableArray.CreateBuilder<NamedTupleField>();
+            fields.Add(ParseNamedTupleField());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightParen)) break;
+                fields.Add(ParseNamedTupleField());
+            }
+            var close = Expect(TokenKind.RightParen, "named-tuple type");
+            return new NamedTupleType(
+                fields.ToImmutable(),
+                new SourceSpan(startPos, close.Span.End));
+        }
+
+        // Positional tuple types are still not modeled; falls back to
+        // single-type-with-diagnostic per the v0 grammar.
+        ReportError("OV0153", "positional tuple types are not yet supported; use a named-tuple `(a: T, b: U)` or a record", Current.Span);
         var inner = ParseTypeExpr();
-        var close = Expect(TokenKind.RightParen, "type");
-        return inner with { Span = new SourceSpan(startPos, close.Span.End) };
+        var closeOne = Expect(TokenKind.RightParen, "type");
+        return inner with { Span = new SourceSpan(startPos, closeOne.Span.End) };
+    }
+
+    private NamedTupleField ParseNamedTupleField()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "named-tuple field name");
+        Expect(TokenKind.Colon, "named-tuple field type");
+        var fieldType = ParseTypeExpr();
+        return new NamedTupleField(
+            nameToken.Lexeme,
+            fieldType,
+            new SourceSpan(nameToken.Span.Start, fieldType.Span.End));
     }
 
     private NamedType ParseNamedType()
@@ -2201,6 +2231,27 @@ public sealed class Parser
             return new UnitExpr(new SourceSpan(startPos, closing.Span.End));
         }
 
+        // Named-tuple expression: `(name = expr, name = expr, ...)`.
+        // Recognized by the lookahead `Identifier =` after the open
+        // paren. Distinct from a parenthesized assignment because
+        // assignments aren't expressions in Overt.
+        if (Check(TokenKind.Identifier)
+            && _cursor + 1 < _tokens.Length
+            && _tokens[_cursor + 1].Kind == TokenKind.Equals)
+        {
+            var fields = ImmutableArray.CreateBuilder<NamedTupleInit>();
+            fields.Add(ParseNamedTupleInit());
+            while (Match(TokenKind.Comma))
+            {
+                if (Check(TokenKind.RightParen)) break;
+                fields.Add(ParseNamedTupleInit());
+            }
+            var close = Expect(TokenKind.RightParen, "named-tuple expression");
+            return new NamedTupleExpr(
+                fields.ToImmutable(),
+                new SourceSpan(startPos, close.Span.End));
+        }
+
         // Parens unambiguate by themselves, so re-enable record-literal parsing inside
         // regardless of the enclosing restricted context.
         var saved = _allowRecordLiteral;
@@ -2240,6 +2291,17 @@ public sealed class Parser
         {
             _allowRecordLiteral = saved;
         }
+    }
+
+    private NamedTupleInit ParseNamedTupleInit()
+    {
+        var nameToken = Expect(TokenKind.Identifier, "named-tuple field name");
+        Expect(TokenKind.Equals, "named-tuple field value");
+        var value = ParseExpression();
+        return new NamedTupleInit(
+            nameToken.Lexeme,
+            value,
+            new SourceSpan(nameToken.Span.Start, value.Span.End));
     }
 
     // ---------------------------------------------------------- primitives

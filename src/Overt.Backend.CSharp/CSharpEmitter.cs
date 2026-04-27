@@ -1181,6 +1181,22 @@ public sealed class CSharpEmitter
                 _w.Write("Unit");
                 break;
 
+            case NamedTupleType ntt:
+                // Lower to a C# value tuple `(T1 name1, T2 name2)` —
+                // C# tuples already support named-element field
+                // access, so `r.quotient` works at use sites without
+                // any further plumbing.
+                _w.Write("(");
+                for (var i = 0; i < ntt.Fields.Length; i++)
+                {
+                    if (i > 0) _w.Write(", ");
+                    EmitType(ntt.Fields[i].Type);
+                    _w.Write(" ");
+                    _w.Write(EscapeId(ntt.Fields[i].Name));
+                }
+                _w.Write(")");
+                break;
+
             case FunctionType ft:
                 // Map to Func<,> (or Action<> for Unit return). Effect row is discarded.
                 if (IsUnit(ft.ReturnType))
@@ -2580,6 +2596,22 @@ public sealed class CSharpEmitter
 
             case AnonymousFunctionExpr af:
                 EmitAnonymousFunction(af);
+                break;
+
+            case NamedTupleExpr nte:
+                // Lower to C#'s named-tuple-construction syntax
+                // `(name1: expr1, name2: expr2)`. C# infers the
+                // value-tuple element types from the named-arg syntax
+                // when used in a typed context.
+                _w.Write("(");
+                for (var i = 0; i < nte.Fields.Length; i++)
+                {
+                    if (i > 0) _w.Write(", ");
+                    _w.Write(EscapeId(nte.Fields[i].Name));
+                    _w.Write(": ");
+                    EmitExpression(nte.Fields[i].Value);
+                }
+                _w.Write(")");
                 break;
 
             default:

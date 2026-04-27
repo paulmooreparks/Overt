@@ -1171,6 +1171,12 @@ public static class GoEmitter
 
         private string LowerType(TypeExpr? type) => type switch
         {
+            // Named-tuple type: lower to an anonymous struct with the
+            // declared field names. Go infers the struct shape at the
+            // construction site and at field access; same surface as
+            // C# value tuples but with explicit Go syntax.
+            NamedTupleType ntt => LowerNamedTupleType(ntt),
+
             NamedType { Name: "Int" } => "int",
             NamedType { Name: "Int64" } => "int64",
             NamedType { Name: "Bool" } => "bool",
@@ -1237,6 +1243,20 @@ public static class GoEmitter
                 "Go back end does not yet handle type expression " + type.GetType().Name
                 + (type is NamedType nm ? $" (Name = {nm.Name})" : "")),
         };
+
+        private string LowerNamedTupleType(NamedTupleType ntt)
+        {
+            var sb = new StringBuilder("struct { ");
+            for (var i = 0; i < ntt.Fields.Length; i++)
+            {
+                if (i > 0) sb.Append("; ");
+                sb.Append(ntt.Fields[i].Name);
+                sb.Append(' ');
+                sb.Append(LowerType(ntt.Fields[i].Type));
+            }
+            sb.Append(" }");
+            return sb.ToString();
+        }
 
         // ------------------------------------------------------ blocks + statements
 
@@ -2749,6 +2769,10 @@ public static class GoEmitter
                     EmitAnonymousFunction(af);
                     break;
 
+                case NamedTupleExpr nte:
+                    EmitNamedTupleExpr(nte);
+                    break;
+
                 default:
                     throw new NotSupportedException(
                         $"Go back end does not yet handle expression {expr.GetType().Name}.");
@@ -2763,6 +2787,75 @@ public static class GoEmitter
         /// immutable lets, gap for `let mut` references. See
         /// docs/closures.md.
         /// </summary>
+        /// <summary>
+        /// Emit a named-tuple expression as a Go anonymous-struct literal.
+        /// `(quotient = q, remainder = r)` becomes
+        /// `struct { quotient int; remainder int }{quotient: q, remainder: r}`.
+        /// The struct shape comes from the type checker's recorded type
+        /// for the expression — it knows the field types from the value
+        /// expressions it inferred. Without the recorded type we emit
+        /// a best-effort placeholder, which the consumer's Go compiler
+        /// catches as a real error rather than a silent miscompile.
+        /// </summary>
+        private void EmitNamedTupleExpr(NamedTupleExpr nte)
+        {
+            // Build the struct type from the recorded NamedTupleTypeRef
+            // for this expression. Fall back to inline name=value pairs
+            // wrapped in parens (which Go won't accept) when the type
+            // checker didn't run — flagging the missing-type case as
+            // a build error rather than emitting silently broken code.
+            if (_typeCheck?.ExpressionTypes.TryGetValue(nte.Span, out var t) == true
+                && t is NamedTupleTypeRef ntt)
+            {
+                _sb.Append("struct { ");
+                for (var i = 0; i < ntt.Fields.Length; i++)
+                {
+                    if (i > 0) _sb.Append("; ");
+                    _sb.Append(ntt.Fields[i].Name);
+                    _sb.Append(' ');
+                    _sb.Append(LowerTypeRef(ntt.Fields[i].Type));
+                }
+                _sb.Append(" }{");
+                for (var i = 0; i < nte.Fields.Length; i++)
+                {
+                    if (i > 0) _sb.Append(", ");
+                    _sb.Append(nte.Fields[i].Name);
+                    _sb.Append(": ");
+                    EmitExpression(nte.Fields[i].Value);
+                }
+                _sb.Append("}");
+            }
+            else
+            {
+                throw new NotSupportedException(
+                    "named-tuple expression emitted without a recorded type — "
+                    + "TypeCheckResult must be passed to Emit() for named-tuple support");
+            }
+        }
+
+        /// <summary>Lower a TypeRef (semantic type) to a Go type
+        /// expression. Mirrors LowerType but starts from the lowered
+        /// IR rather than the syntax tree.</summary>
+        private string LowerTypeRef(TypeRef t) => t switch
+        {
+            PrimitiveType p when p.Name == "Int" => "int",
+            PrimitiveType p when p.Name == "Int64" => "int64",
+            PrimitiveType p when p.Name == "Float" => "float64",
+            PrimitiveType p when p.Name == "Bool" => "bool",
+            PrimitiveType p when p.Name == "String" => "string",
+            PrimitiveType p when p.Name == "Unit" => "overt.Unit",
+            NamedTypeRef { Name: "Result" } nr when nr.TypeArguments.Length == 2
+                => $"overt.Result[{LowerTypeRef(nr.TypeArguments[0])}, {LowerTypeRef(nr.TypeArguments[1])}]",
+            NamedTypeRef { Name: "Option" } no when no.TypeArguments.Length == 1
+                => $"overt.Option[{LowerTypeRef(no.TypeArguments[0])}]",
+            NamedTypeRef { Name: "List" } nl when nl.TypeArguments.Length == 1
+                => $"overt.List[{LowerTypeRef(nl.TypeArguments[0])}]",
+            NamedTypeRef { Name: "IoError" } => "overt.IoError",
+            NamedTypeRef nt when nt.TypeArguments.Length == 0 => nt.Name,
+            _ => throw new NotSupportedException(
+                "Go back end does not yet handle TypeRef in named-tuple field: " + t.Display),
+        };
+
         private void EmitAnonymousFunction(AnonymousFunctionExpr af)
         {
             _sb.Append("func(");

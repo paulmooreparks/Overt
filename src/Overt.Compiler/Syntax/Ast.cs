@@ -246,6 +246,22 @@ public sealed record FunctionType(
     TypeExpr ReturnType,
     SourceSpan Span) : TypeExpr(Span);
 
+/// <summary>
+/// A named-tuple type: <c>(quotient: Int, remainder: Int)</c>. Most
+/// commonly used as a function return type to carry multiple named
+/// values without inventing a top-level record per ad-hoc shape.
+/// Each field is a name+type pair; the construction-site syntax is
+/// <c>(quotient = q, remainder = r)</c> via <see cref="NamedTupleExpr"/>.
+/// </summary>
+public sealed record NamedTupleType(
+    ImmutableArray<NamedTupleField> Fields,
+    SourceSpan Span) : TypeExpr(Span);
+
+public sealed record NamedTupleField(
+    string Name,
+    TypeExpr Type,
+    SourceSpan Span) : SyntaxNode(Span);
+
 // ---------- Statements ----------
 
 public abstract record Statement(SourceSpan Span) : SyntaxNode(Span);
@@ -589,6 +605,21 @@ public sealed record TuplePattern(
 public sealed record LiteralPattern(
     Expression Value,
     SourceSpan Span) : Pattern(Span);
+
+/// <summary>
+/// A named-tuple expression: <c>(quotient = q, remainder = r)</c>.
+/// Construction-site syntax for a value of <see cref="NamedTupleType"/>;
+/// typically appears as the trailing expression in a fn whose return
+/// type is a named-tuple shape.
+/// </summary>
+public sealed record NamedTupleExpr(
+    ImmutableArray<NamedTupleInit> Fields,
+    SourceSpan Span) : Expression(Span);
+
+public sealed record NamedTupleInit(
+    string Name,
+    Expression Value,
+    SourceSpan Span) : SyntaxNode(Span);
 
 /// <summary>
 /// An anonymous function (closure) used as an expression. Same shape

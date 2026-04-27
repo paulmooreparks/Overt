@@ -353,6 +353,10 @@ public sealed class TypeChecker
                         ? ImmutableArray<string>.Empty
                         : ft.Effects.Effects);
 
+            case NamedTupleType ntt:
+                return new NamedTupleTypeRef(
+                    ntt.Fields.Select(f => (f.Name, LowerType(f.Type))).ToImmutableArray());
+
             default:
                 return UnknownType.Instance;
         }
@@ -584,8 +588,20 @@ public sealed class TypeChecker
 
         AnonymousFunctionExpr af => InferAnonymousFunction(af),
 
+        NamedTupleExpr nte => InferNamedTuple(nte),
+
         _ => UnknownType.Instance,
     };
+
+    private TypeRef InferNamedTuple(NamedTupleExpr nte)
+    {
+        var fields = ImmutableArray.CreateBuilder<(string, TypeRef)>(nte.Fields.Length);
+        foreach (var f in nte.Fields)
+        {
+            fields.Add((f.Name, AnnotateExpression(f.Value)));
+        }
+        return new NamedTupleTypeRef(fields.ToImmutable());
+    }
 
     /// <summary>
     /// A closure value's type is a <see cref="FunctionTypeRef"/> built
@@ -692,6 +708,22 @@ public sealed class TypeChecker
         }
 
         var targetType = AnnotateExpression(fa.Target);
+
+        // Field access on a named-tuple value: `r.quotient` returns the
+        // declared type of the `quotient` field. Same surface as
+        // record field access; the named-tuple type is closed at its
+        // construction site so the field set is fully known here.
+        if (targetType is NamedTupleTypeRef ntt)
+        {
+            foreach (var (name, type) in ntt.Fields)
+            {
+                if (name == fa.FieldName) return type;
+            }
+            ReportError("OV0322",
+                $"named-tuple type `{targetType.Display}` has no field `{fa.FieldName}`",
+                fa.Span);
+            return UnknownType.Instance;
+        }
 
         // Method-call syntax: `s.method(args)`. The target is a value
         // expression (already annotated above); look up `method` in the
@@ -1798,6 +1830,10 @@ public sealed class TypeChecker
                 na.Name == nb.Name && AllEqual(na.TypeArguments, nb.TypeArguments),
             (TupleTypeRef ta, TupleTypeRef tb) =>
                 AllEqual(ta.Elements, tb.Elements),
+            (NamedTupleTypeRef nta, NamedTupleTypeRef ntb) =>
+                nta.Fields.Length == ntb.Fields.Length
+                && nta.Fields.Zip(ntb.Fields, (a, b) =>
+                    a.Name == b.Name && TypesEqual(a.Type, b.Type)).All(eq => eq),
             (FunctionTypeRef fa, FunctionTypeRef fb) =>
                 AllEqual(fa.Parameters, fb.Parameters)
                 && TypesEqual(fa.Return, fb.Return)

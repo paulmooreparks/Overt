@@ -377,6 +377,32 @@ let v = {
 The last expression is the value. Statements before it must end with the
 previous newline or `;` (both accepted).
 
+### Named-tuple types (multi-return)
+
+A function can return multiple named values without inventing a
+top-level record per ad-hoc shape:
+
+```overt
+fn divmod(n: Int, d: Int) -> (quotient: Int, remainder: Int) {
+    (quotient = n / d, remainder = n % d)
+}
+
+let r: (quotient: Int, remainder: Int) = divmod(n = 11, d = 5)
+println("${r.quotient} rem ${r.remainder}")
+// 2 rem 1
+```
+
+The return type `(name: T, name: U, ...)` is an anonymous record
+with named fields. Construction at the value site uses
+`(name = expr, name = expr, ...)`. Field access is the normal
+`r.name` form.
+
+Named-tuple types compose anywhere a regular type does — let
+bindings, function parameters, return types. Inspired by Cpp2's
+named-return form (see `docs/closures.md` for the cribbing
+rationale and `samples/diffconf` for the canonical use case:
+`list_diff` returning `(added: List<String>, removed: List<String>)`).
+
 ### Anonymous fn (closure)
 
 Anonymous functions in expression position. Same syntax as a named fn

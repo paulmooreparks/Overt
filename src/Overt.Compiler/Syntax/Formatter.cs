@@ -418,6 +418,16 @@ public static class Formatter
                 ctx.Write(" -> ");
                 FormatType(ft.ReturnType, ctx);
                 break;
+            case NamedTupleType ntt:
+                ctx.Write("(");
+                for (var i = 0; i < ntt.Fields.Length; i++)
+                {
+                    if (i > 0) ctx.Write(", ");
+                    ctx.Write($"{ntt.Fields[i].Name}: ");
+                    FormatType(ntt.Fields[i].Type, ctx);
+                }
+                ctx.Write(")");
+                break;
             default: ctx.Write("/* ? type */"); break;
         }
     }
@@ -604,6 +614,16 @@ public static class Formatter
                 ctx.Depth--;
                 ctx.WriteIndent();
                 ctx.Write("}");
+                break;
+            case NamedTupleExpr nte:
+                ctx.Write("(");
+                for (var i = 0; i < nte.Fields.Length; i++)
+                {
+                    if (i > 0) ctx.Write(", ");
+                    ctx.Write($"{nte.Fields[i].Name} = ");
+                    FormatExpr(nte.Fields[i].Value, ctx);
+                }
+                ctx.Write(")");
                 break;
             case AnonymousFunctionExpr af:
                 ctx.Write("fn(");

@@ -21,10 +21,13 @@ module diffconf
 //     examples/csharp/json.ov.
 //   - A sum-typed diff result (`DiffEntry`) collected as a List, then
 //     rendered with exhaustive matching.
-//   - Captured-state closures: `list_added` / `list_removed` use
-//     `filter` with an anonymous fn that closes over the other-side
-//     list. Two functions, four lines each — the natural shape for
-//     "elements of A not in B."
+//   - Captured-state closures: `list_diff` uses `filter` with
+//     anonymous fns that close over the other-side list, so
+//     "elements of A not in B" reads as a one-line filter call.
+//   - Named multi-return: `list_diff` returns
+//     `(added: List<String>, removed: List<String>)` — a typed
+//     anonymous record at the return-type position, no top-level
+//     record decl needed for the ad-hoc shape.
 
 // ---------------------------------------------------------------- types
 
@@ -59,20 +62,17 @@ extern "csharp" fn parse_config(text: String) -> Config
 
 // ---------------------------------------------------------------- list diff
 
-// Elements present in `right` but not in `left` — the "added" set in
-// before-vs-after vocabulary. The closure captures `left` so filter
-// can apply the per-item membership test inline.
-fn list_added(left: List<String>, right: List<String>) -> List<String> {
-    filter(list = right, predicate = fn(item: String) -> Bool {
+// Compute "added" (in right but not left) and "removed" (in left but
+// not right) in one pass, returned as a named tuple — no top-level
+// record decl needed for the ad-hoc shape. Each closure captures the
+// other-side list so filter can do the per-item membership test
+// inline.
+fn list_diff(left: List<String>, right: List<String>) -> (added: List<String>, removed: List<String>) {
+    (added = filter(list = right, predicate = fn(item: String) -> Bool {
         !List.contains(list = left, value = item)
-    })
-}
-
-// Elements present in `left` but not in `right`. Symmetric to list_added.
-fn list_removed(left: List<String>, right: List<String>) -> List<String> {
-    filter(list = left, predicate = fn(item: String) -> Bool {
+    }), removed = filter(list = left, predicate = fn(item: String) -> Bool {
         !List.contains(list = right, value = item)
-    })
+    }))
 }
 
 // ---------------------------------------------------------------- diff
@@ -95,10 +95,9 @@ fn diff(left: Config, right: Config) -> List<DiffEntry> {
     if left.log_level != right.log_level {
         out = push(list = out, entry = DiffEntry.Changed { field = "log_level", before = "\"${left.log_level}\"", after = "\"${right.log_level}\"" })
     }
-    let added: List<String> = list_added(left = left.upstream_urls, right = right.upstream_urls)
-    let removed: List<String> = list_removed(left = left.upstream_urls, right = right.upstream_urls)
-    if size(added) > 0 || size(removed) > 0 {
-        out = push(list = out, entry = DiffEntry.ListChanged { field = "upstream_urls", added = added, removed = removed })
+    let urls: (added: List<String>, removed: List<String>) = list_diff(left = left.upstream_urls, right = right.upstream_urls)
+    if size(urls.added) > 0 || size(urls.removed) > 0 {
+        out = push(list = out, entry = DiffEntry.ListChanged { field = "upstream_urls", added = urls.added, removed = urls.removed })
     }
     out
 }

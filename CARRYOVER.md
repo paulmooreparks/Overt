@@ -100,15 +100,12 @@ Ordered by "how directly this unblocks someone writing real Overt code":
 
 2. **`Set.values<T>(set: Set<T>) -> List<T>`** (½ session). Set has full create / contains / insert / remove / set-algebra ops but no way to iterate the result. `samples/diffconf/` dropped the natural `Set.difference` path because of this. Symmetric to the existing `Map.values`; trivial on both back ends. See [`docs/osl.md`](docs/osl.md) Candidates.
 
-   **Named multi-return** (1 session). Cribbed from Sutter's Cpp2 (see [hsutter.github.io/cppfront](https://hsutter.github.io/cppfront/cpp2/functions/)). Let a fn declare multiple named return values without inventing a record type:
-   ```
+   ~~**Named multi-return**~~ **Shipped.** Cribbed from Sutter's Cpp2. A fn can declare multiple named return values without a top-level record decl per ad-hoc shape:
+   ```overt
    fn list_diff(left: List<String>, right: List<String>)
        -> (added: List<String>, removed: List<String>) { ... }
-
-   let result = list_diff(left = a, right = b)
-   // result.added, result.removed
    ```
-   Solves the diffconf-style "I want to return a (added, removed) pair" friction without a tuple-type concept or a top-level record decl per ad-hoc shape. The return type IS an anonymous record-with-named-fields; reads naturally given Overt's "every field spelled" rule. Should land after closures.
+   New AST nodes (`NamedTupleType`, `NamedTupleExpr`), TypeRef variant (`NamedTupleTypeRef`), parser cases (lookahead `Identifier :` for type position; `Identifier =` for expr position), type-checker handling, formatter, and both back-end emitters (C# value tuples; Go anonymous structs). `samples/diffconf` rewritten — `list_added` + `list_removed` collapsed into one `list_diff` returning the named tuple.
 
 3. ~~**C# emitter: IIFE-wrapping context loss**~~ **Largely resolved.** Two of the five quirks shipped fixes:
    - Side-effect-only `if` / `match` inside a for-each loop body now emits as a real if / switch statement instead of an IIFE-wrapped ternary. Fix: route block trailing expressions through the statement-position emit path (`EmitExpressionAsStatement`), with a Unit-literal special case that emits an empty statement.

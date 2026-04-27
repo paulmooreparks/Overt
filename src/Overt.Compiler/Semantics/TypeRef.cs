@@ -116,6 +116,20 @@ public sealed record TupleTypeRef(ImmutableArray<TypeRef> Elements) : TypeRef
         $"({string.Join(", ", Elements.Select(e => e.Display))})";
 }
 
+/// <summary>Named-tuple type — anonymous record with field names spelled
+/// inline at the type position. Most common use is a function return
+/// type carrying multiple named values without a top-level record per
+/// shape (Cpp2's named-return shape; see docs/closures.md and the
+/// design notes for the Cpp2 cribbing rationale). Field access on a
+/// value of this type works the same as on a regular record:
+/// <c>r.field_name</c> resolves to the field's declared type.</summary>
+public sealed record NamedTupleTypeRef(
+    ImmutableArray<(string Name, TypeRef Type)> Fields) : TypeRef
+{
+    public override string Display
+        => $"({string.Join(", ", Fields.Select(f => $"{f.Name}: {f.Type.Display}"))})";
+}
+
 /// <summary>
 /// A reference to a generic type parameter bound in the current declaration scope
 /// (e.g. <c>T</c>, <c>E</c> on a generic function). Unified during inference.

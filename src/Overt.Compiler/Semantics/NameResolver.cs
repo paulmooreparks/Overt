@@ -517,6 +517,13 @@ public sealed class NameResolver
                 ResolveExpression(tx.Body, scope);
                 break;
 
+            case NamedTupleExpr nte:
+                foreach (var f in nte.Fields)
+                {
+                    ResolveExpression(f.Value, scope);
+                }
+                break;
+
             case AnonymousFunctionExpr af:
                 {
                     // Closure body resolves in a new scope nested inside

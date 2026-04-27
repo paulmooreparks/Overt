@@ -500,6 +500,33 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_NamedMultiReturn_RoundTripsViaCSharpValueTuple()
+    {
+        // `fn divmod(...) -> (quotient: Int, remainder: Int)` lowers
+        // to a C# value tuple with named elements; field access via
+        // `r.quotient` works directly because C# value tuples support
+        // named-element access. This is the smallest end-to-end test of
+        // the named-multi-return feature: parser, type checker,
+        // emitter, and runtime all participate.
+        const string src = """
+            module multi_ret_e2e
+
+            fn divmod(n: Int, d: Int) -> (quotient: Int, remainder: Int) {
+                (quotient = n / d, remainder = n % d)
+            }
+
+            fn main() !{io} -> Result<Int, IoError> {
+                let r: (quotient: Int, remainder: Int) = divmod(n = 11, d = 5)
+                Ok(r.quotient * 100 + r.remainder)
+            }
+            """;
+        var (result, _) = CompileAndRun(src, "multi_ret_e2e");
+        Assert.NotNull(result);
+        // 11 / 5 = 2 quotient, 1 remainder; 2*100 + 1 = 201.
+        Assert.Equal(201, result!.GetType().GetProperty("Value")!.GetValue(result));
+    }
+
+    [Fact]
     public void Transpiled_AnonymousFn_AssignedToTypedLet()
     {
         // Anonymous fn assigned to a let with an explicit fn-type
