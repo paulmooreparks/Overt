@@ -822,6 +822,25 @@ Writer.flush(writer: FileWriter) !{io} -> Result<Unit, IoError>
   implementation could start; the citation list documents which
   programs justified each design decision when the time comes.
 
+### Set.values
+
+- **Signature:** `Set.values<T>(set: Set<T>) -> List<T>`
+- **Semantics:** Return the set's elements as a `List<T>` in
+  iteration order (filesystem-dependent, not stable across hosts —
+  same caveat as `Map.keys` / `Map.values`). Closes the gap that
+  every `Set` operation produces a `Set<T>` but no operation lets
+  you iterate one.
+- **Motivating programs:**
+  - `samples/diffconf/diffconf.ov` — wanted
+    `Set.difference(left = a, right = b)` for the upstream-URL diff,
+    couldn't iterate the result, fell back to `let mut` + `for each`
+    + `List.contains`.
+- **Status:** 🔮 speculative (1 of 3)
+- **Notes:** Ergonomically symmetric to `Map.values(map: Map<K,V>) ->
+  List<V>` which already ships. Implementation is trivial on both
+  back ends (the underlying `ImmutableHashSet<T>` / Go map already
+  supports iteration).
+
 ### Template
 
 ```
