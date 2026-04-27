@@ -541,6 +541,7 @@ static class Cli
         var types = new Type[]
         {
             typeof(System.Net.Http.HttpClient),
+            typeof(System.Net.Sockets.TcpClient),
             typeof(System.Uri),
             typeof(System.Text.Json.JsonSerializer),
             typeof(System.Text.RegularExpressions.Regex),

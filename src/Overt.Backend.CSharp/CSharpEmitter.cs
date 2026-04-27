@@ -1312,6 +1312,8 @@ public sealed class CSharpEmitter
             ft.Parameters.Select(LowerType).ToImmutableArray(),
             LowerType(ft.ReturnType),
             ft.Effects is null ? ImmutableArray<string>.Empty : ft.Effects.Effects),
+        NamedTupleType ntt => new NamedTupleTypeRef(
+            ntt.Fields.Select(f => (f.Name, LowerType(f.Type))).ToImmutableArray()),
         _ => UnknownType.Instance,
     };
 
@@ -3593,6 +3595,8 @@ public sealed class CSharpEmitter
             $"{MapTypeName(n.Name)}<{string.Join(", ", n.TypeArguments.Select(CSharpTypeDisplay))}>",
         TupleTypeRef tt =>
             $"({string.Join(", ", tt.Elements.Select(CSharpTypeDisplay))})",
+        NamedTupleTypeRef ntt =>
+            $"({string.Join(", ", ntt.Fields.Select(f => $"{CSharpTypeDisplay(f.Type)} {f.Name}"))})",
         TypeVarRef tv => tv.Name,
         FunctionTypeRef ft =>
             ft.Return is PrimitiveType { Name: "Unit" }

@@ -935,6 +935,16 @@ public sealed class TypeChecker
                     CollectSubstitutions(pt.Elements[i], at.Elements[i], subs);
                 }
                 break;
+            case NamedTupleTypeRef pnt when arg is NamedTupleTypeRef ant
+                && pnt.Fields.Length == ant.Fields.Length:
+                for (var i = 0; i < pnt.Fields.Length; i++)
+                {
+                    if (pnt.Fields[i].Name == ant.Fields[i].Name)
+                    {
+                        CollectSubstitutions(pnt.Fields[i].Type, ant.Fields[i].Type, subs);
+                    }
+                }
+                break;
         }
     }
 
@@ -958,6 +968,9 @@ public sealed class TypeChecker
                 ft.Effects),
             TupleTypeRef tt => new TupleTypeRef(
                 tt.Elements.Select(e => SubstituteTypeVars(e, subs))
+                    .ToImmutableArray()),
+            NamedTupleTypeRef ntt => new NamedTupleTypeRef(
+                ntt.Fields.Select(f => (f.Name, SubstituteTypeVars(f.Type, subs)))
                     .ToImmutableArray()),
             _ => type,
         };
@@ -1871,6 +1884,7 @@ public sealed class TypeChecker
         TypeVarRef => true,
         NamedTypeRef n => n.TypeArguments.Any(ContainsTypeVar),
         TupleTypeRef tt => tt.Elements.Any(ContainsTypeVar),
+        NamedTupleTypeRef ntt => ntt.Fields.Any(f => ContainsTypeVar(f.Type)),
         FunctionTypeRef ft => ft.Parameters.Any(ContainsTypeVar) || ContainsTypeVar(ft.Return),
         _ => false,
     };

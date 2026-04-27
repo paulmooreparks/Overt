@@ -1,0 +1,89 @@
+module pingall
+
+// `pingall` takes a list of hostnames as argv and probes each one
+// in parallel via `ping`. Reports up/down per host; exits 0 only if
+// every host is up. Useful as a CI step ("are all my service deps
+// reachable?") and as the canonical demo of Overt's parallel
+// fan-out shape: par_map + Process.run + a closure per item.
+//
+// Usage:
+//   overt run pingall.ov example.com 8.8.8.8 192.168.1.1
+//
+// What this sample shows:
+//
+//   - **`par_map` over a List<String>.** The fan-out primitive:
+//     each callback runs concurrently, the result is a List<U> in
+//     input order. First Err short-circuits, but for "couldn't
+//     launch ping" rather than "host was down" — non-zero exit is
+//     just data, not a failure.
+//   - **`Process.run` for the actual probe.** Already Result-shaped;
+//     ProcessOutput's `exit_code` carries the up/down signal.
+//   - **Named multi-return for per-host results.**
+//     `(host: String, up: Bool)` — anonymous record; no top-level
+//     decl per ad-hoc shape.
+//   - **A closure passed to par_map.** The per-host callback is an
+//     anonymous fn that closes over no outer state; defining it
+//     inline keeps the call site self-contained.
+//
+// Platform note: this targets Windows-style ping (`-n 1 -w 2000`).
+// Unix's `ping -c 1 -W 2 <host>` is similar but the flag spelling
+// differs; a real cross-platform tool would branch on OS.
+
+// ---------------------------------------------------------------- ping invocation
+
+// Build ping's argv. Windows: `-n 1` is one echo, `-w 2000` is a
+// 2-second timeout per echo (in ms).
+fn ping_args(host: String) -> List<String> {
+    List.concat_three(first = List.singleton(value = "-n"), middle = List.concat_three(first = List.singleton(value = "1"), middle = List.singleton(value = "-w"), last = List.singleton(value = "2000")), last = List.singleton(value = host))
+}
+
+// One probe. Returns Ok((host, up=true/false)) when ping ran;
+// Err(IoError) when ping itself failed to launch (binary missing,
+// permission denied, etc.). The exit_code carries the up/down
+// signal: 0 means reachable, anything else means down.
+fn probe(host: String) !{io, async} -> Result<(host: String, up: Bool), IoError> {
+    let output: ProcessOutput = Process.run(cmd = "ping", args = ping_args(host = host))?
+    Ok((host = host, up = output.exit_code == 0))
+}
+
+// ---------------------------------------------------------------- render
+
+fn render(result: (host: String, up: Bool)) !{io} -> Result<(), IoError> {
+    if result.up {
+        println("UP   ${result.host}")
+    } else {
+        println("DOWN ${result.host}")
+    }
+}
+
+// Walk the results and accumulate the down count. Predicate is a
+// closure; passes through filter and we count what's left.
+fn count_down(results: List<(host: String, up: Bool)>) -> Int {
+    size(filter(list = results, predicate = fn(r: (host: String, up: Bool)) -> Bool {
+        !r.up
+    }))
+}
+
+// ---------------------------------------------------------------- main
+
+fn main(args: List<String>) !{io, async} -> Result<(), IoError> {
+    if size(args) == 0 {
+        eprintln("usage: pingall <host> [host ...]")?
+        return Err(IoError { narrative = "expected at least one host" })
+    }
+    // Fan out: each host probes in parallel. par_map preserves input
+    // order and short-circuits on first launch-failure (ping binary
+    // missing, etc.); host-down is just a value in the result.
+    let results: List<(host: String, up: Bool)> = par_map(list = args, f = fn(host: String) !{io, async} -> Result<(host: String, up: Bool), IoError> {
+        probe(host = host)
+    })?
+    for each r in results {
+        render(result = r)?
+    }
+    let down: Int = count_down(results = results)
+    if down == 0 {
+        Ok(())
+    } else {
+        Err(IoError { narrative = "${down} of ${size(args)} host(s) down" })
+    }
+}
