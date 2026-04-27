@@ -3515,7 +3515,6 @@ public static class GoEmitter
             "all" => "overt.All",
             "any" => "overt.Any",
             "size" => "overt.Size",
-            "len" => "overt.Len",
             "length" => "overt.Length",
             _ => name,
         };

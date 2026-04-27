@@ -1417,7 +1417,6 @@ public static class Prelude
 
     public static int size<T>(List<T> list) => list.Items.Length;
     public static int length(string s) => s.Length;
-    public static int len<T>(List<T> list) => list.Items.Length;
 
     public static List<U> map<T, U>(List<T> list, Func<T, U> f)
     {

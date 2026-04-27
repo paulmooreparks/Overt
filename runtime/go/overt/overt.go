@@ -302,15 +302,11 @@ func ListConcatThree[T any](first, middle, last List[T]) List[T] {
 	return List[T]{Items: out}
 }
 
-// Size, Len, and Length are three names for closely related operations.
-// Size and Len both return the element count of a List; Length returns
-// the byte length of a string. Overt's prelude exposes all three names
-// (size and len as synonyms for List, length for String); the runtime
-// faithfully provides each so the emitter doesn't have to rewrite at
-// the call site.
-func Size[T any](list List[T]) int   { return len(list.Items) }
-func Len[T any](list List[T]) int    { return len(list.Items) }
-func Length(s string) int            { return len(s) }
+// Size returns the element count of a List; Length returns the byte
+// length of a string. Two distinct names because they apply to
+// different types (List vs. String) — not synonyms.
+func Size[T any](list List[T]) int { return len(list.Items) }
+func Length(s string) int          { return len(s) }
 
 // ListConcat appends two Lists end-to-end. Two-arity sibling of
 // ListConcatThree; useful for the common case of growing a list by

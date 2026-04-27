@@ -301,11 +301,6 @@ public static class Stdlib
             parameters: new TypeRef[] { Generic("List", TV("T")) },
             ret: PrimitiveType.Int));
 
-        e.Add(Fn("len",
-            typeParams: new[] { "T" },
-            parameters: new TypeRef[] { Generic("List", TV("T")) },
-            ret: PrimitiveType.Int));
-
         e.Add(Fn("length",
             typeParams: Array.Empty<string>(),
             parameters: new TypeRef[] { PrimitiveType.String },

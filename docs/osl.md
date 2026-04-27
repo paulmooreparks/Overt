@@ -324,17 +324,10 @@ collections.
 | ✅ | `List.sort_by<T>(list: List<T>, cmp: fn(T, T) -> Int) -> List<T>` (stable; libc cmp convention) |
 | ⏳ | `List.sort<T>(list: List<T>) -> List<T>` (requires generic ordering primitive) |
 
-### Cleanup
-
-| Status | Item | Note |
-| --- | --- | --- |
-| 🚫 | `len<T>(list) -> Int` synonym | Duplicate of `size`. Remove pre-1.0; programs use `size`. |
-
-`size` is the canonical name. `len` is a v0 shipping mistake. The Overt
-formatter will rewrite `len(xs)` to `size(xs)` once we land the cleanup.
-
-`length(s: String) -> Int` is *not* a `size` synonym — it's the String
-operation; see [`String`](#string).
+`size` is the canonical name for List element counts. `length(s: String)
+-> Int` is the String byte-length operation; see [`String`](#string).
+The two are distinct because they apply to different types, not
+synonyms.
 
 ---
 
@@ -879,7 +872,6 @@ disposition; the queue exists so we don't ship the regrets.
 
 | Item | Disposition | Note |
 | --- | --- | --- |
-| `len<T>(list)` | Remove | Duplicate of `size`. Formatter rewrites at fix time. |
 | Effect row on `File.exists` | Keep `!{io}` | The filesystem state can change between calls; `!{io}` declares the dependency. Confirmed correct after review. |
 
 ---

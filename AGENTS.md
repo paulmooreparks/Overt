@@ -1017,7 +1017,6 @@ List.singleton(value: T) -> List<T>
 List.concat_three(first: List<T>, middle: List<T>, last: List<T>) -> List<T>
 
 size(list: List<T>) -> Int
-len(list: List<T>) -> Int
 length(s: String) -> Int
 
 map(list: List<T>, f: fn(T) -> U) -> List<U>
