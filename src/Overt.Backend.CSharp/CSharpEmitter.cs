@@ -766,6 +766,17 @@ public sealed class CSharpEmitter
             + (x.FromLibrary is { } lib ? $" from \"{lib}\"" : ""));
         EmitEffectRowComment(x.Effects);
         _w.Write("public static ");
+        // A `-> Task<()>` extern wraps a host method that returns C#'s
+        // non-generic `Task` (e.g., `TcpClient.ConnectAsync`). The body
+        // does `await callExpr; return Unit.Value;`, so the method
+        // itself is `async Task<Unit>`. Same for the async-Result
+        // shape `-> Task<Result<T, E>>` whose body wraps await in
+        // try/catch. Without `async`, the body's `await` would be a
+        // parse error.
+        if (IsVoidTaskExtern(x) || IsAsyncResultExtern(x))
+        {
+            _w.Write("async ");
+        }
         if (x.ReturnType is { } rt)
         {
             EmitType(rt);
@@ -910,12 +921,58 @@ public sealed class CSharpEmitter
             return;
         }
 
+        if (IsAsyncResultExtern(x))
+        {
+            // `-> Task<Result<T, E>>`: bind target is async (Task or
+            // Task<T>); await it inside try/catch and convert the
+            // host's thrown exception into Err. The Inner Result's T
+            // governs how await's value is folded into Ok.
+            var taskInner = ((NamedType)x.ReturnType!).TypeArguments[0];
+            var resultInner = (NamedType)taskInner;
+            var okInner = resultInner.TypeArguments[0];
+            var errType = resultInner.TypeArguments[1];
+            _w.WriteLine("try");
+            _w.WriteLine("{");
+            using (_w.Indent())
+            {
+                if (okInner is UnitType)
+                {
+                    _w.WriteLine($"await {callExpr};");
+                    _w.WriteLine("return Ok(Unit.Value);");
+                }
+                else
+                {
+                    _w.WriteLine($"var __overt_async_result = await {callExpr};");
+                    _w.WriteLine("return Ok(__overt_async_result);");
+                }
+            }
+            _w.WriteLine("}");
+            _w.WriteLine("catch (Exception __ex)");
+            _w.WriteLine("{");
+            using (_w.Indent())
+            {
+                EmitExternErrorConversion(errType);
+            }
+            _w.WriteLine("}");
+            return;
+        }
+
         if (!returnsResult)
         {
             // Void or plain-typed return: pass through. Exceptions fly.
             if (x.ReturnType is UnitType || x.ReturnType is null)
             {
                 _w.WriteLine($"{callExpr};");
+                _w.WriteLine("return Unit.Value;");
+            }
+            else if (IsVoidTaskExtern(x))
+            {
+                // `-> Task<()>` extern: bind target returns C#'s
+                // non-generic Task; await it and return Unit.Value.
+                // The method declaration is `async Task<Unit>`
+                // (added in EmitExtern above), so this body's `await`
+                // and Unit return are valid.
+                _w.WriteLine($"await {callExpr};");
                 _w.WriteLine("return Unit.Value;");
             }
             else if (x.ReturnType is NamedType { Name: "Option", TypeArguments.Length: 1 } optType)
@@ -1229,6 +1286,31 @@ public sealed class CSharpEmitter
     }
 
     private static bool IsUnit(TypeExpr t) => t is UnitType;
+
+    /// <summary>
+    /// True iff the extern's declared return type is <c>Task&lt;()&gt;</c> —
+    /// the void-Task case where the binds-target returns .NET's
+    /// non-generic <c>Task</c> rather than <c>Task&lt;Unit&gt;</c>.
+    /// Triggers the <c>async Task&lt;Unit&gt;</c> wrap in <see cref="EmitExtern"/>
+    /// and the <c>await; return Unit.Value;</c> body in <see cref="EmitExternBody"/>.
+    /// </summary>
+    private static bool IsVoidTaskExtern(ExternDecl x)
+        => x.ReturnType is NamedType { Name: "Task", TypeArguments.Length: 1 } taskType
+            && taskType.TypeArguments[0] is UnitType;
+
+    /// <summary>
+    /// True iff the extern's declared return type is
+    /// <c>Task&lt;Result&lt;T, E&gt;&gt;</c> — the async-Result wrap
+    /// case. The binds-target returns either non-generic <c>Task</c>
+    /// (when T is Unit) or <c>Task&lt;T&gt;</c>; the emitter wraps
+    /// the await in try/catch to convert thrown exceptions into
+    /// <c>Err</c> values. Used for binding throwing .NET async
+    /// methods (TcpClient.ConnectAsync, HttpClient.GetStringAsync,
+    /// etc.) into Result-shaped Overt fns.
+    /// </summary>
+    private static bool IsAsyncResultExtern(ExternDecl x)
+        => x.ReturnType is NamedType { Name: "Task", TypeArguments.Length: 1 } taskType
+            && taskType.TypeArguments[0] is NamedType { Name: "Result", TypeArguments.Length: 2 };
 
     private static string MapTypeName(string name) => name switch
     {
@@ -1813,6 +1895,12 @@ public sealed class CSharpEmitter
             .Any(p => BodyContainsAwaitExpr(p.Expression)),
         ParallelExpr pe => pe.Tasks.Any(BodyContainsAwaitExpr),
         RaceExpr re => re.Tasks.Any(BodyContainsAwaitExpr),
+        ForEachExpr fe => BodyContainsAwaitExpr(fe.Iterable) || BodyContainsAwaitExpr(fe.Body),
+        WhileExpr we => BodyContainsAwaitExpr(we.Condition) || BodyContainsAwaitExpr(we.Body),
+        LoopExpr lp => BodyContainsAwaitExpr(lp.Body),
+        UnsafeExpr ux => BodyContainsAwaitExpr(ux.Body),
+        TraceExpr tx => BodyContainsAwaitExpr(tx.Body),
+        ReturnExpr rx => BodyContainsAwaitExpr(rx.Value),
         _ => false,
     };
 
@@ -2269,6 +2357,18 @@ public sealed class CSharpEmitter
                 // case body, etc.) still has *something* to terminate
                 // its block, but without `Unit.Value;` (CS0201) on the
                 // line.
+                _w.WriteLine(";");
+                break;
+
+            case AwaitExpr aw:
+                // `expr.await` as a discarded statement: emit
+                // `await operand;` directly, not `(await operand);`.
+                // C# accepts `await foo;` as a statement (await is in
+                // the statement-expression allowlist) but
+                // parens-wrapped expression-statements that aren't
+                // calls / assignments hit CS0201.
+                _w.Write("await ");
+                EmitExpression(aw.Operand);
                 _w.WriteLine(";");
                 break;
 

@@ -1,0 +1,188 @@
+module portcheck
+
+// `portcheck` takes a hostname and a port specification, probes each
+// port via async TCP connect, and reports open/closed per port. Use
+// case: CI smoke-test that a service has its expected ports
+// listening — `portcheck localhost 8080,8443,5432` covers a typical
+// "is the dev stack up" check.
+//
+// Sister sample to `pingall` (which uses `Process.run` + `ping` for
+// ICMP reachability). portcheck reaches deeper into the FFI surface:
+// it binds C#'s async `TcpClient.ConnectAsync` directly and uses
+// Overt's `.await` to compose the call chain — no shell-out.
+//
+// Usage:
+//   overt run portcheck.ov localhost 8080
+//   overt run portcheck.ov example.com 80,443
+//   overt run portcheck.ov localhost 8000-8005
+//   overt run portcheck.ov host 80,443,8000-8005,9000
+//
+// Exit code: 0 when every port is open, 1 when any are closed.
+//
+// What this sample shows:
+//
+//   - **`Task<Result<T, E>>` async-extern wrap.** The new emitter
+//     pattern shipped alongside this sample: declaring an extern as
+//     `-> Task<Result<(), IoError>>` makes the binds-target's thrown
+//     exceptions surface as Err values, so `.await` on the call
+//     yields a Result the caller pattern-matches on. No host
+//     exceptions escape the FFI boundary.
+//   - **`.await` composing inside a fn body.** Standard async fn
+//     shape — `!{io, async}` row, body uses `.await`, emits as
+//     `async Task<ReturnType>` on the C# side.
+//   - **Refinement types validating user input.** `Port` is a
+//     `where 1..65535` Int. The port-spec parser converts user
+//     strings into `List<Port>`; bad input becomes an Err(IoError).
+//   - **Named multi-return for per-port results.**
+//     `(port: Port, open: Bool)` — anonymous record at the result
+//     site; no top-level decl per ad-hoc shape.
+//
+// Limitations:
+//
+//   - **Sequential, not parallel.** par_map's runtime expects a sync
+//     callback (`Func<T, Result<U, E>>`); an async closure compiles
+//     to `Func<T, Task<Result<U, E>>>`, which the sync signature
+//     can't accept. Adding a `par_map_async` variant would fan out
+//     the awaits via `Task.WhenAll` — separate stdlib op, queued
+//     after this sample lands.
+//   - **No per-connection timeout.** ConnectAsync against a
+//     firewalled host that drops SYN packets will hang for the OS
+//     default (~21s on Windows). Best for localhost or cooperative
+//     hosts where closed ports return RST immediately.
+
+// ---------------------------------------------------------------- types
+
+type Port = Int where 1 <= self && self <= 65535
+
+// ---------------------------------------------------------------- FFI
+
+extern "csharp" type TcpClient binds "System.Net.Sockets.TcpClient"
+
+extern "csharp" ctor fn new_tcp_client() -> TcpClient
+    binds "System.Net.Sockets.TcpClient"
+
+// `ConnectAsync` returns C#'s non-generic Task and throws on failure.
+// Wrapped here as `Task<Result<(), IoError>>`: the emitter awaits the
+// underlying Task inside try/catch, returning Ok(()) on success or
+// Err(IoError { narrative = exception_message }) on failure. The
+// caller `.await`s the Task and matches on the Result.
+extern "csharp" instance fn try_connect_async(self: TcpClient, host: String, port: Int) !{io, async} -> Task<Result<(), IoError>>
+    binds "System.Net.Sockets.TcpClient.ConnectAsync"
+
+// ---------------------------------------------------------------- port-spec parsing
+
+// Parse a port-spec piece: either "N" (single port) or "N-M" (range,
+// inclusive). Returns the expanded list of Ints; downstream caller
+// validates each is in Port's range.
+fn parse_piece(piece: String) -> Result<List<Int>, IoError> {
+    match String.index_of(s = piece, needle = "-") {
+        None => match String.parse_int(s = piece) {
+            Ok(n) => Ok(List.singleton(value = n)),
+            Err(_) => Err(IoError { narrative = "not a number: ${piece}" }),
+        },
+        Some(dash) => {
+            let lo_str: String = String.substring(s = piece, start = 0, end = dash)
+            let hi_str: String = String.substring(s = piece, start = dash + 1, end = length(piece))
+            match String.parse_int(s = lo_str) {
+                Err(_) => Err(IoError { narrative = "range low not a number: ${lo_str}" }),
+                Ok(lo) => match String.parse_int(s = hi_str) {
+                    Err(_) => Err(IoError { narrative = "range high not a number: ${hi_str}" }),
+                    Ok(hi) => {
+                        if lo > hi {
+                            Err(IoError { narrative = "range reversed: ${lo}-${hi}" })
+                        } else {
+                            Ok(Int.range(start = lo, end = hi + 1))
+                        }
+                    },
+                },
+            }
+        },
+    }
+}
+
+// Parse a port spec like "8080" / "80,443" / "8000-8005" /
+// "80,443,8000-8005,9000" into a List<Port>. Refines each Int into
+// Port (failing with a clear message on out-of-range entries).
+fn parse_spec(spec: String) -> Result<List<Port>, IoError> {
+    let pieces: List<String> = String.split(s = spec, sep = ",")
+    let mut ports: List<Port> = List<Port>.empty()
+    for each piece in pieces {
+        let raw_list: List<Int> = parse_piece(piece = piece)?
+        for each n in raw_list {
+            if 1 <= n && n <= 65535 {
+                ports = List.concat(left = ports, right = List.singleton(value = n))
+            } else {
+                return Err(IoError { narrative = "port out of range: ${n}" })
+            }
+        }
+    }
+    if size(ports) == 0 {
+        Err(IoError { narrative = "empty port spec" })
+    } else {
+        Ok(ports)
+    }
+}
+
+// ---------------------------------------------------------------- probe
+
+// Probe one port. Refused connections become `open = false`; only
+// connection-launch failures (which the async-Result wrap surfaces
+// as IoError on the awaited Result) would propagate, but ConnectAsync
+// for a well-formed (host, port) doesn't really have a launch-failure
+// path — every error is a connect failure. So `probe` returns the
+// named tuple directly without a Result wrap.
+fn probe(host: String, port: Port) !{io, async} -> (port: Port, open: Bool) {
+    let c: TcpClient = new_tcp_client()
+    match try_connect_async(self = c, host = host, port = port).await {
+        Ok(_) => (port = port, open = true),
+        Err(_) => (port = port, open = false),
+    }
+}
+
+// ---------------------------------------------------------------- render
+
+fn render(result: (port: Port, open: Bool)) !{io} -> Result<(), IoError> {
+    if result.open {
+        println("OPEN   ${result.port}")
+    } else {
+        println("CLOSED ${result.port}")
+    }
+}
+
+fn count_closed(results: List<(port: Port, open: Bool)>) -> Int {
+    size(filter(list = results, predicate = fn(r: (port: Port, open: Bool)) -> Bool {
+        !r.open
+    }))
+}
+
+// ---------------------------------------------------------------- main
+
+fn main(args: List<String>) !{io, async} -> Result<(), IoError> {
+    if size(args) != 2 {
+        eprintln("usage: portcheck <host> <port-spec>")?
+        eprintln("  port-spec: \"8080\", \"80,443\", \"8000-8005\", \"80,443,8000-8005,9000\"")?
+        return Err(IoError { narrative = "expected host and port-spec" })
+    }
+    let host: String = List.at(list = args, index = 0)
+    let spec: String = List.at(list = args, index = 1)
+    let ports: List<Port> = parse_spec(spec = spec)?
+    // Sequential probe: walk the port list, await each probe in turn,
+    // accumulate. par_map can't host an async closure today (its
+    // callback shape is sync); the parallel variant is queued. For
+    // a small port set the total time is dominated by the slowest
+    // probe anyway — ~one connect-RTT per port.
+    let mut results: List<(port: Port, open: Bool)> = List<(port: Port, open: Bool)>.empty()
+    for each p in ports {
+        let r: (port: Port, open: Bool) = probe(host = host, port = p).await
+        results = List.concat(left = results, right = List.singleton(value = r))
+    }
+    for each r in results {
+        render(result = r)?
+    }
+    let closed: Int = count_closed(results = results)
+    if closed == 0 {
+        Ok(())
+    } else {
+        Err(IoError { narrative = "${closed} of ${size(ports)} port(s) closed" })
+    }
+}

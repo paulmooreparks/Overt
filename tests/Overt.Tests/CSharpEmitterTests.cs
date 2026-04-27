@@ -337,6 +337,52 @@ public class CSharpEmitterTests
     }
 
     [Fact]
+    public void Emit_VoidTaskExtern_WrapsWithAwaitAndUnitReturn()
+    {
+        // An extern declared `-> Task<()>` binds to a host method
+        // returning C#'s non-generic Task. The emitter wraps with
+        // `async Task<Unit>` + `await callExpr; return Unit.Value;`
+        // so the host method's "no result" Task fits Overt's Task<Unit>
+        // type.
+        var source = """
+            module m
+            extern "csharp" type TcpClient binds "System.Net.Sockets.TcpClient"
+            extern "csharp" instance fn cx(self: TcpClient, host: String, port: Int)
+                !{io, async} -> Task<()>
+                binds "System.Net.Sockets.TcpClient.ConnectAsync"
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains("public static async global::System.Threading.Tasks.Task<Unit> cx(", csharp);
+        Assert.Contains("await self.ConnectAsync(host, port);", csharp);
+        Assert.Contains("return Unit.Value;", csharp);
+    }
+
+    [Fact]
+    public void Emit_AsyncResultExtern_WrapsAwaitInTryCatch()
+    {
+        // An extern declared `-> Task<Result<T, E>>` binds an async
+        // host method that throws. The emitter awaits inside try/catch
+        // and converts thrown exceptions into Err values, so the
+        // caller's `.await` yields a Result the program can match on.
+        var source = """
+            module m
+            extern "csharp" type TcpClient binds "System.Net.Sockets.TcpClient"
+            extern "csharp" instance fn try_cx(self: TcpClient, host: String, port: Int)
+                !{io, async} -> Task<Result<(), IoError>>
+                binds "System.Net.Sockets.TcpClient.ConnectAsync"
+            """;
+        var csharp = EmitSource(source);
+        Assert.Contains(
+            "public static async global::System.Threading.Tasks.Task<Result<Unit, IoError>> try_cx(",
+            csharp);
+        Assert.Contains("try", csharp);
+        Assert.Contains("await self.ConnectAsync(host, port);", csharp);
+        Assert.Contains("return Ok(Unit.Value);", csharp);
+        Assert.Contains("catch (Exception __ex)", csharp);
+        Assert.Contains("return Err(new IoError(narrative: __ex.Message));", csharp);
+    }
+
+    [Fact]
     public void Emit_DocComment_OnRecordField_RaisesError()
     {
         // V1 doesn't support @doc on record fields (no clean spot for inline XML

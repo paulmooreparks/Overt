@@ -541,6 +541,10 @@ public static class Formatter
                 FormatExpr(pr.Operand, ctx);
                 ctx.Write("?");
                 break;
+            case AwaitExpr aw:
+                FormatExpr(aw.Operand, ctx);
+                ctx.Write(".await");
+                break;
             case ReturnExpr rx:
                 ctx.Write("return ");
                 FormatExpr(rx.Value, ctx);
