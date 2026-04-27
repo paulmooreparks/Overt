@@ -2924,8 +2924,8 @@ public static class GoEmitter
                 case TraceExpr tr:
                     CollectLetBindingNames(tr.Body, sink);
                     break;
-                // Leaf expressions (literals, bare identifiers, wildcards)
-                // contribute no bindings; nothing to recurse into.
+                    // Leaf expressions (literals, bare identifiers, wildcards)
+                    // contribute no bindings; nothing to recurse into.
             }
         }
 
