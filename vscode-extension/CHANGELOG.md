@@ -6,6 +6,22 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-27
+
+### Added
+
+- Highlight new stdlib type `LogLevel` (the four-arm Debug / Info /
+  Warn / Error sum that ships with the reshaped `TraceEvent`).
+- Highlight the new `Log` namespace via the namespace-call pattern, so
+  `Log.info(...)`, `Log.warn(...)`, etc. render in the same style as
+  the other stdlib namespaces.
+
+### Removed
+
+- Drop `len` from the prelude-function highlight list. `len` was a
+  duplicate of `size` and is removed from the runtime; programs that
+  used it now fail at parse, so highlighting it would be misleading.
+
 ## [0.1.2] - 2026-04-27
 
 ### Added
