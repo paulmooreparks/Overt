@@ -1,0 +1,253 @@
+module envcheck
+
+// `envcheck` reads a `.env`-style file and validates each key against
+// a schema declared as Overt code. The schema is a
+// `Map<String, SchemaEntry>` whose values carry a validator closure
+// per key, so adding a new key is one line of source. Reports missing
+// required keys, invalid values, and unknown keys; exits 1 on any
+// failure. CI-friendly: stdout for the report, stderr clean, exit
+// code carries the signal.
+//
+// Usage:
+//   overt run envcheck.ov envs/prod.env
+//   overt run envcheck.ov envs/bad.env
+//
+// What this sample shows:
+//
+//   - **Closures stored as Map values.** `SchemaEntry` carries a
+//     `fn(String) -> Result<(), String>` validator. The schema
+//     becomes a typed dispatch table; adding a new key requires no
+//     plumbing past inserting one entry.
+//   - **Map.entries iteration with closures.** Validation walks the
+//     env map and the schema map separately to catch invalid values
+//     and missing-required-keys in one pass each.
+//   - **Sum-typed failure result with three variants.** The renderer
+//     exhaustively matches; if `Failure` grew a fourth kind tomorrow
+//     every rendering site would refuse to compile until updated.
+//   - **Pure-Overt CLI built around refinement-shaped validation.**
+//     No C# entry point; argv, file reads, parsing, validation, and
+//     output all live in this module.
+
+// ---------------------------------------------------------------- types
+
+// One per-key entry in the schema. The validator closure either
+// returns Ok(()) (the value is fine) or Err(reason) (the reason
+// renders verbatim in the failure report).
+record SchemaEntry {
+    validator: fn(String) -> Result<(), String>,
+    required: Bool,
+}
+
+// One validation failure. Three shapes, each with the info needed to
+// produce the right report line.
+@derive(Debug)
+enum Failure {
+    MissingRequired { key: String },
+    Invalid { key: String, value: String, reason: String },
+    Unknown { key: String },
+}
+
+// ---------------------------------------------------------------- validators
+
+// Each fn returns a closure that validates a single value. Pulled out
+// of the schema-build site so the reasons are colocated with the
+// rules and the schema reads as a key-to-rule index.
+
+fn non_empty() -> fn(String) -> Result<(), String> {
+    fn(value: String) -> Result<(), String> {
+        if length(value) > 0 {
+            Ok(())
+        } else {
+            Err("must be non-empty")
+        }
+    }
+}
+
+fn int_in_range(low: Int, high: Int) -> fn(String) -> Result<(), String> {
+    fn(value: String) -> Result<(), String> {
+        match String.parse_int(s = value) {
+            Err(_) => Err("must be an integer in ${low}..${high}"),
+            Ok(n) => {
+                if n >= low && n <= high {
+                    Ok(())
+                } else {
+                    Err("must be in ${low}..${high}; got ${n}")
+                }
+            },
+        }
+    }
+}
+
+fn one_of(allowed: List<String>) -> fn(String) -> Result<(), String> {
+    fn(value: String) -> Result<(), String> {
+        if List.contains(list = allowed, value = value) {
+            Ok(())
+        } else {
+            Err("must be one of: ${String.join(list = allowed, sep = ", ")}")
+        }
+    }
+}
+
+// ---------------------------------------------------------------- schema
+
+// The application's required-and-optional environment variables. Each
+// entry pairs a key with a validator closure and a required flag.
+// Adding a new variable: append one Map.insert call; the rest of the
+// program picks it up automatically.
+fn build_schema() -> Map<String, SchemaEntry> {
+    let log_levels: List<String> = List.concat_three(first = List.singleton(value = "debug"), middle = List.concat_three(first = List.singleton(value = "info"), middle = List.singleton(value = "warn"), last = List.singleton(value = "error")), last = List<String>.empty())
+    let mut s: Map<String, SchemaEntry> = Map<String, SchemaEntry>.empty()
+    s = Map<String, SchemaEntry>.insert(map = s, key = "DATABASE_URL", value = SchemaEntry { validator = non_empty(), required = true })
+    s = Map<String, SchemaEntry>.insert(map = s, key = "PORT", value = SchemaEntry { validator = int_in_range(low = 1, high = 65535), required = true })
+    s = Map<String, SchemaEntry>.insert(map = s, key = "WORKER_COUNT", value = SchemaEntry { validator = int_in_range(low = 1, high = 256), required = true })
+    s = Map<String, SchemaEntry>.insert(map = s, key = "LOG_LEVEL", value = SchemaEntry { validator = one_of(allowed = log_levels), required = true })
+    s = Map<String, SchemaEntry>.insert(map = s, key = "CACHE_TTL", value = SchemaEntry { validator = int_in_range(low = 0, high = 86400), required = false })
+    s
+}
+
+// ---------------------------------------------------------------- parsing
+
+// One parsed line of a .env file. Top-level record so the emitter
+// has unambiguous type info at the construction sites — the bare
+// `Pair<K, V>` record literal needs Form-3-style type args at the
+// constructor in some IIFE-wrapped contexts, which is fiddly to get
+// right. A dedicated record sidesteps the question.
+record EnvLine {
+    key: String,
+    value: String,
+}
+
+// Parse one line of a .env file. Blank lines and `#` comments return
+// None; well-formed `KEY=VALUE` lines return Some(EnvLine{...}).
+// Malformed lines (no `=`, empty key) return None for the v0 sample —
+// real envcheck would report them as parse failures.
+fn parse_line(line: String) -> Option<EnvLine> {
+    let trimmed: String = String.trim(s = line)
+    if length(trimmed) == 0 || String.starts_with(s = trimmed, prefix = "#") {
+        None
+    } else {
+        match String.index_of(s = trimmed, needle = "=") {
+            None => None,
+            Some(eq) => {
+                let key: String = String.trim(s = String.substring(s = trimmed, start = 0, end = eq))
+                let value: String = String.trim(s = String.substring(s = trimmed, start = eq + 1, end = length(trimmed)))
+                if length(key) == 0 {
+                    None
+                } else {
+                    Some(EnvLine { key = key, value = value })
+                }
+            },
+        }
+    }
+}
+
+// Read every line of `path`, parse each, return the resulting Map.
+// Duplicate keys: last assignment wins (matches dotenv-loader behavior
+// most CI tools follow).
+fn read_env(path: String) !{io} -> Result<Map<String, String>, IoError> {
+    let lines: List<String> = File.read_lines(path = path)?
+    let mut env: Map<String, String> = Map<String, String>.empty()
+    for each line in lines {
+        // Match-as-expression returns the new env value; the
+        // assignment happens at the loop level. Match-with-only-
+        // side-effect-arms inside a for-each loop hits the same
+        // expression-as-statement quirk diffconf documented; this
+        // workaround sidesteps it.
+        env = match parse_line(line = line) {
+            None => env,
+            Some(parsed) => Map<String, String>.insert(map = env, key = parsed.key, value = parsed.value),
+        }
+    }
+    Ok(env)
+}
+
+// ---------------------------------------------------------------- validation
+
+// Walk the env map: for every key, look up the schema entry and run
+// its validator. Unknown keys (in env but not schema) become Unknown
+// failures. The captured `schema` lets the closure pull the right
+// validator per key.
+fn check_env_keys(env: Map<String, String>, schema: Map<String, SchemaEntry>) -> List<Failure> {
+    let mut failures: List<Failure> = List<Failure>.empty()
+    for each entry in Map<String, String>.entries(map = env) {
+        failures = check_one_key(failures = failures, entry = entry, schema = schema)
+    }
+    failures
+}
+
+// Per-entry check pulled out of the loop so the nested matches sit in
+// expression position (return value flows out through fn return type)
+// rather than statement position (where the side-effect-only arms hit
+// the expression-as-statement emitter quirk).
+fn check_one_key(failures: List<Failure>, entry: MapEntry<String, String>, schema: Map<String, SchemaEntry>) -> List<Failure> {
+    match Map<String, SchemaEntry>.get(map = schema, key = entry.key) {
+        None => push(list = failures, failure = Failure.Unknown { key = entry.key }),
+        Some(schema_entry) => {
+            // Bind the validator-call result to a typed let before
+            // matching; the IIFE-wrapped match-arm context loses
+            // the scrutinee type otherwise, and Ok / Err patterns
+            // emit without their ResultOk / ResultErr rewrite.
+            let outcome: Result<(), String> = schema_entry.validator(entry.value)
+            match outcome {
+                Ok(_) => failures,
+                Err(reason) => push(list = failures, failure = Failure.Invalid { key = entry.key, value = entry.value, reason = reason }),
+            }
+        },
+    }
+}
+
+// Walk the schema: for every required key not present in env, emit
+// MissingRequired. Run after check_env_keys so the report orders
+// invalid-value failures before missing-key failures (the more
+// specific failures first).
+fn check_required_keys(env: Map<String, String>, schema: Map<String, SchemaEntry>) -> List<Failure> {
+    let mut failures: List<Failure> = List<Failure>.empty()
+    for each entry in Map<String, SchemaEntry>.entries(map = schema) {
+        // If-as-expression returns the new failures value, sidestepping
+        // the if-with-side-effect-only-then-arm emitter quirk.
+        failures = if entry.value.required && !Map<String, String>.contains_key(map = env, key = entry.key) {
+            push(list = failures, failure = Failure.MissingRequired { key = entry.key })
+        } else {
+            failures
+        }
+    }
+    failures
+}
+
+fn push(list: List<Failure>, failure: Failure) -> List<Failure> {
+    List.concat(left = list, right = List.singleton(value = failure))
+}
+
+// ---------------------------------------------------------------- render
+
+fn render_failure(f: Failure) !{io} -> Result<(), IoError> {
+    match f {
+        Failure.MissingRequired { key = k } => println("MISSING ${k}: required key not set"),
+        Failure.Invalid { key = k, value = v, reason = r } => println("INVALID ${k} (\"${v}\"): ${r}"),
+        Failure.Unknown { key = k } => println("UNKNOWN ${k}: not declared in schema"),
+    }
+}
+
+// ---------------------------------------------------------------- main
+
+fn main(args: List<String>) !{io} -> Result<(), IoError> {
+    if size(args) != 1 {
+        eprintln("usage: envcheck <path-to-env-file>")?
+        return Err(IoError { narrative = "expected one path" })
+    }
+    let path: String = List.at(list = args, index = 0)
+    let env: Map<String, String> = read_env(path = path)?
+    let schema: Map<String, SchemaEntry> = build_schema()
+    let invalid: List<Failure> = check_env_keys(env = env, schema = schema)
+    let missing: List<Failure> = check_required_keys(env = env, schema = schema)
+    let all: List<Failure> = List.concat(left = invalid, right = missing)
+    if size(all) == 0 {
+        println("OK: ${Map<String, String>.size(map = env)} key(s) validated against ${Map<String, SchemaEntry>.size(map = schema)} schema entry(ies)")?
+        Ok(())
+    } else {
+        for each f in all {
+            render_failure(f = f)?
+        }
+        Err(IoError { narrative = "${size(all)} validation failure(s)" })
+    }
+}
