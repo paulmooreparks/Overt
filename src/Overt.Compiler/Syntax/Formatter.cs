@@ -97,6 +97,7 @@ public static class Formatter
         /// comment pack that leads up to it flushes first.</summary>
         public void FlushLeading(FormatContext ctx, int upToLine)
         {
+            var lastCommentLine = -1;
             while (_index < _tokens.Length)
             {
                 var t = _tokens[_index];
@@ -107,11 +108,28 @@ public static class Formatter
                 }
                 if (t.Span.Start.Line >= upToLine) break;
 
-                // Separate blocks with a blank line so blank-line groupings the
-                // author had around a comment survive at least approximately.
                 if (!ctx.EndsWithNewline) ctx.Newline();
+                // If the previous comment was more than one line above
+                // this one, the author had a blank line separating
+                // them — preserve it so paragraph breaks inside a
+                // comment block survive the round trip.
+                if (lastCommentLine >= 0 && t.Span.Start.Line > lastCommentLine + 1)
+                {
+                    ctx.Newline();
+                }
                 ctx.Line(t.Lexeme);
+                lastCommentLine = t.Span.Start.Line;
                 _index++;
+            }
+
+            // Preserve a blank line between the comment block and the
+            // construct that follows when the source had one. Without
+            // this, a section header like `// ---- types` written with
+            // a blank line before the next decl renders glued to it,
+            // erasing the visual division the author intended.
+            if (lastCommentLine >= 0 && upToLine > lastCommentLine + 1)
+            {
+                ctx.Newline();
             }
         }
 
@@ -676,8 +694,24 @@ public static class Formatter
         FormatBlock(ie.Then, ctx);
         if (ie.Else is { } elseBlock)
         {
-            ctx.Write(" else ");
-            FormatBlock(elseBlock, ctx);
+            // Collapse `else { if ... }` to `else if ...` when the
+            // else-block is just a single trailing if-expression.
+            // The parser produces the same AST for `else if` source
+            // and explicit `else { if }`, so this is the canonical
+            // shape — without the collapse, every chained else-if
+            // would render as a stairstep of nested blocks one
+            // indent level deeper per arm.
+            if (elseBlock.Statements.IsDefaultOrEmpty
+                && elseBlock.TrailingExpression is IfExpr nestedIf)
+            {
+                ctx.Write(" else ");
+                FormatIf(nestedIf, ctx);
+            }
+            else
+            {
+                ctx.Write(" else ");
+                FormatBlock(elseBlock, ctx);
+            }
         }
     }
 

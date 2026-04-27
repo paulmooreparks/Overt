@@ -25,6 +25,9 @@ module logtally
 //     adding a new variant later forces every consumer to handle it.
 //   - Effects declared on the boundary fns: argv, File, stdin, println
 //     all carry !{io}; the parsing fns are pure.
+
+// ---------------------------------------------------------------- types
+
 // Result of parsing one line. Either we found a `[LEVEL] rest` shape,
 // or the line didn't match.
 @derive(Debug)
@@ -40,6 +43,8 @@ record Tally {
     malformed: Int,
     total: Int,
 }
+
+// ---------------------------------------------------------------- parsing
 
 // Pull `[LEVEL]` off the front of the line. Returns Tagged on a clean
 // match, Malformed on anything else. Robust to leading whitespace and
@@ -70,6 +75,8 @@ fn parse_tagged(trimmed: String, close: Int) -> LineKind {
     LineKind.Tagged { level = level, message = message }
 }
 
+// ---------------------------------------------------------------- aggregation
+
 // Initial aggregate. Map<String, Int> needs Form 3 because the type
 // arguments aren't recoverable from the (zero) value args.
 fn empty_tally() -> Tally {
@@ -90,6 +97,8 @@ fn step(t: Tally, line: String) -> Tally {
         LineKind.Malformed { raw = _ } => Tally { counts = t.counts, malformed = t.malformed + 1, total = next_total },
     }
 }
+
+// ---------------------------------------------------------------- ordering
 
 // Map a level name to a sort rank. Unknown levels sort last (rank 99)
 // so they stand out visually rather than blending into the recognized
@@ -113,6 +122,8 @@ fn compare_entries(a: MapEntry<String, Int>, b: MapEntry<String, Int>) -> Int {
     level_rank(level = a.key) - level_rank(level = b.key)
 }
 
+// ---------------------------------------------------------------- I/O
+
 // Read every input line. With an argv path, read that file; otherwise
 // drain stdin and split on newlines. The two paths converge on a
 // `Result<List<String>, IoError>`.
@@ -133,6 +144,8 @@ fn read_input(argv: List<String>) !{io} -> Result<List<String>, IoError> {
     }
 }
 
+// ---------------------------------------------------------------- output
+
 // One histogram line per level, then a separator, then totals. The
 // malformed warning goes to stderr so it doesn't pollute stdout for
 // anyone piping the histogram into another tool.
@@ -149,6 +162,8 @@ fn print_report(t: Tally) !{io} -> Result<(), IoError> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------- main
 
 // `main(args: List<String>)` is the recommended CLI shape: the
 // dependency on argv is visible in the signature, and the runner
