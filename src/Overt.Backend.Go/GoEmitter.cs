@@ -1197,6 +1197,7 @@ public static class GoEmitter
             NamedType { Name: "TraceEvent" } => "overt.TraceEvent",
             NamedType { Name: "RefinementError" } => "overt.RefinementError",
             NamedType { Name: "ProcessOutput" } => "overt.ProcessOutput",
+            NamedType { Name: "Bytes" } => "overt.Bytes",
             // Opaque host types: declared by `extern "go" type N binds
             // "..."`. The binds-string is the Go-side type expression
             // in import-path form (e.g. `*net/http.Request`); the
@@ -3533,7 +3534,7 @@ public static class GoEmitter
             // Allowlist gate: only known stdlib namespaces route here.
             // Unknown namespaces are most likely the user's own enum
             // (variant access) and shouldn't be camelized.
-            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Directory" or "Path" or "Process" or "Map" or "Set"))
+            if (namespaceName is not ("Int" or "List" or "String" or "Option" or "Result" or "Trace" or "CString" or "File" or "Directory" or "Path" or "Process" or "Map" or "Set" or "Bytes"))
             {
                 return null;
             }

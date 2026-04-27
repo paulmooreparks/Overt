@@ -512,15 +512,15 @@ operate at the text-only ceiling.
 
 | Status | Item |
 | --- | --- |
-| ⏳ | `Bytes` type (opaque sequence of u8) |
-| ⏳ | `Bytes.empty() -> Bytes` |
-| ⏳ | `Bytes.from_list(list: List<Int>) -> Bytes` (each Int must be 0..255) |
-| ⏳ | `Bytes.size(b: Bytes) -> Int` |
-| ⏳ | `Bytes.at(b: Bytes, index: Int) -> Int` (panics out-of-range) |
-| ⏳ | `Bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` |
-| ⏳ | `Bytes.concat(left: Bytes, right: Bytes) -> Bytes` |
-| ⏳ | `Bytes.from_utf8(s: String) -> Bytes` |
-| ⏳ | `Bytes.to_utf8(b: Bytes) -> Result<String, IoError>` (Err on invalid UTF-8) |
+| ✅ | `Bytes` type (immutable sequence of u8) |
+| ✅ | `Bytes.empty() -> Bytes` |
+| ✅ | `Bytes.from_list(list: List<Int>) -> Bytes` (each Int must be 0..255) |
+| ✅ | `Bytes.size(b: Bytes) -> Int` |
+| ✅ | `Bytes.at(b: Bytes, index: Int) -> Int` (panics out-of-range) |
+| ✅ | `Bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` |
+| ✅ | `Bytes.concat(left: Bytes, right: Bytes) -> Bytes` |
+| ✅ | `Bytes.from_utf8(s: String) -> Bytes` |
+| ✅ | `Bytes.to_utf8(b: Bytes) -> Result<String, IoError>` (Err on invalid UTF-8) |
 
 `Bytes.at` returns `Int` rather than a separate `Byte` primitive — every
 operation that wants a single byte uses Int 0..255, and programs that
@@ -556,6 +556,8 @@ verbose for the common cases.
 | ✅ | `File.size(path: String) !{io} -> Result<Int, IoError>` |
 | ✅ | `File.move(from: String, to: String) !{io} -> Result<Unit, IoError>` (= C `rename`; atomic where the host supports it) |
 | ✅ | `File.copy(from: String, to: String) !{io} -> Result<Unit, IoError>` (overwrites destination) |
+| ✅ | `File.read_bytes(path: String) !{io} -> Result<Bytes, IoError>` |
+| ✅ | `File.write_bytes(path: String, data: Bytes) !{io} -> Result<Unit, IoError>` (overwrites) |
 | ⏳ | `File.read_bytes(path: String) !{io} -> Result<Bytes, IoError>` |
 | ⏳ | `File.write_bytes(path: String, data: Bytes) !{io} -> Result<Unit, IoError>` |
 

@@ -80,6 +80,16 @@ public static class Stdlib
         b["File.size"] = ImmutableArray.Create("path");
         b["File.move"] = ImmutableArray.Create("from", "to");
         b["File.copy"] = ImmutableArray.Create("from", "to");
+        b["File.read_bytes"] = ImmutableArray.Create("path");
+        b["File.write_bytes"] = ImmutableArray.Create("path", "data");
+        b["Bytes.empty"] = ImmutableArray<string>.Empty;
+        b["Bytes.from_list"] = ImmutableArray.Create("list");
+        b["Bytes.size"] = ImmutableArray.Create("b");
+        b["Bytes.at"] = ImmutableArray.Create("b", "index");
+        b["Bytes.slice"] = ImmutableArray.Create("b", "start", "end");
+        b["Bytes.concat"] = ImmutableArray.Create("left", "right");
+        b["Bytes.from_utf8"] = ImmutableArray.Create("s");
+        b["Bytes.to_utf8"] = ImmutableArray.Create("b");
         b["Directory.exists"] = ImmutableArray.Create("path");
         b["Directory.create"] = ImmutableArray.Create("path");
         b["Directory.list"] = ImmutableArray.Create("path");
@@ -196,6 +206,7 @@ public static class Stdlib
         e.Add(Type("MapEntry"));  // record returned by Map.entries
         e.Add(Type("ListPartition")); // record returned by List.partition
         e.Add(Type("Pair")); // universal 2-tuple container; used by List.zip / List.unzip
+        e.Add(Type("Bytes")); // immutable byte sequence; used by File.read_bytes / write_bytes
 
         // ---- Result / Option factory helpers -----------------------------------
         // Ok<T, E>(value: T) -> Result<T, E>
@@ -792,6 +803,63 @@ public static class Stdlib
             parameters: new TypeRef[] { PrimitiveType.String, PrimitiveType.String },
             ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
             effects: new[] { "io" }));
+
+        // File.read_bytes(path: String) !{io} -> Result<Bytes, IoError>
+        e.Add(Fn("File.read_bytes",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Generic("Result", Named("Bytes"), Named("IoError")),
+            effects: new[] { "io" }));
+
+        // File.write_bytes(path: String, data: Bytes) !{io} -> Result<(), IoError>
+        e.Add(Fn("File.write_bytes",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String, Named("Bytes") },
+            ret: Generic("Result", PrimitiveType.Unit, Named("IoError")),
+            effects: new[] { "io" }));
+
+        // ---- Bytes -------------------------------------------------------------
+        // Immutable byte sequence; foundational binary-data type.
+
+        e.Add(Fn("Bytes.empty",
+            typeParams: Array.Empty<string>(),
+            parameters: Array.Empty<TypeRef>(),
+            ret: Named("Bytes")));
+
+        e.Add(Fn("Bytes.from_list",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Generic("List", PrimitiveType.Int) },
+            ret: Named("Bytes")));
+
+        e.Add(Fn("Bytes.size",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Named("Bytes") },
+            ret: PrimitiveType.Int));
+
+        e.Add(Fn("Bytes.at",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Named("Bytes"), PrimitiveType.Int },
+            ret: PrimitiveType.Int));
+
+        e.Add(Fn("Bytes.slice",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Named("Bytes"), PrimitiveType.Int, PrimitiveType.Int },
+            ret: Named("Bytes")));
+
+        e.Add(Fn("Bytes.concat",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Named("Bytes"), Named("Bytes") },
+            ret: Named("Bytes")));
+
+        e.Add(Fn("Bytes.from_utf8",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { PrimitiveType.String },
+            ret: Named("Bytes")));
+
+        e.Add(Fn("Bytes.to_utf8",
+            typeParams: Array.Empty<string>(),
+            parameters: new TypeRef[] { Named("Bytes") },
+            ret: Generic("Result", PrimitiveType.String, Named("IoError"))));
 
         // ---- Directory operations ----------------------------------------------
 
