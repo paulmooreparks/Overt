@@ -1,0 +1,7 @@
+[INFO] this line is well-formed
+this one has no level prefix
+[BROKEN line missing the closing bracket
+[WARN] this is fine
+   [INFO] leading whitespace is OK; the parser trims first
+[debug] case matters; lowercase is treated as its own bucket
+[INFO] another well-formed line

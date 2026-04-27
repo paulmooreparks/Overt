@@ -1,0 +1,163 @@
+module logtally
+
+// `logtally` reads a log file (or stdin), parses each line for a
+// bracketed level tag like `[INFO] message`, and prints a histogram of
+// levels seen. Lines that don't match the format are counted as
+// "unparseable" without aborting.
+//
+// The shape it expects is exactly what the Overt runtime's default Log
+// consumer emits — `[DEBUG]`, `[INFO]`, `[WARN]`, `[ERROR]` lines
+// (and `[TRACE]` for programs that extend with their own enum, like
+// the config-validate sample). Read its own output back, in other words.
+//
+// Usage:
+//   overt run logtally.ov logs/busy.log
+//   cat logs/busy.log | overt run logtally.ov
+//
+// What this sample shows:
+//
+//   - A complete CLI in pure Overt — argv, file or stdin I/O, parsing,
+//     aggregation, sorted output. No C# entry point.
+//   - Map<String, Int> aggregation via fold; entries pulled out for
+//     ordered output via List.sort_by with a named comparator (no
+//     anonymous lambda needed).
+//   - Sum-typed parse result (`LineKind`) with exhaustive matching;
+//     adding a new variant later forces every consumer to handle it.
+//   - Effects declared on the boundary fns: argv, File, stdin, println
+//     all carry !{io}; the parsing fns are pure.
+// Result of parsing one line. Either we found a `[LEVEL] rest` shape,
+// or the line didn't match.
+@derive(Debug)
+enum LineKind {
+    Tagged { level: String, message: String },
+    Malformed { raw: String },
+}
+
+// Running aggregate threaded through fold. Immutable; each step
+// returns a new value with the relevant counter bumped.
+record Tally {
+    counts: Map<String, Int>,
+    malformed: Int,
+    total: Int,
+}
+
+// Pull `[LEVEL]` off the front of the line. Returns Tagged on a clean
+// match, Malformed on anything else. Robust to leading whitespace and
+// to the message portion being empty.
+fn parse_line(line: String) -> LineKind {
+    let trimmed: String = String.trim(s = line)
+    if length(trimmed) == 0 || !String.starts_with(s = trimmed, prefix = "[") {
+        LineKind.Malformed { raw = line }
+    } else {
+        match String.index_of(s = trimmed, needle = "]") {
+            None => LineKind.Malformed { raw = line },
+            Some(close) => parse_tagged(trimmed = trimmed, close = close),
+        }
+    }
+}
+
+// Build a Tagged variant given the `]` index. The level is the slice
+// between `[` and `]`; the message is whatever's left after trimming.
+fn parse_tagged(trimmed: String, close: Int) -> LineKind {
+    let level: String = String.substring(s = trimmed, start = 1, end = close)
+    let rest_start: Int = close + 1
+    let after: String = if rest_start < length(trimmed) {
+        String.substring(s = trimmed, start = rest_start, end = length(trimmed))
+    } else {
+        ""
+    }
+    let message: String = String.trim(s = after)
+    LineKind.Tagged { level = level, message = message }
+}
+
+// Initial aggregate. Map<String, Int> needs Form 3 because the type
+// arguments aren't recoverable from the (zero) value args.
+fn empty_tally() -> Tally {
+    Tally { counts = Map<String, Int>.empty(), malformed = 0, total = 0 }
+}
+
+// Bump the right counter for one parsed line.
+fn step(t: Tally, line: String) -> Tally {
+    let next_total: Int = t.total + 1
+    match parse_line(line = line) {
+        LineKind.Tagged { level = lv, message = _ } => {
+            let prior: Int = match Map<String, Int>.get(map = t.counts, key = lv) {
+                Some(n) => n,
+                None => 0,
+            }
+            Tally { counts = Map<String, Int>.insert(map = t.counts, key = lv, value = prior + 1), malformed = t.malformed, total = next_total }
+        },
+        LineKind.Malformed { raw = _ } => Tally { counts = t.counts, malformed = t.malformed + 1, total = next_total },
+    }
+}
+
+// Map a level name to a sort rank. Unknown levels sort last (rank 99)
+// so they stand out visually rather than blending into the recognized
+// range.
+fn level_rank(level: String) -> Int {
+    match level {
+        "TRACE" => 0,
+        "DEBUG" => 1,
+        "INFO" => 2,
+        "WARN" => 3,
+        "WARNING" => 3,
+        "ERROR" => 4,
+        "FATAL" => 5,
+        _ => 99,
+    }
+}
+
+// Comparator passed to List.sort_by. Stable sort + this comparator
+// means unrecognized levels keep their input order within rank 99.
+fn compare_entries(a: MapEntry<String, Int>, b: MapEntry<String, Int>) -> Int {
+    level_rank(level = a.key) - level_rank(level = b.key)
+}
+
+// Read every input line. With an argv path, read that file; otherwise
+// drain stdin and split on newlines. The two paths converge on a
+// `Result<List<String>, IoError>`.
+fn read_input(argv: List<String>) !{io} -> Result<List<String>, IoError> {
+    if size(argv) > 0 {
+        let path: String = List.at(list = argv, index = 0)
+        File.read_lines(path = path)
+    } else {
+        let raw: String = read_to_end()?
+        // Match File.read_lines: a stream ending in "\n" should not
+        // produce a spurious empty trailing line.
+        let body: String = if String.ends_with(s = raw, suffix = "\n") {
+            String.substring(s = raw, start = 0, end = length(raw) - 1)
+        } else {
+            raw
+        }
+        Ok(String.split(s = body, sep = "\n"))
+    }
+}
+
+// One histogram line per level, then a separator, then totals. The
+// malformed warning goes to stderr so it doesn't pollute stdout for
+// anyone piping the histogram into another tool.
+fn print_report(t: Tally) !{io} -> Result<(), IoError> {
+    let entries: List<MapEntry<String, Int>> = Map<String, Int>.entries(map = t.counts)
+    let sorted: List<MapEntry<String, Int>> = List.sort_by(list = entries, cmp = compare_entries)
+    for each entry in sorted {
+        println("${entry.key}: ${entry.value}")?
+    }
+    println("---")?
+    println("total: ${t.total}")?
+    if t.malformed > 0 {
+        eprintln("warning: ${t.malformed} unparseable line(s) skipped")?
+    }
+    Ok(())
+}
+
+// `main(args: List<String>)` is the CLI shape the `overt run` runner
+// recognizes — the runner passes the user's program-side argv into
+// `args` directly. The bare `args()` prelude fn reads the host
+// process's argv, which is the runner itself when invoked under
+// `overt run`, not the trailing program args.
+fn main(args: List<String>) !{io} -> Result<(), IoError> {
+    let lines: List<String> = read_input(argv = args)?
+    let final_tally: Tally = fold(list = lines, seed = empty_tally(), step = step)
+    print_report(t = final_tally)?
+    Ok(())
+}

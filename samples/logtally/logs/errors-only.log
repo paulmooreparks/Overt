@@ -1,0 +1,5 @@
+[ERROR] db connection refused: 127.0.0.1:5432
+[ERROR] retry exhausted for db connection
+[ERROR] failing health check: db unreachable
+[ERROR] orphan transaction rolled back: tx-9821
+[ERROR] orphan transaction rolled back: tx-9822

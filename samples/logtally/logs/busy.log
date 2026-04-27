@@ -1,0 +1,19 @@
+[INFO] server starting on :8080
+[DEBUG] worker pool initialized with 4 threads
+[INFO] cache warmed in 312ms
+[INFO] request GET /healthz
+[WARN] slow upstream response (812ms) for api.example.com
+[INFO] request GET /users/42
+[ERROR] upstream api.example.com: connection refused
+[INFO] request POST /orders
+[WARN] retrying upstream api.example.com (attempt 1)
+[INFO] request GET /users/17
+[ERROR] upstream api.example.com: connection refused
+[WARN] retrying upstream api.example.com (attempt 2)
+[INFO] upstream recovered after 2 retries
+[INFO] request POST /orders/9
+[DEBUG] cache hit ratio: 0.84
+[INFO] request GET /healthz
+[INFO] graceful shutdown initiated
+[INFO] worker pool drained
+[INFO] server stopped after 41s
