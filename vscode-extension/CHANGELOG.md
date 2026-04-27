@@ -6,6 +6,29 @@ versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-27
+
+### Added
+
+- Highlight new stdlib types: `ProcessOutput`, `MapEntry`,
+  `RefinementError`, `RefinementViolation`, `Bytes` in the
+  type list.
+- Highlight new namespace calls: `File.read_to_string`, `File.exists`,
+  `File.write_all_text`, `Path.join`, `Path.parent`, `Path.file_name`,
+  `Path.extension`, `Process.run`, `Directory.*`, `Bytes.*` —
+  via the namespace-call pattern.
+- Highlight new prelude functions: `print`, `eprint`, `read_line`,
+  `read_to_end`.
+
+### Changed
+
+- Namespace-call pattern now supports the Form-3 generic-call syntax
+  `Type<Args>.method()` introduced in the Overt repo's recent
+  redesign. The optional `<...>` between namespace and dot is part
+  of the same call token; before this version, `List<Int>.empty()`
+  highlighted `List` as a type but the `.empty(` portion fell back
+  to the default style.
+
 ## [0.1.1] - 2026-04-26
 
 ### Added

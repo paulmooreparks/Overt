@@ -206,8 +206,8 @@
             "patterns": [
                 {
                     "name": "support.type.primitive.overt",
-                    "comment": "Stdlib types: real primitives (Int, Int64, Float, Bool, String, Unit), nominal stdlib generics (Option, Result, List, Map, Set, Task), error types, and FFI-boundary types. Not strictly minimal — kept permissive so common BCL bridges (Int32, Byte, Char) also highlight cleanly.",
-                    "match": "\\b(Int|Int32|Int64|Float|Bool|String|Byte|Char|Unit|Option|Result|List|Map|Set|Seq|Task|CString|Ptr|Index|TraceEvent|RaceAllFailed|OvertError|IoError|HttpError|JsonError|ParseError)\\b"
+                    "comment": "Stdlib types: real primitives (Int, Int64, Float, Bool, String, Unit), nominal stdlib generics (Option, Result, List, Map, Set, Task), error types, FFI-boundary types, and v0.1 stdlib record types (ProcessOutput, MapEntry, RefinementError). Not strictly minimal — kept permissive so common BCL bridges (Int32, Byte, Char) also highlight cleanly.",
+                    "match": "\\b(Int|Int32|Int64|Float|Bool|String|Byte|Char|Unit|Option|Result|List|Map|Set|Seq|Task|CString|Ptr|Index|TraceEvent|ProcessOutput|MapEntry|RefinementError|RefinementViolation|Bytes|RaceAllFailed|OvertError|IoError|HttpError|JsonError|ParseError)\\b"
                 },
                 {
                     "name": "entity.name.type.overt",
@@ -220,12 +220,12 @@
                 {
                     "name": "support.function.builtin.overt",
                     "comment": "Prelude functions, ambient in every module without `use`. Mirrors Stdlib.cs entries; keep this list in sync when adding prelude exports.",
-                    "match": "\\b(println|eprintln|print|args|size|length|len|map|filter|fold|try_map|par_map|all|any)(?=\\s*\\()"
+                    "match": "\\b(println|eprintln|print|eprint|read_line|read_to_end|args|size|length|len|map|filter|fold|try_map|par_map|all|any)(?=\\s*\\()"
                 },
                 {
                     "name": "support.function.namespace.overt",
-                    "comment": "Module-qualified stdlib calls (`String.chars`, `Int.range`, `List.at`, etc.). Uppercase namespace + lowercase member.",
-                    "match": "\\b(String|Int|List|Map|Set|Trace|CString)\\.[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
+                    "comment": "Module-qualified stdlib calls (`String.chars`, `Int.range`, `List.at`, etc.). Optional `<args>` between namespace and dot supports the Form-3 syntax for generic-typed namespace calls (`List<Int>.empty()`, `Map<String, Int>.empty()`).",
+                    "match": "\\b(String|Int|List|Map|Set|Trace|CString|File|Directory|Path|Process|Bytes)\\b(?:<[^>\\n]*>)?\\.[a-z_][a-zA-Z0-9_]*(?=\\s*\\()"
                 }
             ]
         },
