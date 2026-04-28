@@ -209,6 +209,46 @@ public class StdlibRuntimeTests
             $"par_map_async wall time was {sw.ElapsedMilliseconds}ms; sequential would be ~{count * delayMs}ms; expected fan-out under {sequentialBudget}ms");
     }
 
+    // ----------------------------------------------------------- ListBuilder
+
+    [Fact]
+    public void ListBuilder_PushBuild_ReturnsListInOrder()
+    {
+        var b = List.builder<int>();
+        b = ListBuilder.push(b, 1);
+        b = ListBuilder.push(b, 2);
+        b = ListBuilder.push(b, 3);
+        var result = ListBuilder.build(b);
+        Assert.Equal(new[] { 1, 2, 3 }, result.Items);
+    }
+
+    [Fact]
+    public void ListBuilder_EmptyBuilderBuildsEmptyList()
+    {
+        var b = List.builder<int>();
+        var result = ListBuilder.build(b);
+        Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public void ListBuilder_PushAfterBuildThrows()
+    {
+        var b = List.builder<int>();
+        ListBuilder.build(b);
+        var ex = Assert.Throws<InvalidOperationException>(() => ListBuilder.push(b, 99));
+        Assert.Contains("already finalized", ex.Message);
+    }
+
+    [Fact]
+    public void ListBuilder_BuildTwiceThrows()
+    {
+        var b = List.builder<int>();
+        ListBuilder.push(b, 1);
+        ListBuilder.build(b);
+        var ex = Assert.Throws<InvalidOperationException>(() => ListBuilder.build(b));
+        Assert.Contains("single-shot", ex.Message);
+    }
+
     // -------------------------------------------------------------- Trace
 
     [Fact]

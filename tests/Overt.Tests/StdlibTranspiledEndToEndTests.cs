@@ -255,6 +255,55 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_MultiModule_ImportsRefinementTypeAlias()
+    {
+        // helper.ov defines `pub type Loudness = Int where ...`; entry.ov
+        // imports it and uses it both as a parameter type and via the
+        // auto-generated `try_from` constructor. Non-generic refinement
+        // aliases lower to file-scoped C# `using` directives in the
+        // defining module, so cross-module use requires the importer's
+        // emit to re-emit the matching `using` directive at its prologue.
+        // Without that, this fails at the C# compile step with "type
+        // `Loudness` could not be found".
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-refmod-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "helper.ov"), """
+                module helper
+
+                pub type Loudness = Int where 1 <= self && self <= 10
+
+                pub fn make_loudness(raw: Int) -> Result<Loudness, RefinementError> {
+                    Loudness.try_from(raw = raw)
+                }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use helper.{Loudness, make_loudness}
+
+                fn describe(l: Loudness) -> String { "loudness=${l}" }
+
+                fn main() !{io} -> Result<(), IoError> {
+                    match make_loudness(raw = 7) {
+                        Ok(l) => println(describe(l = l))?,
+                        Err(_) => println("invalid")?,
+                    }
+                    Ok(())
+                }
+                """);
+            var (result, stdout) = CompileAndRunGraph(Path.Combine(tmp, "entry.ov"));
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Contains("loudness=7", stdout);
+        }
+        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public void Transpiled_MultiModule_DottedPathWalksDirectories()
     {
         // stdlib/http/client.ov declares `module stdlib.http.client`;
@@ -305,6 +354,8 @@ public class StdlibTranspiledEndToEndTests
             StringComparer.Ordinal);
         var trees = new List<SyntaxTree>();
         string? entryModuleName = null;
+        var importedModulesByName = graph.Modules
+            .ToImmutableDictionary(m => m.Name, m => m.Ast, StringComparer.Ordinal);
 
         foreach (var mod in graph.Modules)
         {
@@ -315,7 +366,7 @@ public class StdlibTranspiledEndToEndTests
             var typed = Overt.Compiler.Semantics.TypeChecker.Check(mod.Ast, resolved, importedTypes);
             Assert.Empty(typed.Diagnostics);
 
-            var cs = CSharpEmitter.Emit(mod.Ast, typed, mod.SourcePath);
+            var cs = CSharpEmitter.Emit(mod.Ast, typed, resolution: null, mod.SourcePath, importedModulesByName);
             trees.Add(CSharpSyntaxTree.ParseText(cs,
                 new CSharpParseOptions(LanguageVersion.Latest)));
 
@@ -560,6 +611,44 @@ public class StdlibTranspiledEndToEndTests
         Assert.Equal("True",
             result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
         Assert.Contains("total=20", stdout);
+    }
+
+    [Fact]
+    public void Transpiled_ListBuilder_PushBuildLoopProducesOrderedList()
+    {
+        // The ListBuilder pattern: build a list one item at a time inside a
+        // loop body, finalize via build. Exercises the Overt-level type
+        // (`ListBuilder<T>`), the `List<T>.builder()` constructor, and the
+        // `ListBuilder.push` / `ListBuilder.build` named-arg call shapes.
+        const string src = """
+            module e2e_builder
+
+            fn double_evens(xs: List<Int>) -> List<Int> {
+                let mut b: ListBuilder<Int> = List<Int>.builder()
+                for each x in xs {
+                    if x % 2 == 0 {
+                        b = ListBuilder.push(builder = b, value = x * 2)
+                    }
+                }
+                ListBuilder.build(builder = b)
+            }
+
+            fn main() !{io} -> Result<(), IoError> {
+                let input: List<Int> = Int.range(start = 1, end = 7)
+                let result: List<Int> = double_evens(xs = input)
+                let total: Int = fold(list = result, seed = 0, step = fn(a: Int, n: Int) -> Int { a + n })
+                println("total=${total}")?
+                Ok(())
+            }
+            """;
+
+        var (result, stdout) = CompileAndRun(src, "e2e_builder");
+
+        Assert.NotNull(result);
+        Assert.Equal("True",
+            result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+        // 4 + 8 + 12 = 24
+        Assert.Contains("total=24", stdout);
     }
 
     [Fact]

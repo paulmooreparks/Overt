@@ -98,16 +98,20 @@ public sealed class CSharpEmitter
     /// </summary>
     private TypeRef? _currentFnReturn;
 
+    private readonly System.Collections.Immutable.ImmutableDictionary<string, ModuleDecl>? _importedModules;
+
     private CSharpEmitter(
         IndentedWriter w,
         TypeCheckResult? types,
         ResolutionResult? resolution,
-        string? sourcePath)
+        string? sourcePath,
+        System.Collections.Immutable.ImmutableDictionary<string, ModuleDecl>? importedModules = null)
     {
         _w = w;
         _types = types;
         _resolution = resolution;
         _sourcePath = sourcePath;
+        _importedModules = importedModules;
     }
 
     public static string Emit(
@@ -121,9 +125,26 @@ public sealed class CSharpEmitter
         TypeCheckResult? types,
         ResolutionResult? resolution,
         string? sourcePath = null)
+        => Emit(module, types, resolution, sourcePath, importedModules: null);
+
+    /// <summary>
+    /// Full-fidelity emit. <paramref name="importedModules"/> maps module name
+    /// to its parsed AST and is used to look up imported non-generic refinement
+    /// type aliases — the importer's prologue re-emits a <c>using {Alias} = ...;</c>
+    /// directive for each, so a `pub type Foo = Int where ...` declared in
+    /// module A is usable as a transparent <c>int</c> in module B's emit.
+    /// Generic aliases lower to wrapper records and travel via the namespace
+    /// import; nothing extra needed there.
+    /// </summary>
+    public static string Emit(
+        ModuleDecl module,
+        TypeCheckResult? types,
+        ResolutionResult? resolution,
+        string? sourcePath,
+        System.Collections.Immutable.ImmutableDictionary<string, ModuleDecl>? importedModules)
     {
         var sb = new StringBuilder();
-        var emitter = new CSharpEmitter(new IndentedWriter(sb), types, resolution, sourcePath);
+        var emitter = new CSharpEmitter(new IndentedWriter(sb), types, resolution, sourcePath, importedModules);
         emitter.EmitModule(module);
         return sb.ToString();
     }
@@ -242,6 +263,25 @@ public sealed class CSharpEmitter
             else
             {
                 _w.WriteLine($"using static {ns}.Module;");
+            }
+
+            // Non-generic type aliases lower to file-scoped C# `using X = T;`
+            // directives in the defining module's emit; those don't survive
+            // namespace imports. Re-emit each imported `pub` non-generic alias
+            // here so cross-module references resolve. Generic refinement
+            // aliases lower to wrapper records and travel via the namespace
+            // import above; nothing more to do for them.
+            if (_importedModules is { } imported
+                && imported.TryGetValue(use.ModuleName, out var importedAst))
+            {
+                foreach (var ta in importedAst.Declarations.OfType<TypeAliasDecl>())
+                {
+                    if (!ta.IsPub) continue;
+                    if (ta.TypeParameters.Length > 0) continue;
+                    _w.Write($"using {ta.Name} = ");
+                    EmitType(ta.Target);
+                    _w.WriteLine(";");
+                }
             }
         }
 

@@ -210,6 +210,7 @@ public static class Stdlib
         e.Add(Type("MapEntry"));  // record returned by Map.entries
         e.Add(Type("ListPartition")); // record returned by List.partition
         e.Add(Type("Pair")); // universal 2-tuple container; used by List.zip / List.unzip
+        e.Add(Type("ListBuilder")); // O(1) amortized append; finalize with ListBuilder.build
         e.Add(Type("Bytes")); // immutable byte sequence; used by File.read_bytes / write_bytes
         e.Add(Type("LogLevel")); // severity level on TraceEvent
         e.Add(Type("Log")); // namespace shape for Log.debug / info / warn / error
@@ -447,6 +448,43 @@ public static class Stdlib
         e.Add(Fn("List.empty",
             typeParams: new[] { "T" },
             parameters: Array.Empty<TypeRef>(),
+            ret: Generic("List", TV("T"))));
+
+        // List.builder<T>() -> ListBuilder<T>
+        // Construct an empty incremental builder. Unlike `List.concat`-with-
+        // `List.singleton` (O(n) per append, O(n²) over a loop), the builder
+        // is O(1) amortized per push and O(n) for the final `build`. Use when
+        // a fn body computes elements one at a time (filter-then-emit, branch-
+        // by-branch synthesis, IO-driven accumulation) and the per-item logic
+        // is too involved to express as `map`/`filter`/`fold`.
+        e.Add(Fn("List.builder",
+            typeParams: new[] { "T" },
+            parameters: Array.Empty<TypeRef>(),
+            ret: Generic("ListBuilder", TV("T"))));
+
+        // ListBuilder.push<T>(builder: ListBuilder<T>, value: T) -> ListBuilder<T>
+        // Append one element. Returns the same builder so the loop pattern
+        // `b = ListBuilder.push(builder = b, value = x)` reads naturally even
+        // though the underlying buffer is shared (host-side mutation hidden
+        // for performance).
+        e.Add(Fn("ListBuilder.push",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[]
+            {
+                Generic("ListBuilder", TV("T")),
+                TV("T"),
+            },
+            ret: Generic("ListBuilder", TV("T"))));
+
+        // ListBuilder.build<T>(builder: ListBuilder<T>) -> List<T>
+        // Finalize to an immutable List. Single-shot — calling `build` twice
+        // on the same builder is a programmer error and throws at runtime.
+        // The final List shares the builder's array, so finalize is O(1)
+        // when the builder hasn't been over-allocated; total cost across a
+        // build-loop is O(n).
+        e.Add(Fn("ListBuilder.build",
+            typeParams: new[] { "T" },
+            parameters: new TypeRef[] { Generic("ListBuilder", TV("T")) },
             ret: Generic("List", TV("T"))));
 
         // List.singleton<T>(value: T) -> List<T>

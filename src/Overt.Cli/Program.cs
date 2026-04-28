@@ -281,6 +281,11 @@ static class Cli
 
         // Emit C# for every module in the graph. The entry module's
         // assembly name matches the input file so stack traces point there.
+        // Imported-module ASTs are threaded through so the emitter can
+        // re-emit cross-module non-generic type-alias `using` directives
+        // (otherwise file-scoped) at the importer's prologue.
+        var importedModulesByName = compiled.Modules
+            .ToImmutableDictionary(m => m.Name, m => m.Ast, StringComparer.Ordinal);
         var trees = new List<RoslynCore.SyntaxTree>();
         foreach (var module in compiled.Modules)
         {
@@ -288,7 +293,8 @@ static class Cli
                 module.Ast,
                 compiled.TypeChecks[module.Name],
                 compiled.Resolutions[module.Name],
-                module.SourcePath);
+                module.SourcePath,
+                importedModulesByName);
             var tree = RoslynCSharp.CSharpSyntaxTree.ParseText(
                 csharp, new RoslynCSharp.CSharpParseOptions(RoslynCSharp.LanguageVersion.Latest));
             trees.Add(tree);
@@ -974,7 +980,9 @@ static class Cli
         var resolved = compiled.Resolutions[entry.Name];
 
         var sourcePath = Path.GetFullPath(inputFile);
-        var csharp = CSharpEmitter.Emit(entry.Ast, typed, resolved, sourcePath);
+        var importedModulesByName = compiled.Modules
+            .ToImmutableDictionary(m => m.Name, m => m.Ast, StringComparer.Ordinal);
+        var csharp = CSharpEmitter.Emit(entry.Ast, typed, resolved, sourcePath, importedModulesByName);
         Console.Out.Write(csharp);
 
         var combined = compiled.Diagnostics;

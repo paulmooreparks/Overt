@@ -171,12 +171,14 @@ public sealed class OvertTranspileTask : Microsoft.Build.Utilities.Task
             // modules use a deterministic suffixed name so MSBuild
             // incremental builds don't churn.
             var baseName = Path.GetFileNameWithoutExtension(sourcePath);
+            var importedModulesByName = fileResult.Modules
+                .ToImmutableDictionary(m => m.Name, m => m.Ast, StringComparer.Ordinal);
             for (int i = 0; i < fileResult.Modules.Length; i++)
             {
                 var mod = fileResult.Modules[i];
                 var typed = fileResult.TypeChecks[mod.Name];
                 var resolved = fileResult.Resolutions[mod.Name];
-                var csharp = CSharpEmitter.Emit(mod.Ast, typed, resolved, sourcePath);
+                var csharp = CSharpEmitter.Emit(mod.Ast, typed, resolved, sourcePath, importedModulesByName);
 
                 var outName = mod.IsSynthetic
                     ? $"{baseName}.synth.{SafeName(mod.Name)}.g.cs"

@@ -76,6 +76,11 @@ public static class List
     public static List<T> empty<T>() => new(System.Collections.Immutable.ImmutableArray<T>.Empty);
     public static List<T> singleton<T>(T value)
         => new(System.Collections.Immutable.ImmutableArray.Create(value));
+
+    // Constructs an empty incremental builder. Pairs with ListBuilder.push /
+    // ListBuilder.build for O(1)-amortized appending — the natural fix for
+    // the O(n²) `concat`-with-`singleton` loop pattern.
+    public static ListBuilder<T> builder<T>() => new();
     public static List<T> concat_three<T>(List<T> first, List<T> middle, List<T> last)
         => new(first.Items.AddRange(middle.Items).AddRange(last.Items));
 
@@ -287,3 +292,64 @@ public sealed record ListPartition<T>(List<T> matched, List<T> unmatched);
 /// Overt-canonical lowercase.
 /// </summary>
 public sealed record Pair<T, U>(T left, U right);
+
+/// <summary>
+/// Mutable buffer for <see cref="List{T}"/>. The Overt-side surface is the
+/// `ListBuilder<T>` type with `ListBuilder.push` and `ListBuilder.build`; under
+/// the hood the type wraps <see cref="System.Collections.Immutable.ImmutableArray{T}.Builder"/>
+/// for O(1) amortized append. Hidden mutation: `push` returns the same wrapper
+/// so the canonical Overt loop pattern reads as
+/// <c>b = ListBuilder.push(builder = b, value = x)</c> and the `let mut b`
+/// rebind is just for the type checker — the underlying Builder is shared.
+///
+/// One-shot semantics on <c>build</c>: <see cref="System.Collections.Immutable.ImmutableArray{T}.Builder.MoveToImmutable"/>
+/// throws if the inner builder's Capacity hasn't been pre-sized to its Count
+/// or has been consumed already, so we use <c>ToImmutable</c> (one pass O(n))
+/// and disable the builder so a second `build` produces a clear error rather
+/// than a silently-truncated list.
+/// </summary>
+public sealed class ListBuilder<T>
+{
+    private System.Collections.Immutable.ImmutableArray<T>.Builder? _items
+        = System.Collections.Immutable.ImmutableArray.CreateBuilder<T>();
+
+    internal void Add(T value)
+    {
+        if (_items is null)
+        {
+            throw new InvalidOperationException(
+                "ListBuilder.push: builder was already finalized via ListBuilder.build; "
+                + "construct a fresh builder with List.builder() if you need another list.");
+        }
+        _items.Add(value);
+    }
+
+    internal List<T> Finalize()
+    {
+        if (_items is null)
+        {
+            throw new InvalidOperationException(
+                "ListBuilder.build: builder was already finalized; ListBuilder.build is "
+                + "single-shot (call once per builder, then construct a fresh one).");
+        }
+        var snapshot = _items.ToImmutable();
+        _items = null; // disable further pushes / builds
+        return new List<T>(snapshot);
+    }
+}
+
+/// <summary>
+/// Static companion for <see cref="ListBuilder{T}"/>. Mirrors the
+/// <see cref="List"/>-with-<see cref="List{T}"/> shape so call sites read as
+/// <c>ListBuilder.push(builder = b, value = x)</c>.
+/// </summary>
+public static class ListBuilder
+{
+    public static ListBuilder<T> push<T>(ListBuilder<T> builder, T value)
+    {
+        builder.Add(value);
+        return builder;
+    }
+
+    public static List<T> build<T>(ListBuilder<T> builder) => builder.Finalize();
+}
