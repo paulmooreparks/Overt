@@ -16,7 +16,7 @@ NuGet packages. The copy you are reading applies to the enclosing package's
 version. The copy on GitHub `main` tracks the current development tip and
 may be ahead of any published package; if in doubt, read the bundled copy.
 
-Status as of commit tip: 391 tests; `overt run` executes transpiled programs
+Status as of commit tip: 526 tests; `overt run` executes transpiled programs
 via in-memory Roslyn. The C# back end is primary; Go is scaffolded only.
 
 ---
@@ -165,20 +165,47 @@ use stdlib.http.client as http
 - Wildcard imports are forbidden (DESIGN.md §19); name the symbols you want
   (selective form) or alias the module (`as`).
 - Selective + alias together isn't supported; pick one.
-- `overt run` resolves the full module graph. Other emit modes
-  (`--emit=csharp`, etc.) operate on a single file only and will fail on
-  files with `use` declarations.
+- `overt run` resolves the full module graph. Other emit modes operate on a
+  single file each but `overt --emit=csharp` works against multi-file
+  programs by emitting only the entry file's lowered C#.
+
+**Visibility: `pub` exports a declaration.** Top-level declarations are
+**module-private by default**. Add `pub` before the declaration keyword
+to make the symbol available to other modules' `use` clauses:
+
+```overt
+module mathutil
+
+pub fn double(x: Int) -> Int { x * 2 }      // exported
+fn private_helper(x: Int) -> Int { x + 1 }  // module-private; cannot be imported
+```
+
+Trying to `use mathutil.{private_helper}` reports **OV0168** ("module has
+no exported symbol"); the diagnostic note points at `pub` so the fix is
+unambiguous. `pub` is accepted on every kind of top-level declaration:
+`pub fn`, `pub record`, `pub enum`, `pub type`, `pub extern`. Re-exports
+(`pub use`) aren't supported in v1.
 
 Top-level declarations:
 - `fn <name>(...) ...`: function
 - `record <Name> { field: Type, ... }`: product type, immutable
 - `enum <Name> { Variant, Variant { field: Type }, ... }`: sum type
 - `type <Name> = <Type> where <pred>`: type alias, optionally refined
-- `extern "c" fn <name>(...) -> <Type>`: FFI declaration (body throws at
-  runtime; binding is unimplemented)
+- `extern "csharp" fn <name>(...) ... binds "Host.Method"`: FFI to
+  the .NET BCL (the canonical path; see §11.7 for the bulk-import form)
+- `extern "c" fn <name>(...) -> <Type>`: C FFI declaration; v1 parses
+  but emits a stub body that throws at runtime
 
 Declaration order does not matter; forward references within a file are
 fine.
+
+**Cross-module records, enums, refinement aliases.** All three travel
+across modules: mark them `pub`, import via `use mod.{TypeName, ...}`,
+use the type by its bare name. Generic refinement aliases (`type Box<T>
+= ...`) lower to wrapper records that travel via the namespace import;
+non-generic aliases (`type Port = Int where ...`) lower to file-scoped
+C# `using` directives that the importer's prologue re-emits, so they
+also work transparently.
 
 ---
 
@@ -191,6 +218,15 @@ Generic stdlib types:
 - `Result<T, E>`: success or failure
 - `Option<T>`: present or absent
 - `List<T>`: ordered immutable collection
+- `Map<K, V>`: key-value lookup
+- `Set<T>`: unordered unique-element collection
+- `Pair<T, U>`: 2-tuple with named fields `left` / `right` (used by
+  `List.zip` / `List.unzip`); for ad-hoc multi-value returns prefer
+  named tuples (below)
+- `Task<T>`: async-boundary wrapper (see §9 — call sites use postfix
+  `.await` to unwrap)
+- `ListBuilder<T>`: mutable buffer for incremental list construction
+  (see §12 — `O(1)` amortized push, `O(n)` finalize)
 
 Records are immutable, constructed with `{ field = value, ... }`:
 
@@ -223,11 +259,24 @@ let s = Status.Pending
 let e = OrderError.OutOfStock { sku = "A-1" }
 ```
 
-Tuples:
+**Named tuples** for ad-hoc multi-value carriers (use as fn returns,
+let bindings, record fields). Each field has a name, the same way a
+record's fields do; the syntax differs only in being inline rather
+than declared up top:
 
 ```overt
-let pair: (Int, String) = (1, "hi")
+fn split_lines(s: String) -> (head: String, rest: String) {
+    // ... destructure inside; return as (head = ..., rest = ...)
+}
+
+let pieces: (head: String, rest: String) = split_lines(s = input)
+println("first line: ${pieces.head}")
 ```
+
+Positional tuples (`(Int, String)`) are not supported in v1 — every
+multi-value shape carries names so call sites and field accesses are
+self-describing. Use a `record` declaration if the shape recurs in
+multiple signatures; named tuples are best for one-off returns.
 
 **Every `let` requires an explicit type annotation.** Missing annotations
 fire **OV0314**. The rule serves two purposes: it prevents silent
@@ -541,15 +590,13 @@ let mentions: Bool = log_line.contains(needle = "ERROR")
 
 // Option / Result fallbacks — eager (`unwrap_or`) and lazy (`unwrap_or_else`).
 // The lazy fn runs only on None / Err; for Result, it receives the Err value
-// so the fallback can react to the failure shape. Overt has no inline-lambda
-// syntax, so the lazy callbacks are named fns:
-fn make_default() -> Int { 0 }
-fn explain(e: IoError) -> Int { 0 }
-
-let count: Int   = maybe_count.unwrap_or(default_value = 0)
-let lazy:  Int   = maybe_count.unwrap_or_else(default_fn = make_default)
-let read:  Int   = read_int(...).unwrap_or(default_value = 0)
-let smart: Int   = read_int(...).unwrap_or_else(default_fn = explain)
+// so the fallback can react to the failure shape. The lazy callbacks accept
+// either named fns or anonymous closures (§6 — closures shipped).
+let count: Int = maybe_count.unwrap_or(default_value = 0)
+let lazy:  Int = maybe_count.unwrap_or_else(default_fn = fn() -> Int { 0 })
+let read:  Int = read_int(...).unwrap_or(default_value = 0)
+let smart: Int = read_int(...).unwrap_or_else(
+    default_fn = fn(e: IoError) -> Int { 0 })
 
 // Infinite loop; exits via break
 let mut n = 0
@@ -644,6 +691,72 @@ on the effect row alone.
 **OV0317** fires if `.await` is applied to a non-`Task<T>` value. The
 effect row itself is checked by **OV0310** (missing effect).
 
+### Three async-extern wrap shapes
+
+The C# back end recognises three extern-return shapes and emits the
+right wrapper for each. Pick the shape that matches the host method's
+real signature:
+
+1. **`-> Task<T>` for happy-path async returns.** Plain Task wrapping
+   a value; `.await` unwraps to T. Use when the host method is
+   non-throwing or when you want host exceptions to propagate up
+   uncaught (the same as a host-thrown exception in any C# call).
+
+   ```overt
+   extern "csharp" fn read_text(path: String) -> Task<String>
+       binds "System.IO.File.ReadAllTextAsync"
+   ```
+
+2. **`-> Task<()>` for non-generic async (void-Task) returns.** The
+   host method is `async Task` (no generic argument). The emitter
+   wraps the call in `await` + `return Unit.Value;` so the Overt-side
+   sees `Task<()>` and `.await` produces unit.
+
+   ```overt
+   extern "csharp" instance fn try_connect_async(self: TcpClient, host: String, port: Int)
+       !{io, async} -> Task<()>
+       binds "System.Net.Sockets.TcpClient.ConnectAsync"
+   ```
+
+3. **`-> Task<Result<T, E>>` for exception-bridging.** The host method
+   throws on failure; the wrap catches and returns `Err(IoError {
+   narrative = ex.Message })`. `.await` on the call site yields a
+   `Result<T, E>` the caller pattern-matches. No host exceptions
+   escape the FFI boundary. Used heavily in `samples/portcheck` and
+   `samples/diffconf`.
+
+   ```overt
+   extern "csharp" instance fn try_connect_async(self: TcpClient, host: String, port: Int)
+       !{io, async} -> Task<Result<(), IoError>>
+       binds "System.Net.Sockets.TcpClient.ConnectAsync"
+   ```
+
+### Parallel async fan-out: `par_map_async`
+
+Sequential `.await` in a loop runs probes one at a time. For
+fan-out, use `par_map_async` — a stdlib op that takes a callback
+returning `Task<Result<U, E>>` and runs the Tasks concurrently via
+`Task.WhenAll`:
+
+```overt
+let results: List<(port: Port, open: Bool)> = par_map_async(
+    list = ports,
+    f = fn(p: Port) !{io, async} -> Task<Result<(port: Port, open: Bool), IoError>> {
+        probe(host = host, port = p)   // returns Task<Result<...>> at the call site
+    }
+).await?
+```
+
+The closure body calls an async fn **without** `.await` — calling an
+`!{io, async}` fn at a non-`.await` position evaluates to a
+`Task<...>` value, which the closure passes through to `par_map_async`.
+Total wall time is the slowest probe, not the sum.
+
+The sister sync op `par_map` exists for callbacks that return
+`Result<U, E>` directly; both are stdlib registrations, both run on
+the thread pool. Pick `par_map_async` whenever the per-item callback
+is async.
+
 ---
 
 ## 10. Calls and pipes
@@ -679,9 +792,9 @@ unwrap) that you must mentally simulate at each step. For the common
 
 ```overt
 // Canonical for agent RWRA: each step explicit, no implicit operations.
-let filtered: List<Int> = filter(xs, is_even)
-let squared:  List<Int> = map(filtered, square)
-let total:    Int       = fold(squared, seed = 0, step = add)
+let filtered: List<Int> = filter(list = xs, predicate = is_even)
+let squared:  List<Int> = map(list = filtered, f = square)
+let total:    Int       = fold(list = squared, seed = 0, step = add)
 ```
 
 Reach for pipes only when the intent is genuinely pipeline-shaped (a single
@@ -1079,21 +1192,51 @@ eprintln(line: String) !{io} -> Result<(), IoError>
 
 ### Lists
 
+Construction and shape:
+
 ```overt
-List.empty() -> List<T>                              // needs context for T
+List<T>.empty() -> List<T>                                     // Form 3 — see §10
 List.singleton(value: T) -> List<T>
+List.concat(left: List<T>, right: List<T>) -> List<T>          // pairwise; O(n)
 List.concat_three(first: List<T>, middle: List<T>, last: List<T>) -> List<T>
 
 size(list: List<T>) -> Int
-length(s: String) -> Int
+length(s: String) -> Int                                       // string length, not List
+```
 
+Higher-order ops (closures or named fns; both work):
+
+```overt
 map(list: List<T>, f: fn(T) -> U) -> List<U>
-filter(list: List<T>, pred: fn(T) -> Bool) -> List<T>
+filter(list: List<T>, predicate: fn(T) -> Bool) -> List<T>
 fold(list: List<T>, seed: U, step: fn(U, T) -> U) -> U
 
 par_map(list: List<T>, f: fn(T) !{io, async} -> Result<U, E>)
     !{io, async} -> Result<List<U>, E>
 try_map(list: List<T>, f: fn(T) -> Result<U, E>) -> Result<List<U>, E>
+
+// par_map_async: callback returns Task<Result<U, E>> instead of Result, so the
+// runtime fans out via Task.WhenAll. See §9 for usage.
+par_map_async(list: List<T>, f: fn(T) !{io, async} -> Task<Result<U, E>>)
+    !{io, async} -> Task<Result<List<U>, E>>
+
+all(list: List<T>, predicate: fn(T) -> Bool) -> Bool
+any(list: List<T>, predicate: fn(T) -> Bool) -> Bool
+```
+
+Indexing and slicing:
+
+```overt
+List.head(list: List<T>) -> Option<T>     // None for empty
+List.tail(list: List<T>) -> List<T>       // empty for empty
+List.at(list: List<T>, index: Int) -> T   // panics on out-of-range (not domain error)
+List.take(list: List<T>, n: Int) -> List<T>
+List.drop(list: List<T>, n: Int) -> List<T>
+List.reverse(list: List<T>) -> List<T>
+List.find(list: List<T>, predicate: fn(T) -> Bool) -> Option<T>
+List.partition(list: List<T>, predicate: fn(T) -> Bool) -> ListPartition<T>
+List.zip(left: List<T>, right: List<U>) -> List<Pair<T, U>>
+List.unzip(pairs: List<Pair<T, U>>) -> Pair<List<T>, List<U>>
 ```
 
 `par_map` runs the callback concurrently (TPL) and returns the first `Err`
@@ -1103,6 +1246,78 @@ by original index on failure; order of the output list matches the input.
 effect row. Reach for it when the callback is a pure validator and the
 parallelism in `par_map` would force unwanted effects into the caller's row.
 Short-circuits on the first `Err` in iteration order.
+
+### Incremental list construction: `ListBuilder<T>`
+
+When per-item logic is too involved for `map` / `filter` / `fold` and you'd
+otherwise reach for `let mut results = List.empty(); for each x { results
+= List.concat(left = results, right = List.singleton(value = ...)) }`,
+that's O(n²). The right shape is `ListBuilder<T>` — O(1) amortized push,
+O(n) finalize:
+
+```overt
+fn double_evens(xs: List<Int>) -> List<Int> {
+    let mut b: ListBuilder<Int> = List<Int>.builder()
+    for each x in xs {
+        if x % 2 == 0 {
+            b = ListBuilder.push(builder = b, value = x * 2)
+        }
+    }
+    ListBuilder.build(builder = b)
+}
+```
+
+API:
+
+```overt
+List<T>.builder() -> ListBuilder<T>                             // Form 3
+ListBuilder.push(builder: ListBuilder<T>, value: T) -> ListBuilder<T>
+ListBuilder.build(builder: ListBuilder<T>) -> List<T>
+```
+
+`build` is **single-shot**: calling `ListBuilder.build` (or
+`ListBuilder.push`) on a builder you already finalized throws at runtime
+with a clear `InvalidOperationException` message. Construct a fresh
+builder via `List<T>.builder()` if you need another list.
+
+### Maps and Sets
+
+```overt
+Map<K, V>.empty() -> Map<K, V>
+Map.insert(map: Map<K, V>, key: K, value: V) -> Map<K, V>
+Map.get(map: Map<K, V>, key: K) -> Option<V>
+Map.remove(map: Map<K, V>, key: K) -> Map<K, V>
+Map.contains_key(map: Map<K, V>, key: K) -> Bool
+Map.entries(map: Map<K, V>) -> List<MapEntry<K, V>>
+Map.values(map: Map<K, V>) -> List<V>
+Map.keys(map: Map<K, V>) -> List<K>
+
+Set<T>.empty() -> Set<T>
+Set.insert(set: Set<T>, value: T) -> Set<T>
+Set.contains(set: Set<T>, value: T) -> Bool
+Set.remove(set: Set<T>, value: T) -> Set<T>
+Set.union(left: Set<T>, right: Set<T>) -> Set<T>
+Set.intersection(left: Set<T>, right: Set<T>) -> Set<T>
+Set.difference(left: Set<T>, right: Set<T>) -> Set<T>
+Set.values(set: Set<T>) -> List<T>
+```
+
+### Strings
+
+```overt
+String.split(s: String, sep: String) -> List<String>
+String.join(list: List<String>, sep: String) -> String
+String.parse_int(s: String) -> Result<Int, IoError>
+String.index_of(s: String, needle: String) -> Option<Int>
+String.substring(s: String, start: Int, end: Int) -> String
+// Plus the predicates (.starts_with / .ends_with / .contains) shown in §8.
+```
+
+### Numerics
+
+```overt
+Int.range(start: Int, end: Int) -> List<Int>     // half-open [start, end)
+```
 
 ### Trace
 
@@ -1319,13 +1534,25 @@ fn strlen(s: String) -> Int {
 - **`overt fmt` is still single-file.** It will format a file that has
   `use` declarations locally but won't touch the imported modules. For
   multi-file work, run `overt fmt` per file.
-- **FFI calls at runtime.** `extern` compiles; invocation throws.
+- **C FFI at runtime.** `extern "c" fn` parses; invocation throws.
+  Use `extern "csharp"` (which works end-to-end against the BCL — see
+  `samples/portcheck` and `samples/diffconf`) or, if you genuinely need
+  a C lib, hand-write a C# wrapper and bind to that.
 - **`trace { ... }` emission.** The block is pass-through; no events fire.
 - **`f64` literal patterns in `match`.** Parse OK but don't fire, because float
   equality isn't a well-defined match.
 - **Block comments (`/* ... */`).** Only line comments (`//`) work.
-- **Module-system-aware package management.** No `import`, no `cargo`-style
-  manifest.
+- **Tuple-of-enum exhaustiveness for some shapes.** `match (a, b)` against
+  two enum types is checked cartesian-product-style for the simple case;
+  some patterns (nested enums, mixed enum+wildcard with field destructure)
+  still fall back to the no-check path. Add a `_ => ...` arm to be safe.
+- **Re-exports.** `pub use foo.{bar}` parses but errors out with OV0157;
+  v1 has no re-export mechanism.
+- **Package management beyond `<ProjectReference>`.** No `cargo`-style
+  manifest, no Overt-native registry yet. Cross-project imports work
+  via MSBuild project references (§11) but that's the limit.
+- **LSP / IDE integration.** Diagnostics are CLI-only today; no hover,
+  go-to-definition, autocomplete.
 
 ---
 
@@ -1351,8 +1578,17 @@ reference. Codes are stable.
 | OV0160 | parse | duplicate field / variant / parameter | rename |
 | OV0161 | parse | `let mut` with non-identifier pattern | mutable bindings take a single name |
 | OV0162 | parse | missing comma between match arms | add `,` |
+| OV0163 | parse | wildcard `use` (no selector) | name the symbols (`use mod.{a, b}`) or alias (`use mod as m`) |
+| OV0164 | module-graph | circular import | break the cycle by extracting the shared part into a third module |
+| OV0165 | module-graph | cannot read entry file | check the path and permissions |
+| OV0166 | module-graph | cannot read imported module | check the path and that the file exists |
+| OV0167 | module-graph | cannot find module on search path | the file's path must match the dotted module name; see §2 |
+| OV0168 | resolve | imported symbol not exported | mark the source decl `pub`; help text points at this fix |
 | OV0169 | parse | file missing its `module <name>` header | add `module <name>` as the first line |
-| OV0170 | parse | stray `;` | remove it; newlines separate statements |
+| OV0170 | parse / extern-use | stray `;` (parse) **or** `extern "csharp" use` target not resolvable on this platform (extern-use) | depends on stage — diagnostic message tells you which |
+| OV0171 | extern-use | `extern "csharp" use` resolver threw | check the target name; the inner exception text comes through |
+| OV0172 | extern-use | synthesized facade fails to lex | usually a BindGenerator bug — file an issue with the target name |
+| OV0173 | extern-use | synthesized facade fails to parse | as OV0172 |
 | OV0200 | resolve | unknown name | check spelling; did-you-mean suggested |
 | OV0201 | resolve | shadowed name | rename; no shadowing across nested scopes |
 | OV0300 | type | argument type mismatch | match the parameter type |
@@ -1430,6 +1666,53 @@ fn transition(state: State, event: Event) -> Result<State, TransitionError> {
         (State.Listening, Event.Data) => Ok(State.Receiving),
         _                             => Err(TransitionError.Invalid { from = state, event = event }),
     }
+}
+```
+
+**Incremental list construction:**
+```overt
+fn collect_filtered(xs: List<Int>, threshold: Int) -> List<Int> {
+    let mut b: ListBuilder<Int> = List<Int>.builder()
+    for each x in xs {
+        if x > threshold {
+            b = ListBuilder.push(builder = b, value = x * 2)
+        }
+    }
+    ListBuilder.build(builder = b)
+}
+```
+
+**Async fan-out:**
+```overt
+fn probe_all(host: String, ports: List<Port>) !{io, async} -> Result<List<(port: Port, open: Bool)>, IoError> {
+    par_map_async(
+        list = ports,
+        f = fn(p: Port) !{io, async} -> Task<Result<(port: Port, open: Bool), IoError>> {
+            probe(host = host, port = p)
+        }
+    ).await
+}
+```
+
+**Multi-module program:**
+```overt
+// helper.ov
+module my_app.helpers
+
+pub record Greeting { text: String }
+
+pub fn make(name: String) -> Greeting {
+    Greeting { text = "hello, ${name}" }
+}
+
+// main.ov
+module my_app.main
+
+use my_app.helpers.{Greeting, make}
+
+fn main() !{io} -> Result<(), IoError> {
+    let g: Greeting = make(name = "world")
+    println(g.text)
 }
 ```
 
