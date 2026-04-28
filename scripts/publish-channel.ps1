@@ -152,6 +152,28 @@ if ($DO_INSTALL) {
     Write-Host "==> Reinstalling global tool: overt $VERSION" -ForegroundColor Cyan
     # Uninstall is best-effort; first install has nothing to uninstall.
     dotnet tool uninstall --global Overt 2>$null | Out-Null
+
+    # Self-heal: if a previous run left the .store cache or shim behind
+    # (transient file lock, antivirus interference, interrupted install),
+    # `dotnet tool install` will fail with "Access to the path ... is
+    # denied" while trying to clean the stale entry. Sweep both spots
+    # before installing. Safe to do unconditionally — the uninstall
+    # above already handles the happy path, so anything left is residue.
+    $toolsDir = Join-Path $env:USERPROFILE '.dotnet\tools'
+    $storeOvert = Join-Path $toolsDir '.store\overt'
+    if (Test-Path $storeOvert) {
+        Write-Host "    sweeping stale .store\overt residue" -ForegroundColor DarkGray
+        try { Remove-Item -Recurse -Force $storeOvert -ErrorAction Stop }
+        catch { Write-Warning "could not remove ${storeOvert}: $($_.Exception.Message)" }
+    }
+    foreach ($shim in @('overt.exe', 'overt')) {
+        $shimPath = Join-Path $toolsDir $shim
+        if (Test-Path $shimPath) {
+            try { Remove-Item -Force $shimPath -ErrorAction Stop }
+            catch { Write-Warning "could not remove orphan shim ${shimPath}: $($_.Exception.Message)" }
+        }
+    }
+
     $toolConfig = Join-Path $PSScriptRoot 'nuget.tool.config'
     dotnet tool install --global Overt --version $VERSION --add-source $DIST --configfile $toolConfig --ignore-failed-sources | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "dotnet tool install failed" }
