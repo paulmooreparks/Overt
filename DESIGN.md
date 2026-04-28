@@ -1114,8 +1114,10 @@ Source organization inside a project. Most is already committed (§7 — `module
 
 - **Hierarchical paths via directories.** `stdlib/http/client.ov` is module `stdlib.http.client`. Imports name the path: `use stdlib.http.client`.
 - **Selective imports and aliasing.** `use stdlib.http as http` aliases a module; `use stdlib.http.{get, post}` selects specific symbols. **Wildcard imports are disallowed**: they are a known training-prior hazard that invites agents to guess wrong names.
-- **Re-exports.** A module may re-export symbols from another module it imports, exposing them under its own name. Idiomatic pattern for organizing a stdlib façade.
+- **Re-exports.** A module may re-export symbols from another module it imports, exposing them under its own name. Idiomatic pattern for organizing a stdlib façade. (Not yet implemented — `pub use` parses but errors out via OV0157; queued.)
 - **Circular dependencies are forbidden.** The compiler enforces a strict acyclic import graph. Breaking a cycle requires extracting the shared part into a third, separately-imported module.
+
+**Implementation status (as of 2026-04-28).** The pieces above are wired through except where noted: hierarchical paths walk directories and produce dotted module names; selective and aliased `use` forms both resolve and emit the correct C# `using` shapes; `pub` is enforced at the import boundary by `Cli.CompileGraph`'s exports filter, with OV0168's diagnostic note pointing the user at `pub` when an importer names a private symbol; cycles trigger OV0164. Cross-module records, enums, and functions all round-trip correctly (cover sample at [`StdlibTranspiledEndToEndTests::Transpiled_MultiModule_*`](tests/Overt.Tests/StdlibTranspiledEndToEndTests.cs)). One known gap: non-generic refinement aliases (`type Foo = Int where ...`) lower to file-scoped C# `using` aliases, so they don't survive cross-module import; switching them to wrapper-record lowering (matching the generic-refinement path) closes it.
 
 ### Stdlib strategy: per-back-end is primary, not portable
 

@@ -36,7 +36,7 @@ public class ModuleImportTests
         tmp.Write("helper.ov", """
             module helper
 
-            fn add_one(x: Int) -> Int { x + 1 }
+            pub fn add_one(x: Int) -> Int { x + 1 }
             """);
         tmp.Write("main.ov", """
             module app
@@ -86,7 +86,7 @@ public class ModuleImportTests
         tmp.Write("helper.ov", """
             module helper
 
-            fn add_one(x: Int) -> Int { x + 1 }
+            pub fn add_one(x: Int) -> Int { x + 1 }
             """);
         tmp.Write("main.ov", """
             module app
@@ -136,7 +136,7 @@ public class ModuleImportTests
         tmp.Write(Path.Combine("stdlib", "http", "client.ov"), """
             module stdlib.http.client
 
-            fn get(url: String) -> String { url }
+            pub fn get(url: String) -> String { url }
             """);
         tmp.Write("main.ov", """
             module app
@@ -235,5 +235,34 @@ public class ModuleImportTests
         var app = graph.Modules.First(m => m.Name == "app");
         var appResolved = NameResolver.Resolve(app.Ast, importables);
         Assert.Contains(appResolved.Diagnostics, d => d.Code == "OV0168");
+    }
+
+    [Fact]
+    public void Graph_PrivateSymbolImportReportsOV0168()
+    {
+        // helper.ov defines `add_one` without `pub`; main.ov tries to import
+        // it. The full Cli.CompileGraph pipeline filters non-pub decls out of
+        // the importable map, so the resolver sees the symbol as missing and
+        // OV0168 fires. The diagnostic note mentions `pub` so the user knows
+        // the fix.
+        using var tmp = new TempDir();
+        tmp.Write("helper.ov", """
+            module helper
+
+            fn add_one(x: Int) -> Int { x + 1 }
+            """);
+        tmp.Write("main.ov", """
+            module app
+
+            use helper.{add_one}
+
+            fn main() -> Int { 0 }
+            """);
+
+        var graph = Cli.CompileGraph(System.IO.Path.Combine(tmp.Path, "main.ov"));
+        var d = Assert.Single(
+            graph.Diagnostics,
+            x => x.Code == "OV0168" && x.Message.Contains("add_one"));
+        Assert.Contains(d.Notes, n => n.Text.Contains("pub"));
     }
 }

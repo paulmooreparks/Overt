@@ -28,7 +28,8 @@ public sealed record FunctionDecl(
     TypeExpr? ReturnType,
     BlockExpr Body,
     ImmutableArray<Annotation> Annotations,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    bool IsPub = false) : Declaration(Span);
 
 /// <summary>
 /// A type alias with an optional refinement predicate:
@@ -59,7 +60,8 @@ public sealed record TypeAliasDecl(
     TypeExpr Target,
     Expression? Predicate,
     Expression? ElseExpr,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    bool IsPub = false) : Declaration(Span);
 
 /// <summary>
 /// FFI import — a function declared in Overt but implemented in a host language. The
@@ -107,7 +109,8 @@ public sealed record ExternTypeDecl(
     string Platform,
     string Name,
     string BindsTarget,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    bool IsPub = false) : Declaration(Span);
 
 /// <summary>
 /// Shape of a host-language binding. The source form <c>extern "csharp" fn
@@ -148,7 +151,8 @@ public sealed record ExternDecl(
     string BindsTarget,
     string? FromLibrary,
     SourceSpan Span,
-    ExternKind Kind = ExternKind.Static) : Declaration(Span);
+    ExternKind Kind = ExternKind.Static,
+    bool IsPub = false) : Declaration(Span);
 
 /// <summary>
 /// Bulk-import declaration: <c>extern "csharp" use "System.IO.File"</c>
@@ -169,7 +173,8 @@ public sealed record RecordDecl(
     string Name,
     ImmutableArray<Annotation> Annotations,
     ImmutableArray<RecordField> Fields,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    bool IsPub = false) : Declaration(Span);
 
 public sealed record RecordField(
     string Name,
@@ -186,7 +191,8 @@ public sealed record EnumDecl(
     string Name,
     ImmutableArray<Annotation> Annotations,
     ImmutableArray<EnumVariant> Variants,
-    SourceSpan Span) : Declaration(Span);
+    SourceSpan Span,
+    bool IsPub = false) : Declaration(Span);
 
 public sealed record EnumVariant(
     string Name,

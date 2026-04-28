@@ -688,17 +688,22 @@ static class Cli
     /// type aliases. Indexed by simple name for <c>use</c> lookup.</summary>
     static ImmutableDictionary<string, Symbol> CollectTopLevelExports(ModuleDecl module)
     {
+        // DESIGN.md §19: top-level decls are module-private by default; only
+        // those marked `pub` flow into the importable-symbol table. Private
+        // decls still resolve within the defining module via the Pass-1
+        // top-level scan in NameResolver; they just don't reach the import
+        // boundary.
         var builder = ImmutableDictionary.CreateBuilder<string, Symbol>(StringComparer.Ordinal);
         foreach (var decl in module.Declarations)
         {
             var sym = decl switch
             {
-                FunctionDecl f => new Symbol(SymbolKind.Function, f.Name, f.Span, f),
-                ExternDecl x => new Symbol(SymbolKind.Extern, x.Name, x.Span, x),
-                RecordDecl r => new Symbol(SymbolKind.Record, r.Name, r.Span, r),
-                EnumDecl e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
-                TypeAliasDecl t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
-                ExternTypeDecl xt => new Symbol(SymbolKind.Record, xt.Name, xt.Span, xt),
+                FunctionDecl { IsPub: true } f => new Symbol(SymbolKind.Function, f.Name, f.Span, f),
+                ExternDecl { IsPub: true } x => new Symbol(SymbolKind.Extern, x.Name, x.Span, x),
+                RecordDecl { IsPub: true } r => new Symbol(SymbolKind.Record, r.Name, r.Span, r),
+                EnumDecl { IsPub: true } e => new Symbol(SymbolKind.Enum, e.Name, e.Span, e),
+                TypeAliasDecl { IsPub: true } t => new Symbol(SymbolKind.TypeAlias, t.Name, t.Span, t),
+                ExternTypeDecl { IsPub: true } xt => new Symbol(SymbolKind.Record, xt.Name, xt.Span, xt),
                 _ => (Symbol?)null,
             };
             if (sym is not null) builder[sym.Name] = sym;

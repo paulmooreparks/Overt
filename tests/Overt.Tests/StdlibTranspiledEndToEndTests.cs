@@ -131,7 +131,7 @@ public class StdlibTranspiledEndToEndTests
             File.WriteAllText(Path.Combine(tmp, "helper.ov"), """
                 module helper
 
-                fn triple(x: Int) -> Int { x * 3 }
+                pub fn triple(x: Int) -> Int { x * 3 }
                 """);
             File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
                 module entry
@@ -154,6 +154,107 @@ public class StdlibTranspiledEndToEndTests
     }
 
     [Fact]
+    public void Transpiled_MultiModule_ImportsRecord()
+    {
+        // helper.ov defines `record Greeting`; entry.ov imports it via
+        // `use helper.{Greeting, make}` and uses both the type (in a `let`
+        // annotation) and the constructor function. Without the importer
+        // emitting `using {namespace};` alongside `using static`, this fails
+        // to compile with "Greeting could not be found" on the type
+        // annotation.
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-recmod-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "helper.ov"), """
+                module helper
+
+                pub record Greeting {
+                    text: String,
+                    excited: Bool,
+                }
+
+                pub fn make(name: String) -> Greeting {
+                    Greeting { text = "hi, ${name}", excited = true }
+                }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use helper.{Greeting, make}
+
+                fn main() !{io} -> Result<(), IoError> {
+                    let g: Greeting = make(name = "world")
+                    println("${g.text} excited=${g.excited}")?
+                    Ok(())
+                }
+                """);
+            var (result, stdout) = CompileAndRunGraph(Path.Combine(tmp, "entry.ov"));
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Contains("hi, world excited=True", stdout);
+        }
+        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+    }
+
+    [Fact]
+    public void Transpiled_MultiModule_ImportsEnum()
+    {
+        // Mirror of the record test for enums, with a payload-carrying variant
+        // that's pattern-matched at the call site so both the type and the
+        // variant constructors round-trip across the module boundary.
+        var tmp = Path.Combine(Path.GetTempPath(),
+            "overt-enummod-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        Directory.CreateDirectory(tmp);
+        try
+        {
+            File.WriteAllText(Path.Combine(tmp, "helper.ov"), """
+                module helper
+
+                pub enum Mood {
+                    Happy,
+                    Sad,
+                    Excited { intensity: Int },
+                }
+
+                pub fn pick(name: String) -> Mood {
+                    if name == "world" {
+                        Mood.Excited { intensity = 11 }
+                    } else {
+                        Mood.Happy
+                    }
+                }
+                """);
+            File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
+                module entry
+
+                use helper.{Mood, pick}
+
+                fn render(m: Mood) -> String {
+                    match m {
+                        Mood.Happy => "happy",
+                        Mood.Sad => "sad",
+                        Mood.Excited { intensity = intensity } => "excited at ${intensity}",
+                    }
+                }
+
+                fn main() !{io} -> Result<(), IoError> {
+                    println(render(m = pick(name = "world")))?
+                    Ok(())
+                }
+                """);
+            var (result, stdout) = CompileAndRunGraph(Path.Combine(tmp, "entry.ov"));
+            Assert.NotNull(result);
+            Assert.Equal("True",
+                result!.GetType().GetProperty("IsOk")!.GetValue(result)!.ToString());
+            Assert.Contains("excited at 11", stdout);
+        }
+        finally { try { Directory.Delete(tmp, recursive: true); } catch { } }
+    }
+
+    [Fact]
     public void Transpiled_MultiModule_DottedPathWalksDirectories()
     {
         // stdlib/http/client.ov declares `module stdlib.http.client`;
@@ -166,7 +267,7 @@ public class StdlibTranspiledEndToEndTests
             File.WriteAllText(Path.Combine(tmp, "stdlib", "http", "client.ov"), """
                 module stdlib.http.client
 
-                fn greet(name: String) -> String { name }
+                pub fn greet(name: String) -> String { name }
                 """);
             File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
                 module entry
@@ -218,11 +319,31 @@ public class StdlibTranspiledEndToEndTests
             trees.Add(CSharpSyntaxTree.ParseText(cs,
                 new CSharpParseOptions(LanguageVersion.Latest)));
 
+            // Mirror Program.cs::CollectTopLevelExports — every declaration kind
+            // that an importer can name needs to flow into the exports dict so
+            // selective imports of records/enums/type aliases resolve.
             var exports = ImmutableDictionary.CreateBuilder<string, Overt.Compiler.Semantics.Symbol>(
                 StringComparer.Ordinal);
-            foreach (var fn in mod.Ast.Declarations.OfType<FunctionDecl>())
-                exports[fn.Name] = new Overt.Compiler.Semantics.Symbol(
-                    Overt.Compiler.Semantics.SymbolKind.Function, fn.Name, fn.Span, fn);
+            foreach (var decl in mod.Ast.Declarations)
+            {
+                var sym = decl switch
+                {
+                    FunctionDecl f => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Function, f.Name, f.Span, f),
+                    Overt.Compiler.Syntax.ExternDecl x => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Extern, x.Name, x.Span, x),
+                    Overt.Compiler.Syntax.RecordDecl r => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Record, r.Name, r.Span, r),
+                    Overt.Compiler.Syntax.EnumDecl e => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Enum, e.Name, e.Span, e),
+                    Overt.Compiler.Syntax.TypeAliasDecl t => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.TypeAlias, t.Name, t.Span, t),
+                    Overt.Compiler.Syntax.ExternTypeDecl xt => new Overt.Compiler.Semantics.Symbol(
+                        Overt.Compiler.Semantics.SymbolKind.Record, xt.Name, xt.Span, xt),
+                    _ => (Overt.Compiler.Semantics.Symbol?)null,
+                };
+                if (sym is not null) exports[sym.Name] = sym;
+            }
             exportedSymbols[mod.Name] = exports.ToImmutable();
             symbolTypesByModule[mod.Name] = typed.SymbolTypes;
             entryModuleName = mod.Name; // last in topological order
@@ -280,7 +401,7 @@ public class StdlibTranspiledEndToEndTests
             File.WriteAllText(Path.Combine(tmp, "mathhelper.ov"), """
                 module mathhelper
 
-                fn triple(x: Int) -> Int { x * 3 }
+                pub fn triple(x: Int) -> Int { x * 3 }
                 """);
             File.WriteAllText(Path.Combine(tmp, "entry.ov"), """
                 module entry

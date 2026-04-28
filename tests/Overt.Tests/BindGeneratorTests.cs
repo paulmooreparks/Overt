@@ -259,11 +259,13 @@ public class BindGeneratorTests
         Assert.Contains(
             "fn sync_sibling(x: Int)",
             src);
-        // The `async` token must appear only on the FetchInt line.
+        // The `async` token must appear only on the FetchInt line. BindGenerator
+        // emits each fn as `pub extern "csharp" ...` since the synthetic module
+        // exists to be imported.
         var asyncLines = src
             .Split('\n')
             .Where(l => l.Contains("async", StringComparison.Ordinal)
-                     && l.TrimStart().StartsWith("extern", StringComparison.Ordinal))
+                     && l.TrimStart().StartsWith("pub extern", StringComparison.Ordinal))
             .ToList();
         Assert.Single(asyncLines);
         Assert.Contains("fetch_int", asyncLines[0]);

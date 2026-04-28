@@ -185,12 +185,13 @@ public static class Formatter
     private static void FormatRecord(RecordDecl rd, FormatContext ctx)
     {
         foreach (var ann in rd.Annotations) FormatAnnotation(ann, ctx);
+        var pubPrefix = rd.IsPub ? "pub " : "";
         if (rd.Fields.Length == 0)
         {
-            ctx.Line($"record {rd.Name} {{}}");
+            ctx.Line($"{pubPrefix}record {rd.Name} {{}}");
             return;
         }
-        ctx.Line($"record {rd.Name} {{");
+        ctx.Line($"{pubPrefix}record {rd.Name} {{");
         ctx.Depth++;
         foreach (var f in rd.Fields)
         {
@@ -209,12 +210,13 @@ public static class Formatter
     private static void FormatEnum(EnumDecl ed, FormatContext ctx)
     {
         foreach (var ann in ed.Annotations) FormatAnnotation(ann, ctx);
+        var pubPrefix = ed.IsPub ? "pub " : "";
         if (ed.Variants.Length == 0)
         {
-            ctx.Line($"enum {ed.Name} {{}}");
+            ctx.Line($"{pubPrefix}enum {ed.Name} {{}}");
             return;
         }
-        ctx.Line($"enum {ed.Name} {{");
+        ctx.Line($"{pubPrefix}enum {ed.Name} {{");
         ctx.Depth++;
         foreach (var v in ed.Variants)
         {
@@ -282,6 +284,7 @@ public static class Formatter
     private static void FormatTypeAlias(TypeAliasDecl ta, FormatContext ctx)
     {
         ctx.WriteIndent();
+        if (ta.IsPub) ctx.Write("pub ");
         ctx.Write($"type {ta.Name}");
         if (ta.TypeParameters.Length > 0)
         {
@@ -301,7 +304,8 @@ public static class Formatter
 
     private static void FormatExternType(ExternTypeDecl xt, FormatContext ctx)
     {
-        ctx.Line($"extern \"{xt.Platform}\" type {xt.Name} binds \"{xt.BindsTarget}\"");
+        var pubPrefix = xt.IsPub ? "pub " : "";
+        ctx.Line($"{pubPrefix}extern \"{xt.Platform}\" type {xt.Name} binds \"{xt.BindsTarget}\"");
     }
 
     private static void FormatExternUse(ExternUseDecl xu, FormatContext ctx)
@@ -313,6 +317,7 @@ public static class Formatter
     private static void FormatExtern(ExternDecl ex, FormatContext ctx)
     {
         ctx.WriteIndent();
+        if (ex.IsPub) ctx.Write("pub ");
         if (ex.IsUnsafe) ctx.Write("unsafe ");
         var kindKw = ex.Kind switch
         {
@@ -352,6 +357,7 @@ public static class Formatter
     private static void FormatFunction(FunctionDecl fn, FormatContext ctx)
     {
         ctx.WriteIndent();
+        if (fn.IsPub) ctx.Write("pub ");
         ctx.Write($"fn {fn.Name}");
         if (fn.TypeParameters.Length > 0)
         {

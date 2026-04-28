@@ -139,7 +139,7 @@ public static class BindGenerator
             || (targetType.IsValueType && !targetType.IsEnum);
         if (isOpaqueConstructible)
         {
-            sb.AppendLine($"extern \"csharp\" type {overtTypeName} binds \"{targetType.FullName}\"");
+            sb.AppendLine($"pub extern \"csharp\" type {overtTypeName} binds \"{targetType.FullName}\"");
             sb.AppendLine();
         }
 
@@ -370,7 +370,7 @@ public static class BindGenerator
             paramList.Add($"{paramName}: {overtType}");
         }
 
-        sb.Append("extern \"csharp\" ctor fn ");
+        sb.Append("pub extern \"csharp\" ctor fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));
@@ -392,7 +392,7 @@ public static class BindGenerator
         var name = ToSnakeCase(prop.Name);
         var retText = pure ? overtType : $"Result<{overtType}, IoError>";
 
-        sb.Append("extern \"csharp\" instance fn ");
+        sb.Append("pub extern \"csharp\" instance fn ");
         sb.Append(name);
         sb.Append($"(self: {overtTypeName})");
         if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
@@ -435,7 +435,7 @@ public static class BindGenerator
             ? returnOvertType
             : $"Result<{returnOvertType}, IoError>";
 
-        sb.Append("extern \"csharp\" instance fn ");
+        sb.Append("pub extern \"csharp\" instance fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));
@@ -463,7 +463,7 @@ public static class BindGenerator
         }
 
         var name = ToSnakeCase(prop.Name);
-        sb.Append("extern \"csharp\" fn ");
+        sb.Append("pub extern \"csharp\" fn ");
         sb.Append(name);
         sb.Append("()");
         if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
@@ -487,7 +487,7 @@ public static class BindGenerator
         }
 
         var name = ToSnakeCase(field.Name);
-        sb.Append("extern \"csharp\" fn ");
+        sb.Append("pub extern \"csharp\" fn ");
         sb.Append(name);
         sb.Append("()");
         if (effects.Length > 0) sb.Append($" !{{{string.Join(", ", effects)}}}");
@@ -715,7 +715,7 @@ public static class BindGenerator
         // positional but the named form is still legal. Signature stays the
         // same in both cases — the rule is at the *call site*, not declaration.
         var kindKw = tryOutType is not null ? " try" : "";
-        sb.Append($"extern \"csharp\"{kindKw} fn ");
+        sb.Append($"pub extern \"csharp\"{kindKw} fn ");
         sb.Append(overtName);
         sb.Append('(');
         sb.Append(string.Join(", ", paramList));

@@ -176,7 +176,8 @@ public sealed class NameResolver
                     use.Span,
                     ImmutableArray.Create(new DiagnosticNote(
                         DiagnosticNoteKind.Help,
-                        "check the list of symbols the module declares at top level",
+                        $"if `{sym}` exists in `{use.ModuleName}`, mark it `pub` to export it; "
+                            + "top-level decls are module-private by default (DESIGN.md §19)",
                         null))));
                 continue;
             }

@@ -220,15 +220,21 @@ public sealed class CSharpEmitter
         _w.WriteLine("using Overt.Runtime;");
         _w.WriteLine("using static Overt.Runtime.Prelude;");
 
-        // For each imported module, emit the appropriate C# `using`:
-        //   - Selective: `using static Overt.Generated.Path.Module;`
-        //     brings the module's static methods into scope unqualified.
-        //   - Aliased: `using Alias = Overt.Generated.Path.Module;`
-        //     so that Overt-side `alias.fn(...)` lowers to C# `Alias.fn(...)`
-        //     without any special-casing in the expression emitter.
+        // For each imported module, emit the appropriate C# `using`s:
+        //   - `using {ns};` always — brings record/enum/typealias types
+        //     declared at the imported module's namespace level into scope
+        //     unqualified. Required for both selective and aliased forms
+        //     because Overt's resolver puts type names in scope under
+        //     either form (NameResolver:154-158).
+        //   - Selective: `using static {ns}.Module;` brings the module's
+        //     static fn/extern members into scope unqualified.
+        //   - Aliased: `using Alias = {ns}.Module;` so that Overt-side
+        //     `alias.fn(...)` lowers to C# `Alias.fn(...)` without any
+        //     special-casing in the expression emitter.
         foreach (var use in module.Declarations.OfType<UseDecl>())
         {
             var ns = ToEmittedNamespace(use.ModulePath);
+            _w.WriteLine($"using {ns};");
             if (use.Alias is { } alias)
             {
                 _w.WriteLine($"using {alias} = {ns}.Module;");

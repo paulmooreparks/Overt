@@ -125,6 +125,14 @@ public sealed class Parser
             attributes = ParseAnnotationList();
         }
 
+        // `pub` exports a top-level declaration to other modules. Without it,
+        // the declaration is module-private and cannot be named in another
+        // module's `use` clause. DESIGN.md §19 — module-private by default.
+        // Parsed before the decl keyword so the modifier sits where readers
+        // look for it; carried through to each decl record's IsPub field.
+        var pubSpan = Current.Span;
+        var isPub = Match(TokenKind.KeywordPub);
+
         if (Check(TokenKind.KeywordFn))
         {
             // @csharp and @doc are meaningful on fn; @derive targets types.
@@ -137,15 +145,15 @@ public sealed class Parser
                         attr.Span);
                 }
             }
-            return ParseFunctionDecl(attributes);
+            return ParseFunctionDecl(attributes, isPub);
         }
         if (Check(TokenKind.KeywordRecord))
         {
-            return ParseRecordDecl(attributes);
+            return ParseRecordDecl(attributes, isPub);
         }
         if (Check(TokenKind.KeywordEnum))
         {
-            return ParseEnumDecl(attributes);
+            return ParseEnumDecl(attributes, isPub);
         }
         if (Check(TokenKind.KeywordExtern)
             || (Check(TokenKind.KeywordUnsafe) && Peek(1).Kind == TokenKind.KeywordExtern))
@@ -156,7 +164,7 @@ public sealed class Parser
                     "attributes on `extern` declarations are not supported in v1",
                     attributes[0].Span);
             }
-            return ParseExternDecl();
+            return ParseExternDecl(isPub);
         }
         if (Check(TokenKind.KeywordType))
         {
@@ -166,10 +174,16 @@ public sealed class Parser
                     "attributes on `type` aliases are not supported in v1",
                     attributes[0].Span);
             }
-            return ParseTypeAliasDecl();
+            return ParseTypeAliasDecl(isPub);
         }
         if (Check(TokenKind.KeywordUse))
         {
+            if (isPub)
+            {
+                ReportError("OV0157",
+                    "`pub` is not supported on `use` declarations; re-exports are not in v1",
+                    pubSpan);
+            }
             if (attributes.Length > 0)
             {
                 ReportError("OV0157",
@@ -179,6 +193,12 @@ public sealed class Parser
             return ParseUseDecl();
         }
 
+        if (isPub)
+        {
+            ReportError("OV0150",
+                "`pub` must precede a declaration keyword (`fn`, `record`, `enum`, `extern`, `type`)",
+                pubSpan);
+        }
         if (attributes.Length > 0)
         {
             ReportError("OV0157",
@@ -188,7 +208,7 @@ public sealed class Parser
         return null;
     }
 
-    private Declaration ParseExternDecl()
+    private Declaration ParseExternDecl(bool isPub = false)
     {
         var startPos = Current.Span.Start;
         var isUnsafe = Match(TokenKind.KeywordUnsafe);
@@ -206,7 +226,7 @@ public sealed class Parser
                     "`unsafe` is not applicable to extern type declarations",
                     new SourceSpan(startPos, Current.Span.End));
             }
-            return ParseExternTypeDeclRest(platform, startPos);
+            return ParseExternTypeDeclRest(platform, startPos, isPub);
         }
 
         // `extern "platform" use "Target"` (optional `as Alias`) — bulk-import
@@ -290,7 +310,8 @@ public sealed class Parser
             bindsTarget,
             fromLibrary,
             new SourceSpan(startPos, endPos),
-            Kind: externKind);
+            Kind: externKind,
+            IsPub: isPub);
     }
 
     /// <summary>A reasonable default for the `add module X` hint. The parser
@@ -316,7 +337,7 @@ public sealed class Parser
         }
     }
 
-    private ExternTypeDecl ParseExternTypeDeclRest(string platform, SourcePosition startPos)
+    private ExternTypeDecl ParseExternTypeDeclRest(string platform, SourcePosition startPos, bool isPub = false)
     {
         Expect(TokenKind.KeywordType, "extern type declaration");
         var nameToken = Expect(TokenKind.Identifier, "extern type name");
@@ -327,7 +348,8 @@ public sealed class Parser
             platform,
             nameToken.Lexeme,
             bindsTarget,
-            new SourceSpan(startPos, bindsToken.Span.End));
+            new SourceSpan(startPos, bindsToken.Span.End),
+            isPub);
     }
 
     /// <summary>
@@ -482,7 +504,7 @@ public sealed class Parser
         return sb.ToString();
     }
 
-    private RecordDecl ParseRecordDecl(ImmutableArray<Annotation> attributes)
+    private RecordDecl ParseRecordDecl(ImmutableArray<Annotation> attributes, bool isPub = false)
     {
         var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         Expect(TokenKind.KeywordRecord, "record declaration");
@@ -508,10 +530,11 @@ public sealed class Parser
             nameToken.Lexeme,
             attributes,
             fields.ToImmutable(),
-            new SourceSpan(startPos, closing.Span.End));
+            new SourceSpan(startPos, closing.Span.End),
+            isPub);
     }
 
-    private EnumDecl ParseEnumDecl(ImmutableArray<Annotation> attributes)
+    private EnumDecl ParseEnumDecl(ImmutableArray<Annotation> attributes, bool isPub = false)
     {
         var startPos = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
         Expect(TokenKind.KeywordEnum, "enum declaration");
@@ -537,7 +560,8 @@ public sealed class Parser
             nameToken.Lexeme,
             attributes,
             variants.ToImmutable(),
-            new SourceSpan(startPos, closing.Span.End));
+            new SourceSpan(startPos, closing.Span.End),
+            isPub);
     }
 
     private EnumVariant ParseEnumVariant()
@@ -594,7 +618,7 @@ public sealed class Parser
             new SourceSpan(startPos, type.Span.End));
     }
 
-    private FunctionDecl ParseFunctionDecl(ImmutableArray<Annotation> attributes = default)
+    private FunctionDecl ParseFunctionDecl(ImmutableArray<Annotation> attributes = default, bool isPub = false)
     {
         if (attributes.IsDefault)
         {
@@ -635,7 +659,8 @@ public sealed class Parser
             returnType,
             body,
             attributes,
-            new SourceSpan(startPos, body.Span.End));
+            new SourceSpan(startPos, body.Span.End),
+            isPub);
     }
 
     /// <summary>
@@ -672,7 +697,7 @@ public sealed class Parser
             new SourceSpan(startPos, body.Span.End));
     }
 
-    private TypeAliasDecl ParseTypeAliasDecl()
+    private TypeAliasDecl ParseTypeAliasDecl(bool isPub = false)
     {
         var startPos = Current.Span.Start;
         Expect(TokenKind.KeywordType, "type alias");
@@ -712,7 +737,8 @@ public sealed class Parser
             target,
             predicate,
             elseExpr,
-            new SourceSpan(startPos, endPos));
+            new SourceSpan(startPos, endPos),
+            isPub);
     }
 
     private ImmutableArray<string> ParseTypeParameterList()
