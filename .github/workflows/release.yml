@@ -4,14 +4,20 @@
 #
 # Triggers:
 #   - Push of a `v*` tag: use the tag as-is. Tag shape decides the channel:
-#       v0.1.0-dev.N   -> dev channel    (pushed to nuget.org, --prerelease)
-#       v0.1.0-beta.N  -> beta channel   (pushed to nuget.org, --prerelease)
-#       v0.1.0         -> stable channel (pushed to nuget.org, plain)
+#       v0.1.0-dev.N      -> dev channel     (pushed to nuget.org, --prerelease)
+#       v0.1.0-preview.N  -> preview channel (pushed to nuget.org, --prerelease)
+#       v0.1.0-beta.N     -> beta channel    (pushed to nuget.org, --prerelease)
+#       v0.1.0            -> stable channel  (pushed to nuget.org, plain)
 #   - workflow_dispatch: compute the next dev-counter for the current
 #     MAJOR.MINOR (from VERSION) by scanning existing tags, reserve it
 #     atomically on the remote, then build that tag.
 #   - workflow_call with a `tag` input: the caller (promote.yml) has
 #     already created and pushed the tag; just build it.
+#
+# Runner: build job pins ubuntu-22.04 so the self-contained Linux binary
+# links against glibc 2.35, matching the Compiler Explorer host image.
+# Building on ubuntu-latest (24.04, glibc 2.39) produces binaries that
+# fail to start on CE.
 #
 # Credentials:
 #   - NUGET_API_KEY secret: required to push to nuget.org. Configure in
@@ -97,6 +103,9 @@ jobs:
           if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-dev\.([0-9]+)$ ]]; then
             CHANNEL="dev"
             BUILD_NUMBER="${BASH_REMATCH[1]}"
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-preview\.([0-9]+)$ ]]; then
+            CHANNEL="preview"
+            BUILD_NUMBER="${BASH_REMATCH[1]}"
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.([0-9]+)$ ]]; then
             CHANNEL="beta"
             BUILD_NUMBER="${BASH_REMATCH[1]}"
@@ -115,7 +124,7 @@ jobs:
 
   build:
     needs: compute-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
